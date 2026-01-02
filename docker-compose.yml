@@ -1,0 +1,24 @@
+version: '3.8'
+services:
+  app:
+    image: yang0709/journal-backend:latest
+    ports:
+      - "3001:3000"
+    environment:
+      - MONGO_URI=mongodb://mongo:27017/journal 
+      - JWT_SECRET=${JWT_SECRET}
+      - WX_APPID=${WX_APPID}
+      - WX_SECRET=${WX_SECRET}
+      - PORT=3000
+    depends_on:
+      - mongo
+
+  mongo:
+    image: mongo:7
+    ports:
+      - "27018:27017"
+    volumes:
+      - mongo_data:/data/db
+
+volumes:
+  mongo_data:
