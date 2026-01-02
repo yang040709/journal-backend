@@ -14,7 +14,7 @@ out/
 .next/
 .nuxt/
 .cache/
-
+.git_disabled
 # Environment variables
 .env
 .env.local

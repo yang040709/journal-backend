@@ -26,7 +26,6 @@ const noteSchema = new Schema(
     },
     content: {
       type: String,
-      required: [true, "手帐内容不能为空"],
       default: "",
     },
     tags: {

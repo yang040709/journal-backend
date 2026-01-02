@@ -95,6 +95,7 @@ export class NoteService {
 
     const [items, total] = await Promise.all([
       Note.find(query)
+        .select("-content") // 排除 content 字段，减少网络传输
         .sort({ [sortField]: sortOrder })
         .skip(skip)
         .limit(limit)
@@ -259,7 +260,6 @@ export class NoteService {
         // 转义正则特殊字符，防止注入或报错
         const safeKeyword = keyword.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
         const searchRegex = new RegExp(safeKeyword, "i"); // i = 忽略大小写
-
         query.$or = [{ title: searchRegex }, { content: searchRegex }];
       }
     }
@@ -284,9 +284,9 @@ export class NoteService {
         query.createdAt.$lte = new Date(params.endTime);
       }
     }
-    console.log(query);
 
     const notes = await Note.find(query)
+      .select("-content") // 排除 content 字段，减少网络传输
       .sort({ updatedAt: -1 })
       .limit(100)
       .lean();
@@ -302,6 +302,7 @@ export class NoteService {
     limit: number = 10
   ): Promise<LeanNote[]> {
     const notes = await Note.find({ userId })
+      .select("-content") // 排除 content 字段，减少网络传输
       .sort({ updatedAt: -1 })
       .limit(Math.min(limit, 100))
       .lean();
