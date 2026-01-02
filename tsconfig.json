@@ -1,0 +1,17 @@
+{
+  "compilerOptions": {
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["src/*"],
+      "@utils/*": ["src/utils/*"]
+    },
+    "target": "ES2020", // 编译目标版本
+    "lib": ["ES2017"], // 需要引用的库
+    "outDir": "./dist", // 指定输出目录，如果未指定和对应的.ts文件同目录
+    "allowSyntheticDefaultImports": true,
+    "moduleResolution": "nodenext",
+    "module": "nodenext",
+    "skipLibCheck": true
+  },
+  "include": ["src/**/*.ts"] // 指定需要编译的文件或目录
+}

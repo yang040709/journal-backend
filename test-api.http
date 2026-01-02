@@ -1,0 +1,48 @@
+### 基础测试 - 需要先获取有效的JWT token
+# 注意：实际使用时需要先通过用户认证获取token
+
+### 1. 创建手帐本
+POST http://localhost:3000/note-books
+Content-Type: application/json
+Authorization: Bearer YOUR_TOKEN_HERE
+
+{
+  "title": "我的第一个手帐本",
+  "coverImg": "https://example.com/cover.jpg"
+}
+
+### 2. 获取手帐本列表
+GET http://localhost:3000/note-books
+Authorization: Bearer YOUR_TOKEN_HERE
+
+### 3. 创建手帐
+POST http://localhost:3000/notes
+Content-Type: application/json
+Authorization: Bearer YOUR_TOKEN_HERE
+
+{
+  "noteBookId": "NOTEBOOK_ID_HERE",
+  "title": "第一篇手帐",
+  "content": "这是我的手帐内容...",
+  "tags": ["日记", "生活"]
+}
+
+### 4. 获取手帐列表
+GET http://localhost:3000/notes
+Authorization: Bearer YOUR_TOKEN_HERE
+
+### 5. 搜索手帐
+GET http://localhost:3000/notes/search?q=手帐
+Authorization: Bearer YOUR_TOKEN_HERE
+
+### 6. 获取最近手帐
+GET http://localhost:3000/notes/recent?limit=5
+Authorization: Bearer YOUR_TOKEN_HERE
+
+### 7. 获取用户统计
+GET http://localhost:3000/stats/user
+Authorization: Bearer YOUR_TOKEN_HERE
+
+### 8. 获取标签统计
+GET http://localhost:3000/stats/tags
+Authorization: Bearer YOUR_TOKEN_HERE
