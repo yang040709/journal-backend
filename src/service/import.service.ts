@@ -120,7 +120,7 @@ export class ImportService {
           `手帐数据格式错误：第 ${index + 1} 条手帐缺少 title 字段`
         );
       }
-      if (!note.content || typeof note.content !== "string") {
+      if (typeof note.content !== "string") {
         throw new Error(
           `手帐数据格式错误：第 ${index + 1} 条手帐缺少 content 字段`
         );
