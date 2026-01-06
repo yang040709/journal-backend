@@ -28,6 +28,7 @@
   },
   "dependencies": {
     "@koa/router": "^14.0.0",
+    "@types/node-schedule": "^2.1.8",
     "axios": "^1.13.2",
     "bcryptjs": "^3.0.3",
     "jsonwebtoken": "^9.0.2",
@@ -36,6 +37,7 @@
     "koa-logger": "^4.0.0",
     "mongoose": "^8.19.3",
     "nanoid": "^5.1.6",
+    "node-schedule": "^2.1.1",
     "openai": "^6.9.1",
     "redis": "^5.9.0",
     "zod": "^4.1.13"

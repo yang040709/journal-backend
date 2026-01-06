@@ -1,5 +1,5 @@
 import dotenv from "dotenv";
-import app from "./app";
+import app, { startSchedulersAfterDBConnection } from "./app";
 
 import { connectDB } from "./config/db";
 
@@ -33,6 +33,9 @@ process.on("unhandledRejection", (reason, promise) => {
 const init = async () => {
   try {
     await connectDB();
+
+    // 数据库连接成功后启动调度器
+    startSchedulersAfterDBConnection();
 
     const server = app.listen(PORT, () => {
       console.log(`🚀 Server is running on port ${PORT}`);
