@@ -75,7 +75,9 @@ export class ReminderScheduler {
       await Promise.allSettled(
         batch.map(async (reminder) => {
           try {
-            console.log(`发送提醒: ${reminder.title} (ID: ${reminder.id})`);
+            console.log(
+              `发送提醒: ${reminder.title} (ID: ${reminder.id}) 提醒时间: ${reminder.remindTime}`
+            );
             const success = await ReminderService.sendReminder(reminder);
 
             if (success) {

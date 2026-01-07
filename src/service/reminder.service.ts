@@ -168,6 +168,7 @@ export class ReminderService {
         userId: reminder.userId,
         templateId: reminder.messageId,
         data: templateData,
+        page: `pages/note-detail/note-detail?noteId=${reminder.noteId}`,
       });
 
       if (success) {
@@ -265,11 +266,15 @@ export class ReminderService {
    * 格式化时间
    */
   private static formatTime(date: Date): string {
-    const year = date.getFullYear();
-    const month = String(date.getMonth() + 1).padStart(2, "0");
-    const day = String(date.getDate()).padStart(2, "0");
-    const hours = String(date.getHours()).padStart(2, "0");
-    const minutes = String(date.getMinutes()).padStart(2, "0");
+    /* 
+     为了配合服务器，先这样处理，本地服务器就先理解一下
+    */
+    const adjustedDate = new Date(date.getTime() + 8 * 60 * 60 * 1000);
+    const year = adjustedDate.getFullYear();
+    const month = String(adjustedDate.getMonth() + 1).padStart(2, "0");
+    const day = String(adjustedDate.getDate()).padStart(2, "0");
+    const hours = String(adjustedDate.getHours()).padStart(2, "0");
+    const minutes = String(adjustedDate.getMinutes()).padStart(2, "0");
     return `${year}-${month}-${day} ${hours}:${minutes}`;
   }
 
