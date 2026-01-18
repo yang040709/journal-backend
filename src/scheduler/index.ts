@@ -1,22 +1,26 @@
 import { ReminderScheduler } from "./reminder.scheduler";
+import { logger } from "../utils/logger";
 
 /**
  * 启动所有调度器
  */
 export function startAllSchedulers(): void {
-  console.log("启动所有调度器...");
+  logger.info("启动所有调度器...");
 
   try {
     // 启动提醒调度器
     ReminderScheduler.start();
-    console.log("所有调度器已启动");
+    logger.info("所有调度器已启动");
   } catch (error: any) {
-    console.error("调度器启动失败，但不会终止后端进程:", {
-      message: error.message,
-      stack: error.stack,
+    logger.error("调度器启动失败，但不会终止后端进程", {
+      error: {
+        message: error.message,
+        stack: error.stack,
+        name: error.name,
+      },
       timestamp: new Date().toISOString(),
     });
-    console.log("调度器将在下次重启时重试");
+    logger.info("调度器将在下次重启时重试");
   }
 }
 
@@ -24,12 +28,12 @@ export function startAllSchedulers(): void {
  * 停止所有调度器
  */
 export function stopAllSchedulers(): void {
-  console.log("停止所有调度器...");
+  logger.info("停止所有调度器...");
 
   // 停止提醒调度器
   ReminderScheduler.stop();
 
-  console.log("所有调度器已停止");
+  logger.info("所有调度器已停止");
 }
 
 /**

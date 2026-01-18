@@ -1,4 +1,5 @@
 import Reminder, { IReminder } from "../model/Reminder";
+import Activity from "../model/Activity";
 import { NoteService } from "./note.service";
 import { WeChatService } from "./wechat.service";
 
@@ -25,7 +26,7 @@ export class ReminderService {
    */
   static async createReminder(
     userId: string,
-    data: CreateReminderData
+    data: CreateReminderData,
   ): Promise<IReminder> {
     // 获取手帐信息
     const note = await NoteService.getNoteById(data.noteId, userId);
@@ -44,6 +45,15 @@ export class ReminderService {
       sendStatus: "pending",
     });
 
+    // 记录活动
+    await Activity.create({
+      type: "create",
+      target: "reminder",
+      targetId: reminder.id,
+      title: `创建提醒：${data.title || note.title}`,
+      userId,
+    });
+
     return reminder;
   }
 
@@ -57,7 +67,7 @@ export class ReminderService {
       limit?: number;
       status?: "pending" | "subscribed" | "cancelled";
       sendStatus?: "pending" | "sent" | "failed";
-    } = {}
+    } = {},
   ): Promise<{
     items: IReminder[];
     total: number;
@@ -94,7 +104,7 @@ export class ReminderService {
    */
   static async getReminderById(
     id: string,
-    userId: string
+    userId: string,
   ): Promise<IReminder | null> {
     const reminder = await Reminder.findOne({ _id: id, userId }).lean();
     return reminder as unknown as IReminder | null;
@@ -106,13 +116,28 @@ export class ReminderService {
   static async updateReminder(
     id: string,
     userId: string,
-    data: UpdateReminderData
+    data: UpdateReminderData,
   ): Promise<IReminder | null> {
+    // 先获取更新前的提醒信息
+    const existingReminder = await Reminder.findOne({ _id: id, userId });
+    if (!existingReminder) {
+      return null;
+    }
+
     const reminder = await Reminder.findOneAndUpdate(
       { _id: id, userId },
       { $set: data },
-      { new: true }
+      { new: true },
     ).lean();
+
+    // 记录活动
+    await Activity.create({
+      type: "update",
+      target: "reminder",
+      targetId: id,
+      title: `更新提醒：${existingReminder.title}`,
+      userId,
+    });
 
     return reminder as unknown as IReminder | null;
   }
@@ -121,8 +146,27 @@ export class ReminderService {
    * 删除提醒
    */
   static async deleteReminder(id: string, userId: string): Promise<boolean> {
+    // 先获取要删除的提醒信息
+    const reminder = await Reminder.findOne({ _id: id, userId });
+    if (!reminder) {
+      return false;
+    }
+
     const result = await Reminder.deleteOne({ _id: id, userId });
-    return result.deletedCount > 0;
+    const deleted = result.deletedCount > 0;
+
+    if (deleted) {
+      // 记录活动
+      await Activity.create({
+        type: "delete",
+        target: "reminder",
+        targetId: id,
+        title: `删除提醒：${reminder.title}`,
+        userId,
+      });
+    }
+
+    return deleted;
   }
 
   /**
@@ -130,20 +174,46 @@ export class ReminderService {
    */
   static async batchDeleteReminders(
     reminderIds: string[],
-    userId: string
+    userId: string,
   ): Promise<number> {
+    if (!reminderIds.length) {
+      return 0;
+    }
+
+    // 获取要删除的提醒信息
+    const reminders = await Reminder.find({
+      _id: { $in: reminderIds },
+      userId,
+    });
+    if (!reminders.length) {
+      return 0;
+    }
+
     const result = await Reminder.deleteMany({
       _id: { $in: reminderIds },
       userId,
     });
-    return result.deletedCount;
+    const deletedCount = result.deletedCount || 0;
+
+    if (deletedCount > 0) {
+      // 记录活动
+      await Activity.create({
+        type: "delete",
+        target: "reminder",
+        targetId: "batch",
+        title: `批量删除提醒：共删除${deletedCount}条`,
+        userId,
+      });
+    }
+
+    return deletedCount;
   }
 
   /**
    * 获取待发送的提醒
    */
   static async getPendingReminders(
-    beforeTime: Date = new Date()
+    beforeTime: Date = new Date(),
   ): Promise<IReminder[]> {
     const reminders = await Reminder.find({
       remindTime: { $lte: beforeTime },
@@ -181,7 +251,7 @@ export class ReminderService {
               sentAt: new Date(),
             },
             $inc: { retryCount: 1 },
-          }
+          },
         );
         return true;
       } else {
@@ -193,7 +263,7 @@ export class ReminderService {
       // 发送异常，更新错误信息
       await this.handleSendFailure(
         reminder,
-        error.message || "发送消息时发生异常"
+        error.message || "发送消息时发生异常",
       );
       return false;
     }
@@ -204,7 +274,7 @@ export class ReminderService {
    * 根据微信模板消息要求格式化数据
    */
   private static prepareTemplateData(
-    reminder: IReminder
+    reminder: IReminder,
   ): Record<string, { value: string }> {
     // 微信模板消息字段要求：
     // thing5: 日程标题 - 最多20个字符
@@ -247,7 +317,7 @@ export class ReminderService {
    */
   private static async handleSendFailure(
     reminder: IReminder,
-    error: string
+    error: string,
   ): Promise<void> {
     const updateData: any = {
       lastError: error,
@@ -284,7 +354,7 @@ export class ReminderService {
   static async updateSubscriptionStatus(
     id: string,
     userId: string,
-    status: "subscribed" | "cancelled"
+    status: "subscribed" | "cancelled",
   ): Promise<IReminder | null> {
     return this.updateReminder(id, userId, {
       subscriptionStatus: status,
@@ -299,7 +369,7 @@ export class ReminderService {
    * 3. 保留已发送成功的提醒供用户查看
    */
   static async cleanupExpiredReminders(
-    cutoffTime: Date
+    cutoffTime: Date,
   ): Promise<{ deletedCount: number }> {
     try {
       // 删除条件：

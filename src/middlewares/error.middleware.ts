@@ -1,5 +1,7 @@
 import { Context, Next } from "koa";
 import { error, ErrorCodes } from "../utils/response";
+import { logError } from "../utils/logger";
+import { createRequestContext } from "./requestId.middleware";
 
 /**
  * 全局错误处理中间件
@@ -15,15 +17,8 @@ export const errorMiddleware = async (ctx: Context, next: Next) => {
     }
   } catch (err: any) {
     // 记录错误日志
-    console.error("全局错误捕获:", {
-      timestamp: new Date().toISOString(),
-      method: ctx.method,
-      url: ctx.url,
-      error: err.message,
-      stack: err.stack,
-      errorName: err.name,
-      errorCode: err.code,
-    });
+    const requestContext = createRequestContext(ctx);
+    logError(err, requestContext, "全局错误捕获");
 
     // 根据错误类型返回相应的响应
     if (err instanceof SyntaxError) {
@@ -32,7 +27,7 @@ export const errorMiddleware = async (ctx: Context, next: Next) => {
         ctx,
         "请求数据格式错误，请检查JSON格式",
         ErrorCodes.PARAM_ERROR,
-        400
+        400,
       );
     } else if (err.name === "ValidationError") {
       // 数据验证错误（如 Mongoose）
@@ -68,7 +63,7 @@ export class AppError extends Error {
   constructor(
     message: string,
     public code: number = ErrorCodes.INTERNAL_ERROR,
-    public status: number = 500
+    public status: number = 500,
   ) {
     super(message);
     this.name = "AppError";

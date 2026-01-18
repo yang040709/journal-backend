@@ -10,8 +10,23 @@ services:
       - WX_APPID=${WX_APPID}
       - WX_SECRET=${WX_SECRET}
       - PORT=3000
+      # 日志配置 - 针对30用户优化
+      - LOG_LEVEL=info
+      - LOG_DIR=/app/logs
+      - LOG_MAX_SIZE=10m
+      - LOG_MAX_FILES=14d
+      - NODE_ENV=production
+    volumes:
+      # 挂载日志目录到宿主机，确保持久化
+      - ./logs:/app/logs
     depends_on:
       - mongo
+    # Docker日志驱动配置，防止容器日志过大
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "20m"
+        max-file: "10"
 
   mongo:
     image: mongo:7

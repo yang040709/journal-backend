@@ -1,7 +1,11 @@
 import Koa from "koa";
 import bodyParser from "koa-bodyparser";
-import logger from "koa-logger";
 import { errorMiddleware } from "./middlewares/error.middleware";
+import {
+  requestIdMiddleware,
+  createRequestContext,
+} from "./middlewares/requestId.middleware";
+import { logger, logHttpRequest } from "./utils/logger";
 import UserRouter from "./routes/user.routes";
 import NoteBookRouter from "./routes/noteBook.routes";
 import NoteRouter from "./routes/note.routes";
@@ -14,17 +18,37 @@ const app = new Koa();
 
 // 中间件
 app.use(bodyParser());
-app.use(logger());
+
+// 请求ID中间件（放在最前面）
+app.use(requestIdMiddleware);
 
 // 全局错误处理中间件（放在其他中间件之前）
 app.use(errorMiddleware);
 
-// 请求日志
+// 请求日志中间件（替换原来的koa-logger和自定义日志）
 app.use(async (ctx, next) => {
   const start = Date.now();
-  await next();
-  const ms = Date.now() - start;
-  console.log(`${ctx.method} ${ctx.url} - ${ms}ms`);
+
+  try {
+    await next();
+  } finally {
+    const ms = Date.now() - start;
+    const requestContext = createRequestContext(ctx);
+
+    // 记录HTTP请求
+    logHttpRequest(
+      requestContext.requestId,
+      requestContext.userId,
+      ctx.method,
+      ctx.url,
+      ctx.status,
+      ms,
+      {
+        ip: requestContext.ip,
+        userAgent: requestContext.userAgent,
+      },
+    );
+  }
 });
 
 // 路由
@@ -42,14 +66,18 @@ export default app;
 
 // 调度器启动函数（由 index.ts 调用）
 export function startSchedulersAfterDBConnection(): void {
-  console.log("数据库连接成功，准备启动调度器...");
+  logger.info("数据库连接成功，准备启动调度器...");
 
   // 延迟启动调度器，确保数据库完全就绪
   setTimeout(() => {
     try {
       startAllSchedulers();
     } catch (error) {
-      console.error("调度器启动失败，但不会影响服务器运行:", error);
+      logger.error("调度器启动失败，但不会影响服务器运行", {
+        error: {
+          message: error instanceof Error ? error.message : String(error),
+        },
+      });
     }
   }, 2000); // 延迟2秒启动
 }
