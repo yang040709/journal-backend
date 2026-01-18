@@ -42,6 +42,16 @@ const paginationSchema = z.object({
     .default("updatedAt"),
   order: z.enum(["asc", "desc"]).optional().default("desc"),
   noteBookId: z.string().optional(),
+  tags: z
+    .union([z.string(), z.array(z.string())])
+    .optional()
+    .transform((val) => {
+      if (!val) return undefined;
+      if (Array.isArray(val)) return val;
+      return [val];
+    }),
+  startTime: z.coerce.number().optional(),
+  endTime: z.coerce.number().optional(),
 });
 
 // 搜索参数验证
@@ -73,7 +83,7 @@ router.get("/", async (ctx: AuthContext) => {
       result.total,
       params.page,
       params.limit,
-      "获取手帐列表成功"
+      "获取手帐列表成功",
     );
   } catch (err) {
     if (err instanceof z.ZodError) {
@@ -218,7 +228,7 @@ router.post("/batch-delete", async (ctx: AuthContext) => {
 
     const deletedCount = await NoteService.batchDeleteNotes(
       body.noteIds,
-      userId
+      userId,
     );
 
     success(ctx, { deletedCount }, `成功删除 ${deletedCount} 条手帐`);

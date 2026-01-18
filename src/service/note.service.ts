@@ -24,6 +24,10 @@ export interface PaginationParams {
   limit?: number;
   sortBy?: string;
   order?: "asc" | "desc";
+  noteBookId?: string;
+  tags?: string[];
+  startTime?: number;
+  endTime?: number;
 }
 
 export interface SearchParams {
@@ -78,7 +82,7 @@ export class NoteService {
    */
   static async getNotes(
     userId: string,
-    params: PaginationParams & { noteBookId?: string } = {}
+    params: PaginationParams & { noteBookId?: string } = {},
   ): Promise<{ items: LeanNote[]; total: number }> {
     const page = Math.max(1, params.page || 1);
     const limit = Math.min(100, Math.max(1, params.limit || 20));
@@ -89,8 +93,26 @@ export class NoteService {
 
     // 构建查询条件
     const query: any = { userId };
+
+    // 手帐本筛选
     if (params.noteBookId) {
       query.noteBookId = params.noteBookId;
+    }
+
+    // 标签筛选
+    if (params.tags && params.tags.length > 0) {
+      query.tags = { $all: params.tags };
+    }
+
+    // 时间范围筛选
+    if (params.startTime || params.endTime) {
+      query.createdAt = {};
+      if (params.startTime) {
+        query.createdAt.$gte = new Date(params.startTime);
+      }
+      if (params.endTime) {
+        query.createdAt.$lte = new Date(params.endTime);
+      }
     }
 
     const [items, total] = await Promise.all([
@@ -111,7 +133,7 @@ export class NoteService {
    */
   static async getNoteById(
     id: string,
-    userId: string
+    userId: string,
   ): Promise<LeanNote | null> {
     const note = await Note.findOne({ _id: id, userId }).lean();
     return note ? toLeanNote(note) : null;
@@ -123,7 +145,7 @@ export class NoteService {
   static async updateNote(
     id: string,
     userId: string,
-    data: UpdateNoteData
+    data: UpdateNoteData,
   ): Promise<INote | null> {
     const note = await Note.findOne({ _id: id, userId });
     if (!note) {
@@ -203,7 +225,7 @@ export class NoteService {
    */
   static async batchDeleteNotes(
     noteIds: string[],
-    userId: string
+    userId: string,
   ): Promise<number> {
     if (!noteIds.length) {
       return 0;
@@ -228,7 +250,7 @@ export class NoteService {
     // 更新手帐本计数
     const updatePromises = Object.entries(noteBookCounts).map(
       ([noteBookId, count]) =>
-        NoteBook.updateOne({ _id: noteBookId }, { $inc: { count: -count } })
+        NoteBook.updateOne({ _id: noteBookId }, { $inc: { count: -count } }),
     );
     await Promise.all(updatePromises);
 
@@ -249,7 +271,7 @@ export class NoteService {
    */
   static async searchNotes(
     userId: string,
-    params: SearchParams
+    params: SearchParams,
   ): Promise<LeanNote[]> {
     const query: any = { userId };
 
@@ -299,7 +321,7 @@ export class NoteService {
    */
   static async getRecentNotes(
     userId: string,
-    limit: number = 10
+    limit: number = 10,
   ): Promise<LeanNote[]> {
     const notes = await Note.find({ userId })
       .select("-content") // 排除 content 字段，减少网络传输
@@ -315,7 +337,7 @@ export class NoteService {
    */
   static async validateNoteAccess(
     noteId: string,
-    userId: string
+    userId: string,
   ): Promise<boolean> {
     const note = await Note.findOne({ _id: noteId, userId });
     return !!note;
