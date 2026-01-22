@@ -20,13 +20,13 @@ export const prefix =
 export const coverPreviewList = Object.freeze(
   coverList.map((item) => {
     return prefix + item;
-  })
+  }),
 );
 
 export const defaultNoteBook = [
   {
     title: "日常碎片",
-    coverImg: coverPreviewList[0],
+    coverImg: coverPreviewList[10],
   },
   {
     title: "心情日记",

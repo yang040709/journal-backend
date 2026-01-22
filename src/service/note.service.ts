@@ -111,7 +111,9 @@ export class NoteService {
         query.createdAt.$gte = new Date(params.startTime);
       }
       if (params.endTime) {
-        query.createdAt.$lte = new Date(params.endTime);
+        const endOfRange = new Date(params.endTime);
+        endOfRange.setDate(endOfRange.getDate() + 1);
+        query.createdAt.$lt = endOfRange;
       }
     }
 
