@@ -1,5 +1,10 @@
 import { FlattenMaps } from "mongoose";
-import { LeanNoteBook, LeanNote, LeanActivity } from "../types/mongoose";
+import {
+  LeanNoteBook,
+  LeanNote,
+  LeanActivity,
+  LeanTemplate,
+} from "../types/mongoose";
 
 // 类型转换工具函数
 export function toLeanNoteBook(doc: FlattenMaps<any>): LeanNoteBook {
@@ -37,4 +42,17 @@ export function toLeanNoteArray(docs: FlattenMaps<any>[]): LeanNote[] {
 
 export function toLeanActivityArray(docs: FlattenMaps<any>[]): LeanActivity[] {
   return docs.map(toLeanActivity);
+}
+
+// Template 类型转换函数
+export function toLeanTemplate(doc: FlattenMaps<any>): LeanTemplate {
+  const { _id, __v, ...rest } = doc;
+  return {
+    ...rest,
+    id: _id?.toString() || "",
+  } as LeanTemplate;
+}
+
+export function toLeanTemplateArray(docs: FlattenMaps<any>[]): LeanTemplate[] {
+  return docs.map(toLeanTemplate);
 }

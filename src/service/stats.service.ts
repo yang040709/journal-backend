@@ -11,7 +11,7 @@ export interface UserStats {
 
 export interface ActivityItem {
   type: "create" | "update" | "delete";
-  target: "noteBook" | "note";
+  target: "noteBook" | "note" | "reminder" | "template";
   targetId: string;
   title: string;
   timestamp: number;
@@ -70,7 +70,7 @@ export class StatsService {
    */
   static async getUserActivityTimeline(
     userId: string,
-    limit: number = 20
+    limit: number = 20,
   ): Promise<LeanActivity[]> {
     const activities = await Activity.find({ userId })
       .sort({ createdAt: -1 })
@@ -98,7 +98,7 @@ export class StatsService {
     ]);
 
     const noteCountMap = new Map(
-      noteCounts.map((item) => [item._id.toString(), item.count])
+      noteCounts.map((item) => [item._id.toString(), item.count]),
     );
 
     const lastUpdates = await Note.aggregate([
@@ -107,7 +107,7 @@ export class StatsService {
     ]);
 
     const lastUpdateMap = new Map(
-      lastUpdates.map((item) => [item._id.toString(), item.lastUpdated])
+      lastUpdates.map((item) => [item._id.toString(), item.lastUpdated]),
     );
 
     return noteBooks.map((noteBook) => ({
