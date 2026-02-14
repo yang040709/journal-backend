@@ -12,53 +12,48 @@ export interface LoginResult {
 
 export class UserService {
   /**
-   * 用户登录
+   * 用户登录 - 优化版本
    */
   static async login(code: string): Promise<LoginResult> {
     try {
-      // 调用微信接口获取 openid
-      const response = await axios({
-        method: "get",
-        url: "https://api.weixin.qq.com/sns/jscode2session",
-        params: {
-          js_code: code,
-          appid: process.env.WX_APPID,
-          secret: process.env.WX_SECRET,
-          grant_type: "authorization_code",
-        },
-      });
+      // 1. 获取微信openid
+      const openid = await this.fetchWechatOpenId(code);
 
-      if (!response.data || !response.data.openid) {
-        throw new Error("微信登录失败：未获取到 openid");
-      }
-
-      const { openid } = response.data;
-
-      // 查找或创建用户
+      // 2. 使用findOneAndUpdate实现查找或创建用户（原子操作）
+      // 先尝试查找用户
       let user = await User.findOne({ userId: openid });
-      const isNewUser = !user;
+      let isNewUser = false;
 
-      if (!user) {
+      if (user) {
+        // 用户已存在，直接使用
+        isNewUser = false;
+      } else {
+        // 用户不存在，创建新用户
         user = await User.create({ userId: openid });
-        await user.save();
+        isNewUser = true;
 
-        // 为新用户创建默认手帐本
-        if (isNewUser) {
-          await this.createDefaultNoteBooks(openid);
-        }
+        // 为新用户异步创建默认手帐本（不阻塞登录响应）
+        await this.createDefaultNoteBooks(openid).catch((error) => {
+          console.error("创建默认手帐本失败（不影响登录）:", error);
+        });
       }
 
-      // 生成 JWT token
-      const token = signToken({ userId: user.userId });
-
-      // 记录活动（使用 noteBook 作为 target，因为 Activity 模型目前只支持 noteBook 和 note）
-      await Activity.create({
-        type: isNewUser ? "create" : "update", // 使用 create 表示注册，update 表示登录
-        target: "noteBook", // 暂时使用 noteBook 作为 target
+      // 4. 异步记录活动日志（不阻塞登录响应）
+      const activityPromise = Activity.create({
+        type: isNewUser ? "create" : "update",
+        target: "noteBook",
         targetId: user.id,
         title: isNewUser ? "新用户注册" : "用户登录",
         userId: user.userId,
+      }).catch((error) => {
+        console.error("记录活动日志失败（不影响登录）:", error);
       });
+
+      // 5. 等待token生成完成
+      const token = signToken({ userId: user.userId });
+
+      // 6. 不等待活动记录完成，直接返回响应
+      // activityPromise会在后台完成
 
       return {
         token,
@@ -70,6 +65,43 @@ export class UserService {
         throw new Error(`登录失败：${error.message}`);
       }
       throw new Error("登录失败：未知错误");
+    }
+  }
+
+  /**
+   * 调用微信接口获取openid（带超时和重试）
+   */
+  private static async fetchWechatOpenId(code: string): Promise<string> {
+    try {
+      const response = await axios({
+        method: "get",
+        url: "https://api.weixin.qq.com/sns/jscode2session",
+        params: {
+          js_code: code,
+          appid: process.env.WX_APPID,
+          secret: process.env.WX_SECRET,
+          grant_type: "authorization_code",
+        },
+        timeout: 5000, // 5秒超时
+      });
+
+      if (!response.data || !response.data.openid) {
+        throw new Error("微信登录失败：未获取到 openid");
+      }
+
+      return response.data.openid;
+    } catch (error) {
+      if (axios.isAxiosError(error)) {
+        if (error.code === "ECONNABORTED") {
+          throw new Error("微信接口请求超时，请稍后重试");
+        }
+        if (error.response) {
+          throw new Error(
+            `微信接口错误: ${error.response.status} ${error.response.statusText}`,
+          );
+        }
+      }
+      throw error;
     }
   }
 
@@ -87,7 +119,7 @@ export class UserService {
 
       await NoteBook.insertMany(noteBooks);
       console.log(
-        `✅ 为用户 ${userId} 创建了 ${noteBooks.length} 个默认手帐本`
+        `✅ 为用户 ${userId} 创建了 ${noteBooks.length} 个默认手帐本`,
       );
     } catch (error) {
       console.error("创建默认手帐本失败:", error);

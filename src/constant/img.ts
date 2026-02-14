@@ -34,7 +34,7 @@ export const defaultNoteBook = [
   },
   {
     title: "目标打卡",
-    coverImg: coverPreviewList[7],
+    coverImg: coverPreviewList[11],
   },
   {
     title: "旅行足迹",

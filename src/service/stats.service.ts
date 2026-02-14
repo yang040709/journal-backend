@@ -6,7 +6,6 @@ import { toLeanActivityArray } from "../utils/typeUtils";
 export interface UserStats {
   noteBookCount: number;
   noteCount: number;
-  recentActivity: ActivityItem[];
 }
 
 export interface ActivityItem {
@@ -27,24 +26,13 @@ export class StatsService {
    * 获取用户统计信息
    */
   static async getUserStats(userId: string): Promise<UserStats> {
-    const [noteBookCount, noteCount, recentActivities] = await Promise.all([
+    const [noteBookCount, noteCount] = await Promise.all([
       NoteBook.countDocuments({ userId }),
       Note.countDocuments({ userId }),
-      Activity.find({ userId }).sort({ createdAt: -1 }).limit(10).lean(),
     ]);
-
-    const recentActivity: ActivityItem[] = recentActivities.map((activity) => ({
-      type: activity.type,
-      target: activity.target,
-      targetId: activity.targetId,
-      title: activity.title,
-      timestamp: activity.createdAt.getTime(),
-    }));
-
     return {
       noteBookCount,
       noteCount,
-      recentActivity,
     };
   }
 

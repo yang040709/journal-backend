@@ -257,9 +257,7 @@ router.get("/recent", async (ctx: AuthContext) => {
       .optional()
       .default(10)
       .parse(ctx.query.limit);
-
     const notes = await NoteService.getRecentNotes(userId, limit);
-
     success(ctx, notes, "获取最近手帐成功");
   } catch (err) {
     if (err instanceof z.ZodError) {

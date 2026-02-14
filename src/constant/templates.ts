@@ -15,8 +15,8 @@ export const noteTemplates = Object.freeze([
     name: "单项待办事项",
     description: "记录一件具体要完成的任务，专注执行不遗漏",
     fields: {
-      title: "[待完成] [输入任务名称]",
-      content: `任务详情：\n\n截止时间：\n\n完成备注：\n\n`,
+      title: "任务：XXX",
+      content: `任务详情：\n\n截止时间：\n\n是否完成：\n\n完成备注：\n\n`,
       tags: ["计划"],
     },
   },
@@ -67,7 +67,7 @@ export const noteTemplates = Object.freeze([
     name: "旅行记录",
     description: "记录旅行见闻与感受",
     fields: {
-      title: "[输入目的地] 旅行记",
+      title: "XXX旅行记",
       content: `目的地：\n\n行程安排：\n\n美食推荐：\n\n美景分享：\n\n旅行感悟：\n\n`,
       tags: ["旅行", "美食"],
     },
@@ -87,7 +87,7 @@ export const noteTemplates = Object.freeze([
     name: "读书笔记",
     description: "记录读书心得与摘抄",
     fields: {
-      title: "《[输入书名]》读书笔记",
+      title: "《XXX》读书笔记",
       content: `书籍信息：\n作者：\n出版时间：\n\n核心观点：\n\n精彩摘抄：\n\n个人感悟：\n`,
       tags: ["学习"],
     },
@@ -127,7 +127,7 @@ export const noteTemplates = Object.freeze([
     name: "观影记录",
     description: "记录电影观后感",
     fields: {
-      title: "《[输入电影名称]》观后感",
+      title: "《XXX》观后感",
       content: `电影信息：\n导演：\n主演：\n评分：\n\n剧情简介：\n\n个人评价：\n\n推荐指数：\n`,
       tags: ["日常"],
     },
@@ -147,7 +147,7 @@ export const noteTemplates = Object.freeze([
     name: "目标规划",
     description: "规划目标，分解任务，稳步前进",
     fields: {
-      title: "目标规划 [输入目标]",
+      title: "目标：XXX",
       content: `目标描述：
 
 具体行动步骤：
