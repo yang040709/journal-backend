@@ -7,6 +7,8 @@ export interface INote extends Document {
   content: string;
   tags: string[];
   userId: string;
+  isShare: boolean;
+  shareId?: string;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -38,6 +40,17 @@ const noteSchema = new Schema(
       required: [true, "用户ID不能为空"],
       index: true,
     },
+    isShare: {
+      type: Boolean,
+      default: false,
+      index: true,
+    },
+    shareId: {
+      type: String,
+      unique: true,
+      sparse: true, // 允许null值存在多个
+      index: true,
+    },
   },
   {
     timestamps: true,
@@ -47,7 +60,7 @@ const noteSchema = new Schema(
     toObject: {
       virtuals: true,
     },
-  }
+  },
 );
 
 // 创建索引

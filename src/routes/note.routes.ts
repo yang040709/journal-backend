@@ -269,4 +269,38 @@ router.get("/recent", async (ctx: AuthContext) => {
   }
 });
 
+// /**
+//  * @route GET /notes/:id/share-info
+//  * @desc 获取手帐的分享信息
+//  */
+router.get("/:id/share-info", async (ctx: AuthContext) => {
+  try {
+    const userId = ctx.user!.userId;
+    const { id } = ctx.params;
+
+    const note = await NoteService.getNoteById(id, userId);
+    if (!note) {
+      error(ctx, "手帐不存在", ErrorCodes.NOTE_NOT_FOUND, 404);
+      return;
+    }
+
+    success(
+      ctx,
+      {
+        id: note.id,
+        isShare: note.isShare,
+        shareId: note.shareId,
+        title: note.title,
+        shareUrl: note.shareId
+          ? `/share/pages/share-note/share-note?share_id=${note.shareId}`
+          : null,
+      },
+      "获取分享信息成功",
+    );
+  } catch (err) {
+    console.error("获取分享信息失败:", err);
+    error(ctx, "获取分享信息失败", ErrorCodes.INTERNAL_ERROR, 500);
+  }
+});
+
 export default router;

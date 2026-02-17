@@ -13,6 +13,7 @@ import StatsRouter from "./routes/stats.routes";
 import ExportRouter from "./routes/export.routes";
 import ReminderRouter from "./routes/reminder.routes";
 import TemplateRouter from "./routes/template.routes";
+import ShareRouter from "./routes/share.routes";
 import { startAllSchedulers } from "./scheduler";
 
 const app = new Koa();
@@ -60,6 +61,7 @@ app.use(StatsRouter.routes()).use(StatsRouter.allowedMethods());
 app.use(ExportRouter.routes()).use(ExportRouter.allowedMethods());
 app.use(ReminderRouter.routes()).use(ReminderRouter.allowedMethods());
 app.use(TemplateRouter.routes()).use(TemplateRouter.allowedMethods());
+app.use(ShareRouter.routes()).use(ShareRouter.allowedMethods());
 
 // 注意：404处理现在由 errorMiddleware 自动处理
 // 当没有匹配的路由时，errorMiddleware 会捕获并返回 404 响应

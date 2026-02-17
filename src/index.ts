@@ -2,6 +2,8 @@ import dotenv from "dotenv";
 import app, { startSchedulersAfterDBConnection } from "./app";
 
 import { connectDB } from "./config/db";
+import { runMigrations } from "./utils/migration";
+import { initSensitiveFilter } from "./utils/sensitive-encrypted";
 
 dotenv.config();
 
@@ -33,6 +35,14 @@ process.on("unhandledRejection", (reason, promise) => {
 const init = async () => {
   try {
     await connectDB();
+
+    // 执行数据库迁移
+    await runMigrations();
+
+    // 初始化敏感词过滤器
+    console.log("🔐 正在初始化敏感词过滤器...");
+    await initSensitiveFilter();
+    console.log("✅ 敏感词过滤器初始化完成");
 
     // 数据库连接成功后启动调度器
     startSchedulersAfterDBConnection();

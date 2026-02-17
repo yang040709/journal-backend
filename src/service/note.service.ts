@@ -3,6 +3,8 @@ import NoteBook, { LeanNoteBook } from "../model/NoteBook";
 import Activity from "../model/Activity";
 import { ErrorCodes } from "../utils/response";
 import { toLeanNoteArray, toLeanNote } from "../utils/typeUtils";
+import { checkNoteContent } from "../utils/sensitive-encrypted";
+import { nanoid } from "nanoid";
 
 export interface CreateNoteData {
   noteBookId: string;
@@ -343,5 +345,99 @@ export class NoteService {
   ): Promise<boolean> {
     const note = await Note.findOne({ _id: noteId, userId });
     return !!note;
+  }
+
+  /**
+   * 通过shareId获取分享的手帐
+   * @param shareId 分享ID
+   * @returns 手帐信息，如果不存在或未分享则返回null
+   */
+  static async getNoteByShareId(shareId: string): Promise<LeanNote | null> {
+    const note = await Note.findOne({
+      shareId,
+      isShare: true,
+    }).lean();
+
+    return note ? toLeanNote(note) : null;
+  }
+
+  /**
+   * 设置手帐分享状态
+   * @param noteId 手帐ID
+   * @param userId 用户ID
+   * @param share 是否分享
+   * @returns 更新后的手帐信息，如果手帐不存在则返回null
+   */
+  static async setNoteShareStatus(
+    noteId: string,
+    userId: string,
+    share: boolean,
+  ): Promise<INote | null> {
+    const note = await Note.findOne({ _id: noteId, userId });
+    if (!note) {
+      return null;
+    }
+
+    if (share) {
+      // 开启分享
+      // 检查敏感词
+      const checkResult = checkNoteContent(note.title, note.content);
+
+      // 如果有敏感词，使用处理后的内容
+      if (checkResult.hasAnySensitive) {
+        note.title = checkResult.processedTitle;
+        note.content = checkResult.processedContent;
+      }
+
+      // 生成shareId（如果还没有）
+      if (!note.shareId) {
+        note.shareId = nanoid(12); // 生成12位的唯一ID
+      }
+      note.isShare = true;
+    } else {
+      // 关闭分享
+      note.isShare = false;
+      // 注意：不删除shareId，以便重新开启时使用同一个分享链接
+    }
+
+    await note.save();
+
+    // 记录活动
+    await Activity.create({
+      type: share ? "share_enable" : "share_disable",
+      target: "note",
+      targetId: note.id,
+      title: share
+        ? `开启手帐分享：${note.title}`
+        : `关闭手帐分享：${note.title}`,
+      userId,
+    });
+
+    return note;
+  }
+
+  /**
+   * 生成唯一的shareId
+   * @returns 唯一的shareId
+   */
+  static generateShareId(): string {
+    return nanoid(12);
+  }
+
+  /**
+   * 获取用户的分享手帐列表
+   * @param userId 用户ID
+   * @returns 分享的手帐列表
+   */
+  static async getSharedNotes(userId: string): Promise<LeanNote[]> {
+    const notes = await Note.find({
+      userId,
+      isShare: true,
+    })
+      .select("-content") // 排除 content 字段，减少网络传输
+      .sort({ updatedAt: -1 })
+      .lean();
+
+    return toLeanNoteArray(notes);
   }
 }
