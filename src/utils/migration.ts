@@ -33,6 +33,7 @@ export async function runMigrations() {
             shareId: null,
           },
         },
+        { timestamps: false }, // ⭐ 关键：阻止 updatedAt 自动更新
       );
 
       console.log(`✅ 迁移完成！更新了 ${result.modifiedCount} 条记录`);
@@ -47,6 +48,7 @@ export async function runMigrations() {
       console.log(`   - 总记录数: ${await Note.countDocuments()}`);
       console.log(`   - 样本 isShare: ${sampleNote.isShare}`);
       console.log(`   - 样本 shareId: ${sampleNote.shareId}`);
+      console.log(`   - 样本 updatedAt: ${sampleNote.updatedAt}`); // 验证时间未变
     }
   } catch (error) {
     console.error("❌ 数据库迁移失败:", error);
