@@ -378,6 +378,11 @@ export class NoteService {
       return null;
     }
 
+    // 生成shareId（如果还没有）
+    if (!note.shareId) {
+      note.shareId = nanoid(12); // 生成12位的唯一ID
+    }
+
     if (share) {
       // 开启分享
       // 检查敏感词
@@ -387,11 +392,6 @@ export class NoteService {
       if (checkResult.hasAnySensitive) {
         note.title = checkResult.processedTitle;
         note.content = checkResult.processedContent;
-      }
-
-      // 生成shareId（如果还没有）
-      if (!note.shareId) {
-        note.shareId = nanoid(12); // 生成12位的唯一ID
       }
       note.isShare = true;
     } else {
