@@ -68,7 +68,7 @@ export class NoteService {
     await NoteBook.updateOne({ _id: data.noteBookId }, { $inc: { count: 1 } });
 
     // 记录活动
-    await Activity.create({
+    Activity.create({
       type: "create",
       target: "note",
       targetId: note.id,
@@ -400,7 +400,7 @@ export class NoteService {
       // 注意：不删除shareId，以便重新开启时使用同一个分享链接
     }
 
-    await note.save();
+    await note.save({ timestamps: false }); // 不更新updatedAt
 
     // 记录活动
     await Activity.create({
