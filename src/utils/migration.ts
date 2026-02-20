@@ -3,13 +3,19 @@
  */
 
 import Note from "../model/Note.js";
+import User from "@/model/User.js";
+import { coverPreviewList } from "@/constant/img.js";
 
 /**
  * 检查并执行数据库迁移
  */
 export async function runMigrations() {
   console.log("🔧 检查数据库迁移...");
+  // migrateShare();
+  migrateUsers();
+}
 
+async function migrateShare() {
   try {
     // 检查是否有需要迁移的文档
     const notesWithoutShareFields = await Note.find({
@@ -54,4 +60,18 @@ export async function runMigrations() {
     console.error("❌ 数据库迁移失败:", error);
     // 不抛出错误，避免影响应用启动
   }
+}
+
+async function migrateUsers() {
+  const result = await User.updateMany(
+    { quickCovers: { $exists: false } }, // 只找没有这个字段的文档
+    {
+      $set: {
+        quickCovers: coverPreviewList.slice(0, 11),
+        quickCoversUpdatedAt: new Date(),
+      },
+    },
+    { timestamps: false }, // 阻止 updatedAt 自动更新
+  );
+  console.log(`更新了 ${result.modifiedCount} 个旧用户数据`);
 }

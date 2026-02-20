@@ -3,7 +3,7 @@ import User from "../model/User";
 import NoteBook from "../model/NoteBook";
 import { signToken } from "../utils/jwt";
 import Activity from "../model/Activity";
-import { defaultNoteBook } from "../constant/img";
+import { coverPreviewList, defaultNoteBook } from "../constant/img";
 
 export interface LoginResult {
   token: string;
@@ -29,9 +29,12 @@ export class UserService {
         isNewUser = false;
       } else {
         // 用户不存在，创建新用户
-        user = await User.create({ userId: openid });
+        user = await User.create({
+          userId: openid,
+          quickCovers: coverPreviewList.slice(0, 11),
+          quickCoversUpdatedAt: new Date(),
+        });
         isNewUser = true;
-
         // 为新用户异步创建默认手帐本（不阻塞登录响应）
         await this.createDefaultNoteBooks(openid).catch((error) => {
           console.error("创建默认手帐本失败（不影响登录）:", error);
