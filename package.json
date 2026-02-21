@@ -7,7 +7,8 @@
     "dev": "concurrently \"pnpm run build:watch\" \"pnpm run start:watch\"",
     "build": "tsup",
     "build:watch": "tsup --watch",
-    "start:watch": "wait-on dist/index.js && nodemon --watch dist --ext js,json --exec \"node dist/index.js\""
+    "start:watch": "wait-on dist/index.js && nodemon --watch dist --ext js,json --exec \"node dist/index.js\"",
+    "generated:sensitive-words": "npx tsx ./scripts/encrypt-sensitive-words.ts"
   },
   "keywords": [],
   "author": "",

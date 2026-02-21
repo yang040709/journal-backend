@@ -1,5 +1,5 @@
 import Reminder, { IReminder } from "../model/Reminder";
-import Activity from "../model/Activity";
+import { ActivityLogger } from "../utils/ActivityLogger";
 import { NoteService } from "./note.service";
 import { WeChatService } from "./wechat.service";
 
@@ -46,13 +46,16 @@ export class ReminderService {
     });
 
     // 记录活动
-    await Activity.create({
-      type: "create",
-      target: "reminder",
-      targetId: reminder.id,
-      title: `创建提醒：${data.title || note.title}`,
-      userId,
-    });
+    ActivityLogger.record(
+      {
+        type: "create",
+        target: "reminder",
+        targetId: reminder.id,
+        title: `创建提醒：${data.title || note.title}`,
+        userId,
+      },
+      { blocking: false },
+    );
 
     return reminder;
   }
@@ -131,13 +134,16 @@ export class ReminderService {
     ).lean();
 
     // 记录活动
-    await Activity.create({
-      type: "update",
-      target: "reminder",
-      targetId: id,
-      title: `更新提醒：${existingReminder.title}`,
-      userId,
-    });
+    ActivityLogger.record(
+      {
+        type: "update",
+        target: "reminder",
+        targetId: id,
+        title: `更新提醒：${existingReminder.title}`,
+        userId,
+      },
+      { blocking: false },
+    );
 
     return reminder as unknown as IReminder | null;
   }
@@ -157,13 +163,16 @@ export class ReminderService {
 
     if (deleted) {
       // 记录活动
-      await Activity.create({
-        type: "delete",
-        target: "reminder",
-        targetId: id,
-        title: `删除提醒：${reminder.title}`,
-        userId,
-      });
+      ActivityLogger.record(
+        {
+          type: "delete",
+          target: "reminder",
+          targetId: id,
+          title: `删除提醒：${reminder.title}`,
+          userId,
+        },
+        { blocking: false },
+      );
     }
 
     return deleted;
@@ -197,13 +206,16 @@ export class ReminderService {
 
     if (deletedCount > 0) {
       // 记录活动
-      await Activity.create({
-        type: "delete",
-        target: "reminder",
-        targetId: "batch",
-        title: `批量删除提醒：共删除${deletedCount}条`,
-        userId,
-      });
+      ActivityLogger.record(
+        {
+          type: "delete",
+          target: "reminder",
+          targetId: "batch",
+          title: `批量删除提醒：共删除${deletedCount}条`,
+          userId,
+        },
+        { blocking: false },
+      );
     }
 
     return deletedCount;

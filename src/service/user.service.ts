@@ -2,7 +2,7 @@ import axios from "axios";
 import User from "../model/User";
 import NoteBook from "../model/NoteBook";
 import { signToken } from "../utils/jwt";
-import Activity from "../model/Activity";
+import { ActivityLogger } from "../utils/ActivityLogger";
 import { coverPreviewList, defaultNoteBook } from "../constant/img";
 
 export interface LoginResult {
@@ -42,15 +42,16 @@ export class UserService {
       }
 
       // 4. 异步记录活动日志（不阻塞登录响应）
-      const activityPromise = Activity.create({
-        type: isNewUser ? "create" : "update",
-        target: "noteBook",
-        targetId: user.id,
-        title: isNewUser ? "新用户注册" : "用户登录",
-        userId: user.userId,
-      }).catch((error) => {
-        console.error("记录活动日志失败（不影响登录）:", error);
-      });
+      void ActivityLogger.record(
+        {
+          type: isNewUser ? "create" : "update",
+          target: "noteBook",
+          targetId: user.id,
+          title: isNewUser ? "新用户注册" : "用户登录",
+          userId: user.userId,
+        },
+        { blocking: false },
+      );
 
       // 5. 等待token生成完成
       const token = signToken({ userId: user.userId });

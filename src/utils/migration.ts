@@ -12,7 +12,7 @@ import { coverPreviewList } from "@/constant/img.js";
 export async function runMigrations() {
   console.log("🔧 检查数据库迁移...");
   // migrateShare();
-  migrateUsers();
+  // migrateUsers();
 }
 
 async function migrateShare() {

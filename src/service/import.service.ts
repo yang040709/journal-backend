@@ -1,6 +1,6 @@
 import NoteBook from "../model/NoteBook";
 import Note from "../model/Note";
-import Activity from "../model/Activity";
+import { ActivityLogger } from "../utils/ActivityLogger";
 import { ExportData } from "./export.service";
 
 export interface ImportOptions {
@@ -29,7 +29,7 @@ export class ImportService {
   static async importUserData(
     userId: string,
     importData: ExportData,
-    options: ImportOptions = { mode: "replace", conflictStrategy: "overwrite" }
+    options: ImportOptions = { mode: "replace", conflictStrategy: "overwrite" },
   ): Promise<ImportResult> {
     try {
       // 验证导入数据格式
@@ -61,13 +61,16 @@ export class ImportService {
       }
 
       // 记录导入活动
-      await Activity.create({
-        type: "create",
-        target: "noteBook",
-        targetId: "import",
-        title: `数据导入：${result.statistics.importedNoteBooks}个手帐本，${result.statistics.importedNotes}条手帐`,
-        userId,
-      });
+      void ActivityLogger.record(
+        {
+          type: "create",
+          target: "noteBook",
+          targetId: "import",
+          title: `数据导入：${result.statistics.importedNoteBooks}个手帐本，${result.statistics.importedNotes}条手帐`,
+          userId,
+        },
+        { blocking: false },
+      );
 
       return result;
     } catch (error) {
@@ -108,7 +111,7 @@ export class ImportService {
     data.data.noteBooks.forEach((noteBook, index) => {
       if (!noteBook.title || typeof noteBook.title !== "string") {
         throw new Error(
-          `手帐本数据格式错误：第 ${index + 1} 个手帐本缺少 title 字段`
+          `手帐本数据格式错误：第 ${index + 1} 个手帐本缺少 title 字段`,
         );
       }
     });
@@ -117,17 +120,17 @@ export class ImportService {
     data.data.notes.forEach((note, index) => {
       if (!note.title || typeof note.title !== "string") {
         throw new Error(
-          `手帐数据格式错误：第 ${index + 1} 条手帐缺少 title 字段`
+          `手帐数据格式错误：第 ${index + 1} 条手帐缺少 title 字段`,
         );
       }
       if (typeof note.content !== "string") {
         throw new Error(
-          `手帐数据格式错误：第 ${index + 1} 条手帐缺少 content 字段`
+          `手帐数据格式错误：第 ${index + 1} 条手帐缺少 content 字段`,
         );
       }
       if (!note.noteBookId || typeof note.noteBookId !== "string") {
         throw new Error(
-          `手帐数据格式错误：第 ${index + 1} 条手帐缺少 noteBookId 字段`
+          `手帐数据格式错误：第 ${index + 1} 条手帐缺少 noteBookId 字段`,
         );
       }
     });
@@ -149,7 +152,7 @@ export class ImportService {
   private static async importAllData(
     userId: string,
     importData: ExportData,
-    result: ImportResult
+    result: ImportResult,
   ): Promise<void> {
     // 导入手帐本
     const noteBookMap = new Map<string, string>(); // 旧ID -> 新ID 映射
@@ -208,17 +211,17 @@ export class ImportService {
     userId: string,
     importData: ExportData,
     options: ImportOptions,
-    result: ImportResult
+    result: ImportResult,
   ): Promise<void> {
     // 获取现有数据
     const existingNoteBooks = await NoteBook.find({ userId });
     const existingNotes = await Note.find({ userId });
 
     const existingNoteBookMap = new Map(
-      existingNoteBooks.map((book) => [book.title, book])
+      existingNoteBooks.map((book) => [book.title, book]),
     );
     const existingNoteMap = new Map(
-      existingNotes.map((note) => [`${note.noteBookId}_${note.title}`, note])
+      existingNotes.map((note) => [`${note.noteBookId}_${note.title}`, note]),
     );
 
     // 合并手帐本
@@ -263,14 +266,14 @@ export class ImportService {
         const targetNoteBook = existingNoteBookMap.get(
           this.findNoteBookTitle(
             importData.data.noteBooks,
-            noteData.noteBookId
-          ) || ""
+            noteData.noteBookId,
+          ) || "",
         );
 
         if (!targetNoteBook) {
           result.statistics.skippedNotes++;
           result.errors?.push(
-            `手帐导入失败：找不到手帐本 ${noteData.noteBookId}`
+            `手帐导入失败：找不到手帐本 ${noteData.noteBookId}`,
           );
           continue;
         }
@@ -318,7 +321,7 @@ export class ImportService {
    */
   private static findNoteBookTitle(
     noteBooks: any[],
-    noteBookId: string
+    noteBookId: string,
   ): string | undefined {
     const noteBook = noteBooks.find((book) => book.id === noteBookId);
     return noteBook?.title;

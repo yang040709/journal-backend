@@ -1,5 +1,5 @@
 import Template, { ITemplate, LeanTemplate } from "../model/Template";
-import Activity from "../model/Activity";
+import { ActivityLogger } from "../utils/ActivityLogger";
 // import { ErrorCodes } from "../utils/response";
 import { toLeanTemplateArray, toLeanTemplate } from "../utils/typeUtils";
 import { noteTemplates } from "@/constant/templates.js";
@@ -51,13 +51,16 @@ export class TemplateService {
     await template.save();
 
     // 记录活动
-    await Activity.create({
-      type: "create",
-      target: "template",
-      targetId: template.id,
-      title: `创建模板：${data.name}`,
-      userId,
-    });
+    ActivityLogger.record(
+      {
+        type: "create",
+        target: "template",
+        targetId: template.id,
+        title: `创建模板：${data.name}`,
+        userId,
+      },
+      { blocking: false },
+    );
 
     return template;
   }
@@ -140,13 +143,16 @@ export class TemplateService {
     await template.save();
 
     // 记录活动
-    await Activity.create({
-      type: "update",
-      target: "template",
-      targetId: template.id,
-      title: `更新模板：${template.name}`,
-      userId,
-    });
+    ActivityLogger.record(
+      {
+        type: "update",
+        target: "template",
+        targetId: template.id,
+        title: `更新模板：${template.name}`,
+        userId,
+      },
+      { blocking: false },
+    );
 
     return template;
   }
@@ -168,13 +174,16 @@ export class TemplateService {
     await Template.deleteOne({ _id: id, userId, isSystem: false });
 
     // 记录活动
-    await Activity.create({
-      type: "delete",
-      target: "template",
-      targetId: id,
-      title: `删除模板：${template.name}`,
-      userId,
-    });
+    ActivityLogger.record(
+      {
+        type: "delete",
+        target: "template",
+        targetId: id,
+        title: `删除模板：${template.name}`,
+        userId,
+      },
+      { blocking: false },
+    );
 
     return true;
   }
@@ -200,8 +209,8 @@ export class TemplateService {
       .sort({ updatedAt: -1 })
       .lean();
 
-    // 合并并返回
-    return [...systemTemplates, ...toLeanTemplateArray(userTemplates)];
+    // 合并并返回,把用户的模板放在前面
+    return [...toLeanTemplateArray(userTemplates), ...systemTemplates];
   }
 
   /**
@@ -244,13 +253,16 @@ export class TemplateService {
     });
 
     // 记录活动
-    await Activity.create({
-      type: "delete",
-      target: "template",
-      targetId: "batch",
-      title: `批量删除模板：共删除${result.deletedCount}个`,
-      userId,
-    });
+    void ActivityLogger.record(
+      {
+        type: "delete",
+        target: "template",
+        targetId: "batch",
+        title: `批量删除模板：共删除${result.deletedCount}个`,
+        userId,
+      },
+      { blocking: false },
+    );
 
     return result.deletedCount || 0;
   }

@@ -1,6 +1,6 @@
 import Note, { INote, LeanNote } from "../model/Note";
 import NoteBook, { LeanNoteBook } from "../model/NoteBook";
-import Activity from "../model/Activity";
+import { ActivityLogger } from "../utils/ActivityLogger";
 import { ErrorCodes } from "../utils/response";
 import { toLeanNoteArray, toLeanNote } from "../utils/typeUtils";
 import { checkNoteContent } from "../utils/sensitive-encrypted";
@@ -60,6 +60,8 @@ export class NoteService {
       content: data.content,
       tags: data.tags || [],
       userId: data.userId,
+      isShare: false,
+      shareId: nanoid(12),
     });
 
     await note.save();
@@ -68,13 +70,16 @@ export class NoteService {
     await NoteBook.updateOne({ _id: data.noteBookId }, { $inc: { count: 1 } });
 
     // 记录活动
-    Activity.create({
-      type: "create",
-      target: "note",
-      targetId: note.id,
-      title: `创建手帐：${data.title}`,
-      userId: data.userId,
-    });
+    void ActivityLogger.record(
+      {
+        type: "create",
+        target: "note",
+        targetId: note.id,
+        title: `创建手帐：${data.title}`,
+        userId: data.userId,
+      },
+      { blocking: false },
+    );
 
     return note;
   }
@@ -186,13 +191,16 @@ export class NoteService {
     await note.save();
 
     // 记录活动
-    await Activity.create({
-      type: "update",
-      target: "note",
-      targetId: note.id,
-      title: `更新手帐：${note.title}`,
-      userId,
-    });
+    void ActivityLogger.record(
+      {
+        type: "update",
+        target: "note",
+        targetId: note.id,
+        title: `更新手帐：${note.title}`,
+        userId,
+      },
+      { blocking: false },
+    );
 
     return note;
   }
@@ -213,13 +221,16 @@ export class NoteService {
     await NoteBook.updateOne({ _id: note.noteBookId }, { $inc: { count: -1 } });
 
     // 记录活动
-    await Activity.create({
-      type: "delete",
-      target: "note",
-      targetId: id,
-      title: `删除手帐：${note.title}`,
-      userId,
-    });
+    void ActivityLogger.record(
+      {
+        type: "delete",
+        target: "note",
+        targetId: id,
+        title: `删除手帐：${note.title}`,
+        userId,
+      },
+      { blocking: false },
+    );
 
     return true;
   }
@@ -259,13 +270,16 @@ export class NoteService {
     await Promise.all(updatePromises);
 
     // 记录活动
-    await Activity.create({
-      type: "delete",
-      target: "note",
-      targetId: "batch",
-      title: `批量删除手帐：共删除${result.deletedCount}条`,
-      userId,
-    });
+    void ActivityLogger.record(
+      {
+        type: "delete",
+        target: "note",
+        targetId: "batch",
+        title: `批量删除手帐：共删除${result.deletedCount}条`,
+        userId,
+      },
+      { blocking: false },
+    );
 
     return result.deletedCount || 0;
   }
@@ -403,15 +417,18 @@ export class NoteService {
     await note.save({ timestamps: false }); // 不更新updatedAt
 
     // 记录活动
-    await Activity.create({
-      type: share ? "share_enable" : "share_disable",
-      target: "note",
-      targetId: note.id,
-      title: share
-        ? `开启手帐分享：${note.title}`
-        : `关闭手帐分享：${note.title}`,
-      userId,
-    });
+    void ActivityLogger.record(
+      {
+        type: share ? "share_enable" : "share_disable",
+        target: "note",
+        targetId: note.id,
+        title: share
+          ? `开启手帐分享：${note.title}`
+          : `关闭手帐分享：${note.title}`,
+        userId,
+      },
+      { blocking: false },
+    );
 
     return note;
   }

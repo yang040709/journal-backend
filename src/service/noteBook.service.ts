@@ -1,6 +1,6 @@
 import NoteBook, { INoteBook, LeanNoteBook } from "../model/NoteBook";
 import Note from "../model/Note";
-import Activity from "../model/Activity";
+import { ActivityLogger } from "../utils/ActivityLogger";
 import { ErrorCodes } from "../utils/response";
 import { toLeanNoteBookArray, toLeanNoteBook } from "../utils/typeUtils";
 
@@ -38,13 +38,16 @@ export class NoteBookService {
     await noteBook.save();
 
     // 记录活动
-    await Activity.create({
-      type: "create",
-      target: "noteBook",
-      targetId: noteBook.id,
-      title: `创建手帐本：${data.title}`,
-      userId: data.userId,
-    });
+    ActivityLogger.record(
+      {
+        type: "create",
+        target: "noteBook",
+        targetId: noteBook.id,
+        title: `创建手帐本：${data.title}`,
+        userId: data.userId,
+      },
+      { blocking: false },
+    );
 
     return noteBook;
   }
@@ -54,7 +57,7 @@ export class NoteBookService {
    */
   static async getUserNoteBooks(
     userId: string,
-    params: PaginationParams = {}
+    params: PaginationParams = {},
   ): Promise<{ items: LeanNoteBook[]; total: number }> {
     const page = Math.max(1, params.page || 1);
     const limit = Math.min(100, Math.max(1, params.limit || 20));
@@ -80,7 +83,7 @@ export class NoteBookService {
    */
   static async getNoteBookById(
     id: string,
-    userId: string
+    userId: string,
   ): Promise<LeanNoteBook | null> {
     const noteBook = await NoteBook.findOne({ _id: id, userId }).lean();
     return noteBook ? toLeanNoteBook(noteBook) : null;
@@ -92,7 +95,7 @@ export class NoteBookService {
   static async updateNoteBook(
     id: string,
     userId: string,
-    data: UpdateNoteBookData
+    data: UpdateNoteBookData,
   ): Promise<INoteBook | null> {
     const noteBook = await NoteBook.findOne({ _id: id, userId });
     if (!noteBook) {
@@ -106,13 +109,16 @@ export class NoteBookService {
     await noteBook.save();
 
     // 记录活动
-    await Activity.create({
-      type: "update",
-      target: "noteBook",
-      targetId: noteBook.id,
-      title: `更新手帐本：${noteBook.title}`,
-      userId,
-    });
+    ActivityLogger.record(
+      {
+        type: "update",
+        target: "noteBook",
+        targetId: noteBook.id,
+        title: `更新手帐本：${noteBook.title}`,
+        userId,
+      },
+      { blocking: false },
+    );
 
     return noteBook;
   }
@@ -133,13 +139,16 @@ export class NoteBookService {
     await NoteBook.deleteOne({ _id: id, userId });
 
     // 记录活动
-    await Activity.create({
-      type: "delete",
-      target: "noteBook",
-      targetId: id,
-      title: `删除手帐本：${noteBook.title}`,
-      userId,
-    });
+    ActivityLogger.record(
+      {
+        type: "delete",
+        target: "noteBook",
+        targetId: id,
+        title: `删除手帐本：${noteBook.title}`,
+        userId,
+      },
+      { blocking: false },
+    );
 
     return true;
   }
@@ -149,7 +158,7 @@ export class NoteBookService {
    */
   static async getNoteBookStats(
     id: string,
-    userId: string
+    userId: string,
   ): Promise<{ noteCount: number } | null> {
     const noteBook = await NoteBook.findOne({ _id: id, userId }).lean();
     if (!noteBook) {
@@ -169,7 +178,7 @@ export class NoteBookService {
    */
   static async validateNoteBookAccess(
     noteBookId: string,
-    userId: string
+    userId: string,
   ): Promise<boolean> {
     const noteBook = await NoteBook.findOne({ _id: noteBookId, userId });
     return !!noteBook;

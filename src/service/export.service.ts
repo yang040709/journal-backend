@@ -1,6 +1,6 @@
 import NoteBook from "../model/NoteBook";
 import Note from "../model/Note";
-import Activity from "../model/Activity";
+import { ActivityLogger } from "../utils/ActivityLogger";
 import { defaultNoteBook } from "../constant/img";
 
 export interface ExportData {
@@ -66,13 +66,16 @@ export class ExportService {
       };
 
       // 记录活动
-      await Activity.create({
-        type: "create",
-        target: "noteBook", // 使用noteBook作为target，因为导出涉及手帐本数据
-        targetId: "export",
-        title: `数据导出：${cleanNoteBooks.length}个手帐本，${cleanNotes.length}条手帐`,
-        userId,
-      });
+      void ActivityLogger.record(
+        {
+          type: "create",
+          target: "noteBook", // 使用noteBook作为target，因为导出涉及手帐本数据
+          targetId: "export",
+          title: `数据导出：${cleanNoteBooks.length}个手帐本，${cleanNotes.length}条手帐`,
+          userId,
+        },
+        { blocking: false },
+      );
 
       return exportData;
     } catch (error) {
