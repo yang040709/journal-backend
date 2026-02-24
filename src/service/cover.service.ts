@@ -1,5 +1,6 @@
 import User from "../model/User";
 import { coverPreviewList } from "../constant/img";
+import { ActivityLogger } from "../utils/ActivityLogger";
 
 export interface UpdateQuickCoversData {
   covers: string[];
@@ -71,6 +72,18 @@ export class CoverService {
       throw new Error("用户不存在");
     }
 
+    // 记录活动
+    void ActivityLogger.record(
+      {
+        type: "update",
+        target: "cover",
+        targetId: userId,
+        title: `更新快捷封面列表：共设置 ${covers.length} 个封面`,
+        userId,
+      },
+      { blocking: false },
+    );
+
     return {
       quickCovers: updatedUser.quickCovers,
       quickCoversUpdatedAt: updatedUser.quickCoversUpdatedAt,
@@ -96,5 +109,17 @@ export class CoverService {
     user.quickCovers = coverPreviewList.slice(0, 11);
     user.quickCoversUpdatedAt = new Date();
     await user.save();
+
+    // 记录活动
+    void ActivityLogger.record(
+      {
+        type: "create",
+        target: "cover",
+        targetId: userId,
+        title: "初始化快捷封面列表：使用默认封面",
+        userId,
+      },
+      { blocking: false },
+    );
   }
 }

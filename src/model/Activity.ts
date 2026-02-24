@@ -3,7 +3,7 @@ import { LeanActivity } from "../types/mongoose";
 
 export interface IActivity extends Document {
   type: "create" | "update" | "delete" | "share_enable" | "share_disable";
-  target: "noteBook" | "note" | "reminder" | "template";
+  target: "noteBook" | "note" | "reminder" | "template" | "cover";
   targetId: string;
   title: string;
   userId: string;
@@ -19,7 +19,7 @@ const activitySchema = new Schema(
     },
     target: {
       type: String,
-      enum: ["noteBook", "note", "reminder", "template"],
+      enum: ["noteBook", "note", "reminder", "template", "cover"],
       required: [true, "活动目标不能为空"],
     },
     targetId: {
