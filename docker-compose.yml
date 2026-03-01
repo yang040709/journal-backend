@@ -35,5 +35,31 @@ services:
     volumes:
       - mongo_data:/data/db
 
+  backup:
+    image: mongo:7
+    volumes:
+      - ./backups:/backups
+    environment:
+      # ⚠️ 这里的数据库名称必须与 app 服务的一致
+      - MONGO_URI=mongodb://mongo:27017/journal 
+      - BACKUP_RETENTION_DAYS=7
+    entrypoint: >
+      sh -c "
+      while true; do
+        FILENAME=/backups/backup-$$(date +%Y%m%d-%H%M%S).archive.gz;
+        echo \"Starting backup to $$FILENAME... \";
+        mongodump --uri=\"$$MONGO_URI\" --archive=\"$$FILENAME\" --gzip;
+        if [ $$? -eq 0 ]; then
+          echo 'Backup successful.';
+          # 删除过期备份
+          find /backups -name 'backup-*.archive.gz' -mtime +$$BACKUP_RETENTION_DAYS -delete;
+        else
+          echo 'Backup failed!';
+        fi
+        sleep 86400;
+      done"
+    depends_on:
+      - mongo  
+
 volumes:
   mongo_data:
