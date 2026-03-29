@@ -10,6 +10,7 @@ import { NoteService } from "../service/note.service";
 import { AiNoteService } from "../service/aiNote.service";
 import { z } from "zod";
 import { NotePresetTagService } from "../service/notePresetTag.service";
+import { UserNoteCustomTagService } from "../service/userNoteCustomTag.service";
 
 const router = new Router({
   prefix: "/notes",
@@ -19,15 +20,140 @@ const router = new Router({
 router.use(authMiddleware);
 
 /**
- * 获取可选预设标签（须在 /:id 等动态段之前注册）
+ * @swagger
+ * /notes/preset-tags:
+ *   get:
+ *     tags:
+ *       - 手帐管理
+ *     summary: 获取可选标签（系统预设 + 当前用户自定义）
+ *     description: data.tags 为合并去重后的可选列表；data.systemTags、data.customTags 分区展示用
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: 成功
+ */
+/**
+ * 获取可选标签：系统预设 + 当前用户自定义合并为 tags；并返回 systemTags、customTags（须在 /:id 等动态段之前注册）
  */
 router.get("/preset-tags", async (ctx: AuthContext) => {
   try {
-    const tags = await NotePresetTagService.getTagNames();
-    success(ctx, { tags }, "获取预设标签成功");
+    const userId = ctx.user!.userId;
+    const systemTags = await NotePresetTagService.getTagNames();
+    const customTags = await UserNoteCustomTagService.list(userId);
+    const tags = UserNoteCustomTagService.mergeSelectableTags(
+      systemTags,
+      customTags,
+    );
+    success(
+      ctx,
+      { tags, systemTags, customTags },
+      "获取预设标签成功",
+    );
   } catch (err) {
     console.error("获取预设标签失败:", err);
     error(ctx, "获取预设标签失败", ErrorCodes.INTERNAL_ERROR, 500);
+  }
+});
+
+const addCustomTagSchema = z.object({
+  name: z.string().min(1, "标签名称不能为空"),
+});
+
+/**
+ * @swagger
+ * /notes/custom-tags:
+ *   post:
+ *     tags:
+ *       - 手帐管理
+ *     summary: 新增自定义标签
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - name
+ *             properties:
+ *               name:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         description: 成功；data 含 customTags、tags（合并）
+ *   delete:
+ *     tags:
+ *       - 手帐管理
+ *     summary: 删除自定义标签
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: name
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: 标签名称
+ *     responses:
+ *       200:
+ *         description: 成功
+ */
+/**
+ * 新增自定义标签（最多 12 个，且不可与系统预设同名）
+ */
+router.post("/custom-tags", async (ctx: AuthContext) => {
+  try {
+    const body = addCustomTagSchema.parse(ctx.request.body);
+    const userId = ctx.user!.userId;
+    const customTags = await UserNoteCustomTagService.add(userId, body.name);
+    const systemTags = await NotePresetTagService.getTagNames();
+    const tags = UserNoteCustomTagService.mergeSelectableTags(
+      systemTags,
+      customTags,
+    );
+    success(ctx, { customTags, tags }, "添加自定义标签成功");
+  } catch (err) {
+    if (err instanceof z.ZodError) {
+      error(ctx, "参数验证失败", ErrorCodes.PARAM_ERROR, 400);
+      return;
+    }
+    const msg = err instanceof Error ? err.message : "添加失败";
+    console.error("添加自定义标签失败:", err);
+    error(ctx, msg, ErrorCodes.PARAM_ERROR, 400);
+  }
+});
+
+/**
+ * 删除自定义标签（query: name=标签名）
+ */
+router.delete("/custom-tags", async (ctx: AuthContext) => {
+  try {
+    const q = z.object({ name: z.string().min(1, "标签名称不能为空") }).parse({
+      name:
+        typeof ctx.query.name === "string"
+          ? ctx.query.name
+          : Array.isArray(ctx.query.name)
+            ? ctx.query.name[0]
+            : "",
+    });
+    const userId = ctx.user!.userId;
+    const customTags = await UserNoteCustomTagService.remove(userId, q.name);
+    const systemTags = await NotePresetTagService.getTagNames();
+    const tags = UserNoteCustomTagService.mergeSelectableTags(
+      systemTags,
+      customTags,
+    );
+    success(ctx, { customTags, tags }, "删除自定义标签成功");
+  } catch (err) {
+    if (err instanceof z.ZodError) {
+      error(ctx, "参数验证失败", ErrorCodes.PARAM_ERROR, 400);
+      return;
+    }
+    const msg = err instanceof Error ? err.message : "删除失败";
+    console.error("删除自定义标签失败:", err);
+    error(ctx, msg, ErrorCodes.PARAM_ERROR, 400);
   }
 });
 

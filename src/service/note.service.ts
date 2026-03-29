@@ -6,6 +6,7 @@ import { toLeanNoteArray, toLeanNote } from "../utils/typeUtils";
 import { checkNoteContent } from "../utils/sensitive-encrypted";
 import { nanoid } from "nanoid";
 import { NotePresetTagService } from "./notePresetTag.service";
+import { UserNoteCustomTagService } from "./userNoteCustomTag.service";
 import { recordFromNoteImages } from "./userImageAsset.service";
 
 export interface CreateNoteData {
@@ -98,8 +99,10 @@ export class NoteService {
     }
 
     const key = data.appliedSystemTemplateKey?.trim();
-    const presetTags = await NotePresetTagService.getTagNames();
-    const tags = NotePresetTagService.filterToPreset(data.tags || [], presetTags);
+    const allowedTags = await UserNoteCustomTagService.getAllowedTagNames(
+      data.userId,
+    );
+    const tags = NotePresetTagService.filterToPreset(data.tags || [], allowedTags);
     const note = new Note({
       noteBookId: data.noteBookId,
       title: data.title,
@@ -237,8 +240,8 @@ export class NoteService {
     if (data.title !== undefined) note.title = data.title;
     if (data.content !== undefined) note.content = data.content;
     if (data.tags !== undefined) {
-      const presetTags = await NotePresetTagService.getTagNames();
-      note.tags = NotePresetTagService.filterToPreset(data.tags, presetTags);
+      const allowedTags = await UserNoteCustomTagService.getAllowedTagNames(userId);
+      note.tags = NotePresetTagService.filterToPreset(data.tags, allowedTags);
     }
     const previousImages = data.images !== undefined ? [...(note.images || [])] : null;
     if (data.images !== undefined) note.images = data.images;

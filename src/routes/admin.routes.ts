@@ -35,6 +35,7 @@ import PointsRuleChangeLog from "../model/PointsRuleChangeLog";
 import { PointsService } from "../service/points.service";
 import { listByUser } from "../service/userImageAsset.service";
 import { NotePresetTagService } from "../service/notePresetTag.service";
+import { UserNoteCustomTagService } from "../service/userNoteCustomTag.service";
 import {
   InitialUserNotebookConfigService,
   MAX_INITIAL_NOTEBOOK_COUNT,
@@ -223,7 +224,7 @@ const updateUserSchema = z
 
 const adminPointsRulesPutSchema = z.object({
   pointsPerAd: z.number().int().min(1).max(1_000_000).optional(),
-  globalAdDailyLimit: z.number().int().min(1).max(999).optional(),
+  globalAdDailyLimit: z.number().int().min(0).max(999).optional(),
   uploadExchange: z
     .object({
       enabled: z.boolean().optional(),
@@ -1338,6 +1339,34 @@ authed.get(
         return;
       }
       console.error("admin image-assets:", e);
+      error(ctx, "加载失败", ErrorCodes.INTERNAL_ERROR, 500);
+    }
+  },
+);
+
+/** GET /admin/users/:id/note-tags — `:id` 为业务 userId；返回系统预设与用户自定义标签 */
+authed.get(
+  "/users/:id/note-tags",
+  requireAdminPage(ADMIN_PAGE_USERS),
+  async (ctx) => {
+    try {
+      const biz = AdminUserService.decodeBizUserIdParam(ctx.params.id);
+      if (!biz) {
+        error(ctx, "用户不存在", ErrorCodes.USER_NOT_FOUND, 404);
+        return;
+      }
+      const user = await User.findOne({ userId: biz }).select("userId").lean();
+      if (!user) {
+        error(ctx, "用户不存在", ErrorCodes.USER_NOT_FOUND, 404);
+        return;
+      }
+      const [systemTags, customTags] = await Promise.all([
+        NotePresetTagService.getTagNames(),
+        UserNoteCustomTagService.list(biz),
+      ]);
+      success(ctx, { systemTags, customTags }, "获取用户标签成功");
+    } catch (e) {
+      console.error("admin note-tags:", e);
       error(ctx, "加载失败", ErrorCodes.INTERNAL_ERROR, 500);
     }
   },

@@ -20,6 +20,8 @@ export interface IUser extends Document {
     createdAt: Date;
     updatedAt: Date;
   }>;
+  /** 用户手帐自定义标签（与系统预设合并为可选白名单），最多 12 个 */
+  customNoteTags: string[];
   createdAt: Date;
   updatedAt: Date;
 }
@@ -84,6 +86,10 @@ const userSchema = new Schema(
           },
         ),
       ],
+      default: [],
+    },
+    customNoteTags: {
+      type: [String],
       default: [],
     },
   },

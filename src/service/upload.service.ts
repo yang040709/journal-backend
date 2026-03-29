@@ -3,8 +3,6 @@ import STS from "qcloud-cos-sts";
 import UserUploadQuotaDaily, { UploadBiz } from "../model/UserUploadQuotaDaily";
 import User from "../model/User";
 import { getQuotaDateContext } from "../utils/dateKey";
-import { PointsService } from "./points.service";
-
 export interface CreateCosStsInput {
   userId: string;
   biz: UploadBiz;
@@ -43,8 +41,6 @@ export interface UploadQuotaSummary {
   todayUsedCount: number;
   todayTotalLimit: number;
   todayRemaining: number;
-  todayAdRewardCount: number;
-  todayAdRewardLimit: number;
 }
 
 const allowedImageTypes = new Set(["image/jpeg", "image/png", "image/webp"] as const);
@@ -195,9 +191,6 @@ export class UploadService {
     const { dateKey } = getQuotaDateContext();
     const baseLimit = getDailyBaseLimit();
     const extraQuotaTotal = await getUserExtraQuotaTotal(userId);
-    const rules = await PointsService.getRules();
-    const todayAdRewardLimit = await PointsService.getEffectiveDailyAdLimit(userId, rules);
-    const todayAdRewardCount = await PointsService.getTodayVideoAdCount(userId);
 
     await ensureDailyQuotaRecord(userId, dateKey, baseLimit, extraQuotaTotal);
 
@@ -212,8 +205,6 @@ export class UploadService {
       todayUsedCount,
       todayTotalLimit,
       todayRemaining: Math.max(0, todayTotalLimit - todayUsedCount),
-      todayAdRewardCount,
-      todayAdRewardLimit,
     };
   }
 

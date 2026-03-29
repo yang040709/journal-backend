@@ -12,7 +12,6 @@ import {
   reserveOneAiUsageOrThrow,
   remainingAfterUse,
 } from "./aiUsageQuota";
-import { PointsService } from "./points.service";
 
 export type AiNoteMode = "generate" | "rewrite" | "continue";
 
@@ -37,13 +36,11 @@ export interface AiJournalQuotaSummary {
   bonusQuota: number;
   dailyTotalLimit: number;
   usedToday: number;
-  todayAdRewardCount: number;
-  todayAdRewardLimit: number;
 }
 
 export class AiNoteService {
   /**
-   * 查询今日 AI 写手帐额度（不扣减、不调用模型），含今日激励广告观看次数
+   * 查询今日 AI 写手帐额度（不扣减、不调用模型）
    */
   static async getQuotaSummary(userId: string): Promise<AiJournalQuotaSummary> {
     const { dateKey } = getQuotaDateContext();
@@ -53,17 +50,12 @@ export class AiNoteService {
     const doc = await UserAiUsageDaily.findOne({ userId, dateKey }).lean();
     const used = doc?.usedCount ?? 0;
     const remainingToday = Math.max(0, dailyLimit - used);
-    const rules = await PointsService.getRules();
-    const todayAdRewardCount = await PointsService.getTodayVideoAdCount(userId);
-    const todayAdRewardLimit = await PointsService.getEffectiveDailyAdLimit(userId, rules);
     return {
       remainingToday,
       dailyBaseLimit: baseLimit,
       bonusQuota: bonus,
       dailyTotalLimit: dailyLimit,
       usedToday: used,
-      todayAdRewardCount,
-      todayAdRewardLimit,
     };
   }
 

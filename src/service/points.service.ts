@@ -9,7 +9,8 @@ import { ActivityLogger } from "../utils/ActivityLogger";
 /** 默认新用户积分、广告与兑换（与产品规格一致，可被 DB 配置覆盖） */
 export const DEFAULT_POINTS_RULES = {
   pointsPerAd: 100,
-  globalAdDailyLimit: 5,
+  /** 0 表示每日观看激励视频得积分不设上限 */
+  globalAdDailyLimit: 0,
   uploadExchange: { enabled: true, pointsCost: 100, quotaGain: 3 },
   aiExchange: { enabled: true, pointsCost: 100, quotaGain: 10 },
 } as const;
@@ -39,7 +40,7 @@ function normalizeRules(raw: unknown): PointsRulesPayload {
     globalAdDailyLimit: clampInt(
       r.globalAdDailyLimit,
       DEFAULT_POINTS_RULES.globalAdDailyLimit,
-      1,
+      0,
       999,
     ),
     uploadExchange: {
@@ -290,7 +291,7 @@ export class PointsService {
 
     const dailyLimit = await PointsService.getEffectiveDailyAdLimit(userId, rules);
     const todayCount = await PointsService.getTodayVideoAdCount(userId);
-    if (todayCount >= dailyLimit) {
+    if (dailyLimit > 0 && todayCount >= dailyLimit) {
       throw new PointsAdRewardDailyLimitExceededError({
         todayAdRewardCount: todayCount,
         todayAdRewardLimit: dailyLimit,
