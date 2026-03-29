@@ -7,13 +7,8 @@ import {
   ErrorCodes,
 } from "../utils/response";
 import { NoteService } from "../service/note.service";
-import {
-  AiJournalAdRewardDailyLimitExceededError,
-  AiJournalAdRewardInvalidError,
-  AiNoteService,
-} from "../service/aiNote.service";
+import { AiNoteService } from "../service/aiNote.service";
 import { z } from "zod";
-import { logger } from "../utils/logger";
 import { NotePresetTagService } from "../service/notePresetTag.service";
 
 const router = new Router({
@@ -130,13 +125,6 @@ const batchDeleteSchema = z.object({
 });
 
 // AI 写手帐
-const aiAdRewardSchema = z.object({
-  adProvider: z.string().trim().min(1, "广告平台不能为空").max(100, "广告平台字段过长"),
-  adUnitId: z.string().trim().min(1, "广告位不能为空").max(200, "广告位字段过长"),
-  rewardToken: z.string().trim().min(1, "奖励凭证不能为空").max(255, "奖励凭证字段过长"),
-  requestId: z.string().trim().max(255, "请求ID字段过长").optional(),
-});
-
 const aiGenerateSchema = z.object({
   mode: z.enum(["generate", "rewrite", "continue"]),
   title: z.string().optional(),
@@ -591,54 +579,6 @@ router.get("/ai/quota", async (ctx: AuthContext) => {
   } catch (err) {
     console.error("查询 AI 额度失败:", err);
     error(ctx, "查询 AI 额度失败", ErrorCodes.INTERNAL_ERROR, 500);
-  }
-});
-
-router.post("/ai/quota/ad-reward", async (ctx: AuthContext) => {
-  const userId = ctx.user!.userId;
-  const requestId = ctx.state.requestId || "unknown";
-
-  try {
-    const body = aiAdRewardSchema.parse(ctx.request.body);
-    const result = await AiNoteService.grantAiJournalAdReward(userId, {
-      adProvider: body.adProvider,
-      adUnitId: body.adUnitId,
-      rewardToken: body.rewardToken,
-      requestId: body.requestId || requestId,
-    });
-
-    success(
-      ctx,
-      {
-        rewardQuota: result.rewardQuota,
-        bonusQuota: result.bonusQuota,
-        duplicated: result.duplicated,
-      },
-      result.duplicated ? "奖励已发放，无需重复领取" : "领取奖励成功",
-    );
-  } catch (err) {
-    if (err instanceof z.ZodError) {
-      error(ctx, "参数验证失败", ErrorCodes.PARAM_ERROR, 400);
-      return;
-    }
-
-    if (err instanceof AiJournalAdRewardInvalidError) {
-      error(ctx, err.message, ErrorCodes.AI_AD_REWARD_INVALID, 400);
-      return;
-    }
-
-    if (err instanceof AiJournalAdRewardDailyLimitExceededError) {
-      error(ctx, err.message, ErrorCodes.AI_AD_REWARD_DAILY_LIMIT_EXCEEDED, 400);
-      return;
-    }
-
-    const message = err instanceof Error ? err.message : "领取奖励失败";
-    logger.error("领取 AI 写手帐额度奖励失败", {
-      requestId,
-      userId,
-      error: message,
-    });
-    error(ctx, "领取奖励失败，请稍后重试", ErrorCodes.AI_AD_REWARD_PROVIDER_ERROR, 500);
   }
 });
 

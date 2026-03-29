@@ -67,11 +67,11 @@ jobs:
             COS_UPLOAD_DIR=journal
             COS_STS_DURATION_SECONDS=1800
             COS_MAX_FILE_SIZE_MB=10
-            UPLOAD_DAILY_BASE_LIMIT=15
+            UPLOAD_DAILY_BASE_LIMIT=9
             DEEPSEEK_API_KEY=${{ secrets.DEEPSEEK_API_KEY }}
             DEEPSEEK_API_BASE=https://api.deepseek.com
             DEEPSEEK_MODEL=deepseek-chat
-            AI_DAILY_BASE_LIMIT=5
+            AI_DAILY_BASE_LIMIT=10
             ADMIN_JWT_SECRET=${{ secrets.ADMIN_JWT_SECRET }}
             ADMIN_JWT_EXPIRES_IN=7d
             ADMIN_BOOTSTRAP_USERNAME=${{ secrets.ADMIN_BOOTSTRAP_USERNAME }}

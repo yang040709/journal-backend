@@ -136,6 +136,22 @@ export class UserService {
   }
 
   /**
+   * 记录客户端以本地 JWT 会话启动（非 code 登录路径），写入活动日志且不阻塞调用方
+   */
+  static recordClientSession(userId: string): void {
+    void ActivityLogger.record(
+      {
+        type: "session",
+        target: "user",
+        targetId: userId,
+        title: "小程序启动（本地会话）",
+        userId,
+      },
+      { blocking: false },
+    );
+  }
+
+  /**
    * 获取用户信息
    */
   static async getUserInfo(userId: string) {

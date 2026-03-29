@@ -3,6 +3,8 @@ import { Schema, model, Document } from "mongoose";
 export const SYSTEM_CONFIG_COVERS_KEY = "system_covers";
 export const SYSTEM_CONFIG_NOTE_PRESET_TAGS_KEY = "note_preset_tags";
 export const SYSTEM_CONFIG_INITIAL_NOTEBOOKS_KEY = "initial_user_notebooks";
+/** 积分规则（JSON 存于 pointsRules，见 PointsService） */
+export const SYSTEM_CONFIG_POINTS_RULES_KEY = "points_rules";
 
 export type InitialNotebookTemplate = { title: string; coverImg: string };
 
@@ -15,6 +17,8 @@ export interface ISystemConfig extends Document {
   initialNotebookTemplates: InitialNotebookTemplate[];
   /** 实际创建数量：对 i=0..count-1 取 templates[i % len] */
   initialNotebookCount: number;
+  /** 仅 configKey=points_rules 使用：积分/广告/兑换配置 */
+  pointsRules?: Record<string, unknown> | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -47,6 +51,9 @@ const systemConfigSchema = new Schema(
     initialNotebookCount: {
       type: Number,
       default: 0,
+    },
+    pointsRules: {
+      type: Schema.Types.Mixed,
     },
   },
   { timestamps: true },

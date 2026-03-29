@@ -112,6 +112,37 @@ Authorization: Bearer <your-jwt-token>
 | GET  | `/stats/activity`        | 获取活动时间线     |
 | GET  | `/stats/note-book-usage` | 获取手帐本使用统计 |
 
+#### 管理端用户（`/admin/users/...`，需管理员 JWT）
+
+路径中的 `:id` **仅为业务 `userId`**（如微信 openid），**不是** MongoDB `User._id`。含特殊字符时应对路径段做 URL 编码。若使用旧链接将 Mongo `_id` 放在该段，将返回 404。
+
+| 方法 | 路径 | 描述 |
+| ---- | ---- | ---- |
+| GET | `/admin/users/:id` | 用户摘要 |
+| GET | `/admin/users/:id/overview` | 用户 360° |
+| GET | `/admin/users/:id/activity` | 该用户 Activity 分页 |
+| GET | `/admin/users/:id/covers` | 封面数据 |
+| PUT | `/admin/users/:id` | 更新额度、`points`（改积分须带 `pointsAdjustReason`）、`adRewardDailyLimit`（`null` 清除覆盖）等 |
+| DELETE | `/admin/users/:id` | 删除用户及关联数据 |
+
+#### 积分（C 端）
+
+| 方法 | 路径 | 描述 |
+| ---- | ---- | ---- |
+| GET | `/points/summary` | 积分余额、今日激励视频进度、兑换规则 |
+| POST | `/points/ad-reward` | 激励视频后发积分 |
+| POST | `/points/exchange` | body `{ kind: "upload" \| "ai" }` 兑换永久额度/AI 次数 |
+
+#### 积分规则（管理端，超级管理员）
+
+| 方法 | 路径 | 描述 |
+| ---- | ---- | ---- |
+| GET | `/admin/points/rules` | 当前规则 |
+| PUT | `/admin/points/rules` | 更新规则（写入变更日志） |
+| GET | `/admin/points/rule-change-logs` | 规则变更分页记录 |
+
+**已移除**：`POST /notes/ai/quota/ad-reward`、`POST /api/upload/quota/ad-reward`（改为统一 `/points/ad-reward`）。
+
 ### 数据模型
 
 #### 手帐本 (NoteBook)

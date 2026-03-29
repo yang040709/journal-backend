@@ -31,6 +31,8 @@ import { AdminOperationsReportService } from "../service/adminOperationsReport.s
 import { AdminQuotaService } from "../service/adminQuota.service";
 import { CoverService } from "../service/cover.service";
 import User from "../model/User";
+import PointsRuleChangeLog from "../model/PointsRuleChangeLog";
+import { PointsService } from "../service/points.service";
 import { listByUser } from "../service/userImageAsset.service";
 import { NotePresetTagService } from "../service/notePresetTag.service";
 import {
@@ -101,6 +103,34 @@ const userListQuerySchema = z.object({
   createdAtTo: z.coerce.number().optional(),
 });
 
+/** 用户 Activity 分页：id 为 User MongoDB _id */
+const userActivityQuerySchema = z.object({
+  page: z.coerce.number().int().positive().optional().default(1),
+  limit: z.coerce.number().int().min(1).max(100).optional().default(20),
+  type: z
+    .enum([
+      "create",
+      "update",
+      "delete",
+      "share_enable",
+      "share_disable",
+      "session",
+    ])
+    .optional(),
+  target: z
+    .enum(["noteBook", "note", "reminder", "template", "cover", "user"])
+    .optional(),
+});
+
+/** 全站 Activity 分页；可选 userId 为业务用户 id（与 Activity.userId 一致） */
+const activityListQuerySchema = userActivityQuerySchema.extend({
+  userId: z.preprocess((v) => {
+    if (v === undefined || v === null || v === "") return undefined;
+    const s = String(v).trim();
+    return s.length ? s : undefined;
+  }, z.string().max(128).optional()),
+});
+
 const quotaDailyListQuerySchema = z.object({
   page: z.coerce.number().int().positive().optional().default(1),
   limit: z.coerce.number().int().min(1).max(100).optional().default(20),
@@ -122,7 +152,7 @@ const adRewardLogListQuerySchema = z.object({
   page: z.coerce.number().int().positive().optional().default(1),
   limit: z.coerce.number().int().min(1).max(100).optional().default(20),
   userId: z.string().optional(),
-  rewardType: z.enum(["upload_quota", "ai_journal_quota"]).optional(),
+  rewardType: z.enum(["upload_quota", "ai_journal_quota", "points"]).optional(),
   createdAtFrom: z.coerce.number().optional(),
   createdAtTo: z.coerce.number().optional(),
 });
@@ -173,9 +203,41 @@ const createUserSchema = z.object({
   initDefaultNoteBooks: z.boolean().optional(),
 });
 
-const updateUserSchema = z.object({
-  aiBonusQuota: z.number().int().min(0).optional(),
-  uploadExtraQuotaTotal: z.number().int().min(0).optional(),
+const updateUserSchema = z
+  .object({
+    aiBonusQuota: z.number().int().min(0).optional(),
+    uploadExtraQuotaTotal: z.number().int().min(0).optional(),
+    points: z.number().int().min(0).optional(),
+    pointsAdjustReason: z.string().trim().min(1).max(2000).optional(),
+    adRewardDailyLimit: z.union([z.number().int().min(1).max(999), z.null()]).optional(),
+  })
+  .superRefine((val, ctx) => {
+    if (val.points !== undefined && (!val.pointsAdjustReason || !val.pointsAdjustReason.trim())) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "调整积分时必须填写原因备注",
+        path: ["pointsAdjustReason"],
+      });
+    }
+  });
+
+const adminPointsRulesPutSchema = z.object({
+  pointsPerAd: z.number().int().min(1).max(1_000_000).optional(),
+  globalAdDailyLimit: z.number().int().min(1).max(999).optional(),
+  uploadExchange: z
+    .object({
+      enabled: z.boolean().optional(),
+      pointsCost: z.number().int().min(1).max(1_000_000).optional(),
+      quotaGain: z.number().int().min(1).max(1_000_000).optional(),
+    })
+    .optional(),
+  aiExchange: z
+    .object({
+      enabled: z.boolean().optional(),
+      pointsCost: z.number().int().min(1).max(1_000_000).optional(),
+      quotaGain: z.number().int().min(1).max(1_000_000).optional(),
+    })
+    .optional(),
 });
 
 const createAdminSchema = z.object({
@@ -1091,11 +1153,54 @@ authed.get(
   },
 );
 
+/**
+ * GET /admin/activity
+ * 分页查询全站用户 Activity（时间倒序）；可选 query：userId（业务 id）、type、target
+ */
+authed.get(
+  "/activity",
+  requireAdminPage(ADMIN_PAGE_USERS),
+  async (ctx) => {
+    try {
+      const q = activityListQuerySchema.parse(ctx.query);
+      const result = await AdminUserService.listAllActivities({
+        page: q.page,
+        limit: q.limit,
+        userId: q.userId,
+        type: q.type,
+        target: q.target,
+      });
+      paginatedSuccess(
+        ctx,
+        result.items,
+        result.total,
+        result.page,
+        result.limit,
+        "获取活动日志成功",
+      );
+    } catch (e) {
+      if (e instanceof z.ZodError) {
+        error(ctx, "参数验证失败", ErrorCodes.PARAM_ERROR, 400);
+        return;
+      }
+      console.error("admin /activity:", e);
+      error(ctx, "获取活动日志失败", ErrorCodes.INTERNAL_ERROR, 500);
+    }
+  },
+);
+
 authed.get(
   "/users/:id/overview",
   requireAdminPage(ADMIN_PAGE_USERS),
   async (ctx) => {
-    const data = await AdminUserService.getUserOverview(ctx.params.id);
+    const mongoId = await AdminUserService.resolveMongoIdFromBizUserRouteParam(
+      ctx.params.id,
+    );
+    if (!mongoId) {
+      error(ctx, "用户不存在", ErrorCodes.USER_NOT_FOUND, 404);
+      return;
+    }
+    const data = await AdminUserService.getUserOverview(mongoId);
     if (!data) {
       error(ctx, "用户不存在", ErrorCodes.USER_NOT_FOUND, 404);
       return;
@@ -1104,11 +1209,64 @@ authed.get(
   },
 );
 
+/**
+ * GET /admin/users/:id/activity
+ * 分页查询指定用户的 Activity 时间线；`:id` 为业务 userId；可选 query：type、target
+ */
+authed.get(
+  "/users/:id/activity",
+  requireAdminPage(ADMIN_PAGE_USERS),
+  async (ctx) => {
+    try {
+      const mongoId = await AdminUserService.resolveMongoIdFromBizUserRouteParam(
+        ctx.params.id,
+      );
+      if (!mongoId) {
+        error(ctx, "用户不存在", ErrorCodes.USER_NOT_FOUND, 404);
+        return;
+      }
+      const q = userActivityQuerySchema.parse(ctx.query);
+      const result = await AdminUserService.listUserActivities(mongoId, {
+        page: q.page,
+        limit: q.limit,
+        type: q.type,
+        target: q.target,
+      });
+      if (!result) {
+        error(ctx, "用户不存在", ErrorCodes.USER_NOT_FOUND, 404);
+        return;
+      }
+      paginatedSuccess(
+        ctx,
+        result.items,
+        result.total,
+        result.page,
+        result.limit,
+        "获取用户活动日志成功",
+      );
+    } catch (e) {
+      if (e instanceof z.ZodError) {
+        error(ctx, "参数验证失败", ErrorCodes.PARAM_ERROR, 400);
+        return;
+      }
+      console.error("admin users/:id/activity:", e);
+      error(ctx, "获取用户活动日志失败", ErrorCodes.INTERNAL_ERROR, 500);
+    }
+  },
+);
+
 authed.get(
   "/users/:id",
   requireAdminPage(ADMIN_PAGE_USERS),
   async (ctx) => {
-    const user = await AdminUserService.getUserById(ctx.params.id);
+    const mongoId = await AdminUserService.resolveMongoIdFromBizUserRouteParam(
+      ctx.params.id,
+    );
+    if (!mongoId) {
+      error(ctx, "用户不存在", ErrorCodes.USER_NOT_FOUND, 404);
+      return;
+    }
+    const user = await AdminUserService.getUserById(mongoId);
     if (!user) {
       error(ctx, "用户不存在", ErrorCodes.USER_NOT_FOUND, 404);
       return;
@@ -1122,7 +1280,14 @@ authed.get(
   requireAdminPage(ADMIN_PAGE_USERS),
   async (ctx) => {
     try {
-      const data = await AdminUserCoverService.getCoversPayload(ctx.params.id);
+      const mongoId = await AdminUserService.resolveMongoIdFromBizUserRouteParam(
+        ctx.params.id,
+      );
+      if (!mongoId) {
+        error(ctx, "用户不存在", ErrorCodes.USER_NOT_FOUND, 404);
+        return;
+      }
+      const data = await AdminUserCoverService.getCoversPayload(mongoId);
       success(ctx, data);
     } catch (e) {
       error(
@@ -1140,8 +1305,12 @@ authed.get(
   requireAdminPage(ADMIN_PAGE_USERS),
   async (ctx) => {
     try {
-      const mongoId = ctx.params.id;
-      const user = await User.findById(mongoId).select("userId").lean();
+      const biz = AdminUserService.decodeBizUserIdParam(ctx.params.id);
+      if (!biz) {
+        error(ctx, "用户不存在", ErrorCodes.USER_NOT_FOUND, 404);
+        return;
+      }
+      const user = await User.findOne({ userId: biz }).select("userId").lean();
       if (!user) {
         error(ctx, "用户不存在", ErrorCodes.USER_NOT_FOUND, 404);
         return;
@@ -1179,9 +1348,16 @@ authed.put(
   requireAdminPage(ADMIN_PAGE_USERS),
   async (ctx) => {
     try {
+      const mongoId = await AdminUserService.resolveMongoIdFromBizUserRouteParam(
+        ctx.params.id,
+      );
+      if (!mongoId) {
+        error(ctx, "用户不存在", ErrorCodes.USER_NOT_FOUND, 404);
+        return;
+      }
       const body = adminQuickCoversBodySchema.parse(ctx.request.body);
       const data = await AdminUserCoverService.replaceQuickCovers(
-        ctx.params.id,
+        mongoId,
         body.covers,
       );
       success(ctx, data);
@@ -1200,8 +1376,15 @@ authed.post(
   requireAdminPage(ADMIN_PAGE_USERS),
   async (ctx) => {
     try {
+      const mongoId = await AdminUserService.resolveMongoIdFromBizUserRouteParam(
+        ctx.params.id,
+      );
+      if (!mongoId) {
+        error(ctx, "用户不存在", ErrorCodes.USER_NOT_FOUND, 404);
+        return;
+      }
       const body = adminCustomCoverBodySchema.parse(ctx.request.body);
-      const items = await AdminUserCoverService.addCustomCover(ctx.params.id, {
+      const items = await AdminUserCoverService.addCustomCover(mongoId, {
         coverUrl: body.coverUrl,
         thumbUrl: body.thumbUrl,
         thumbKey: body.thumbKey,
@@ -1222,9 +1405,16 @@ authed.put(
   requireAdminPage(ADMIN_PAGE_USERS),
   async (ctx) => {
     try {
+      const mongoId = await AdminUserService.resolveMongoIdFromBizUserRouteParam(
+        ctx.params.id,
+      );
+      if (!mongoId) {
+        error(ctx, "用户不存在", ErrorCodes.USER_NOT_FOUND, 404);
+        return;
+      }
       const body = adminCustomCoverBodySchema.parse(ctx.request.body);
       const items = await AdminUserCoverService.updateCustomCover(
-        ctx.params.id,
+        mongoId,
         ctx.params.coverId,
         {
           coverUrl: body.coverUrl,
@@ -1248,8 +1438,15 @@ authed.delete(
   requireAdminPage(ADMIN_PAGE_USERS),
   async (ctx) => {
     try {
-      const items = await AdminUserCoverService.deleteCustomCover(
+      const mongoId = await AdminUserService.resolveMongoIdFromBizUserRouteParam(
         ctx.params.id,
+      );
+      if (!mongoId) {
+        error(ctx, "用户不存在", ErrorCodes.USER_NOT_FOUND, 404);
+        return;
+      }
+      const items = await AdminUserCoverService.deleteCustomCover(
+        mongoId,
         ctx.params.coverId,
       );
       success(ctx, items);
@@ -1286,8 +1483,19 @@ authed.put(
   requireAdminPage(ADMIN_PAGE_USERS),
   async (ctx) => {
     try {
+      const mongoId = await AdminUserService.resolveMongoIdFromBizUserRouteParam(
+        ctx.params.id,
+      );
+      if (!mongoId) {
+        error(ctx, "用户不存在", ErrorCodes.USER_NOT_FOUND, 404);
+        return;
+      }
       const body = updateUserSchema.parse(ctx.request.body);
-      const user = await AdminUserService.updateUser(ctx.params.id, body);
+      const user = await AdminUserService.updateUser(
+        mongoId,
+        body,
+        ctx.state.admin!,
+      );
       if (!user) {
         error(ctx, "用户不存在", ErrorCodes.USER_NOT_FOUND, 404);
         return;
@@ -1303,11 +1511,93 @@ authed.put(
   },
 );
 
+authed.get(
+  "/points/rules",
+  requireSuperAdmin(),
+  async (ctx) => {
+    try {
+      const rules = await PointsService.getRules();
+      success(ctx, rules);
+    } catch (e) {
+      error(
+        ctx,
+        e instanceof Error ? e.message : "加载失败",
+        ErrorCodes.INTERNAL_ERROR,
+        500,
+      );
+    }
+  },
+);
+
+authed.put(
+  "/points/rules",
+  requireSuperAdmin(),
+  async (ctx) => {
+    try {
+      const body = adminPointsRulesPutSchema.parse(ctx.request.body);
+      const admin = ctx.state.admin!;
+      const rules = await PointsService.setRulesFromAdmin(body, {
+        id: admin.id,
+        username: admin.username,
+      });
+      success(ctx, rules);
+    } catch (e) {
+      if (e instanceof z.ZodError) {
+        error(ctx, "参数验证失败", ErrorCodes.PARAM_ERROR, 400);
+        return;
+      }
+      error(
+        ctx,
+        e instanceof Error ? e.message : "保存失败",
+        ErrorCodes.PARAM_ERROR,
+      );
+    }
+  },
+);
+
+const pointsRuleLogQuerySchema = z.object({
+  page: z.coerce.number().int().positive().optional().default(1),
+  limit: z.coerce.number().int().min(1).max(100).optional().default(20),
+});
+
+authed.get(
+  "/points/rule-change-logs",
+  requireSuperAdmin(),
+  async (ctx) => {
+    try {
+      const q = pointsRuleLogQuerySchema.parse(ctx.query);
+      const skip = (q.page - 1) * q.limit;
+      const [rows, total] = await Promise.all([
+        PointsRuleChangeLog.find({})
+          .sort({ createdAt: -1 })
+          .skip(skip)
+          .limit(q.limit)
+          .lean(),
+        PointsRuleChangeLog.countDocuments({}),
+      ]);
+      paginatedSuccess(ctx, rows, total, q.page, q.limit);
+    } catch (e) {
+      error(
+        ctx,
+        e instanceof Error ? e.message : "参数错误",
+        ErrorCodes.PARAM_ERROR,
+      );
+    }
+  },
+);
+
 authed.delete(
   "/users/:id",
   requireAdminPage(ADMIN_PAGE_USERS),
   async (ctx) => {
-    const ok = await AdminUserService.deleteUserById(ctx.params.id);
+    const mongoId = await AdminUserService.resolveMongoIdFromBizUserRouteParam(
+      ctx.params.id,
+    );
+    if (!mongoId) {
+      error(ctx, "用户不存在", ErrorCodes.USER_NOT_FOUND, 404);
+      return;
+    }
+    const ok = await AdminUserService.deleteUserById(mongoId);
     if (!ok) {
       error(ctx, "用户不存在", ErrorCodes.USER_NOT_FOUND, 404);
       return;

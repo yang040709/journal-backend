@@ -1,10 +1,12 @@
 import User, { IUser } from "../model/User";
+import type { IActivity } from "../model/Activity";
 import Note from "../model/Note";
 import NoteBook from "../model/NoteBook";
 import Reminder from "../model/Reminder";
 import Template from "../model/Template";
 import Activity from "../model/Activity";
 import UserAdRewardLog from "../model/UserAdRewardLog";
+import PointsLedger from "../model/PointsLedger";
 import UserUploadQuotaDaily from "../model/UserUploadQuotaDaily";
 import UserAiUsageDaily from "../model/UserAiUsageDaily";
 import { getAiDailyBaseLimit } from "./aiUsageQuota";
@@ -12,10 +14,15 @@ import { getUploadDailyBaseLimit } from "./upload.service";
 import { getQuotaDateContext } from "../utils/dateKey";
 import { CoverService } from "./cover.service";
 import { UserService } from "./user.service";
+import { PointsService } from "./points.service";
+import { LeanActivity } from "../types/mongoose";
+import { toLeanActivityArray } from "../utils/typeUtils";
 
 type LeanUserRow = {
   _id: { toString: () => string };
   userId: string;
+  points?: number;
+  adRewardDailyLimit?: number | null;
   aiBonusQuota?: number;
   uploadExtraQuotaTotal?: number;
   createdAt?: Date;
@@ -108,9 +115,15 @@ export class AdminUserService {
   }
 
   static serializeUser(user: LeanUserRow) {
+    const pts = user.points;
     return {
       id: user._id.toString(),
       userId: user.userId,
+      points: pts === undefined || pts === null ? 200 : Math.max(0, Math.floor(Number(pts))),
+      adRewardDailyLimit:
+        typeof user.adRewardDailyLimit === "number" && user.adRewardDailyLimit >= 1
+          ? user.adRewardDailyLimit
+          : null,
       aiBonusQuota: user.aiBonusQuota ?? 0,
       uploadExtraQuotaTotal: user.uploadExtraQuotaTotal ?? 0,
       createdAt: user.createdAt,
@@ -124,6 +137,111 @@ export class AdminUserService {
       return null;
     }
     return AdminUserService.serializeUser(user);
+  }
+
+  /** 管理端路由 `:id` 仅为业务 userId；解码后按 userId 查库 */
+  static decodeBizUserIdParam(raw: string): string {
+    const t = String(raw ?? "").trim();
+    if (!t) {
+      return "";
+    }
+    try {
+      return decodeURIComponent(t).trim();
+    } catch {
+      return t;
+    }
+  }
+
+  /** 将路由中的业务 userId 解析为 User 文档 MongoDB `_id` */
+  static async resolveMongoIdFromBizUserRouteParam(
+    raw: string,
+  ): Promise<string | null> {
+    const biz = AdminUserService.decodeBizUserIdParam(raw);
+    if (!biz) {
+      return null;
+    }
+    const user = await User.findOne({ userId: biz }).select("_id").lean();
+    return user ? user._id.toString() : null;
+  }
+
+  /** 管理端分页查询某用户的 Activity（mongoUserId 为 User._id） */
+  static async listUserActivities(
+    mongoUserId: string,
+    params: {
+      page: number;
+      limit: number;
+      type?: IActivity["type"];
+      target?: IActivity["target"];
+    },
+  ): Promise<{ items: LeanActivity[]; total: number; page: number; limit: number } | null> {
+    const user = await User.findById(mongoUserId).select("userId").lean();
+    if (!user) {
+      return null;
+    }
+    const bizUserId = String((user as { userId?: string }).userId || "").trim();
+    if (!bizUserId) {
+      return null;
+    }
+    const page = Math.max(1, params.page);
+    const limit = Math.min(100, Math.max(1, params.limit));
+    const skip = (page - 1) * limit;
+
+    const q: Record<string, unknown> = { userId: bizUserId };
+    if (params.type) {
+      q.type = params.type;
+    }
+    if (params.target) {
+      q.target = params.target;
+    }
+
+    const [docs, total] = await Promise.all([
+      Activity.find(q).sort({ createdAt: -1 }).skip(skip).limit(limit).lean(),
+      Activity.countDocuments(q),
+    ]);
+
+    return {
+      items: toLeanActivityArray(docs),
+      total,
+      page,
+      limit,
+    };
+  }
+
+  /** 管理端分页查询全站 Activity；可选按业务 userId / type / target 缩小范围 */
+  static async listAllActivities(params: {
+    page: number;
+    limit: number;
+    userId?: string;
+    type?: IActivity["type"];
+    target?: IActivity["target"];
+  }): Promise<{ items: LeanActivity[]; total: number; page: number; limit: number }> {
+    const page = Math.max(1, params.page);
+    const limit = Math.min(100, Math.max(1, params.limit));
+    const skip = (page - 1) * limit;
+
+    const q: Record<string, unknown> = {};
+    const uid = params.userId?.trim();
+    if (uid) {
+      q.userId = uid;
+    }
+    if (params.type) {
+      q.type = params.type;
+    }
+    if (params.target) {
+      q.target = params.target;
+    }
+
+    const [docs, total] = await Promise.all([
+      Activity.find(q).sort({ createdAt: -1 }).skip(skip).limit(limit).lean(),
+      Activity.countDocuments(q),
+    ]);
+
+    return {
+      items: toLeanActivityArray(docs),
+      total,
+      page,
+      limit,
+    };
   }
 
   static async getUserByUserId(userId: string) {
@@ -200,6 +318,7 @@ export class AdminUserService {
     const sysCovers = await CoverService.getSystemCovers();
     const user = await User.create({
       userId,
+      points: 200,
       quickCovers: sysCovers.slice(0, 11),
       quickCoversUpdatedAt: new Date(),
     });
@@ -211,9 +330,24 @@ export class AdminUserService {
 
   static async updateUser(
     id: string,
-    data: { aiBonusQuota?: number; uploadExtraQuotaTotal?: number },
+    data: {
+      aiBonusQuota?: number;
+      uploadExtraQuotaTotal?: number;
+      points?: number;
+      pointsAdjustReason?: string;
+      adRewardDailyLimit?: number | null;
+    },
+    admin: { id: string; username: string },
   ): Promise<IUser | null> {
-    const user = await User.findById(id);
+    let user = await User.findById(id);
+    if (!user) {
+      return null;
+    }
+    if (data.points !== undefined) {
+      const reason = (data.pointsAdjustReason || "").trim() || "后台调整";
+      await PointsService.adminSetPoints(user.userId, data.points, reason, admin);
+    }
+    user = await User.findById(id);
     if (!user) {
       return null;
     }
@@ -222,6 +356,11 @@ export class AdminUserService {
     }
     if (data.uploadExtraQuotaTotal !== undefined) {
       user.uploadExtraQuotaTotal = Math.max(0, data.uploadExtraQuotaTotal);
+    }
+    if (data.adRewardDailyLimit === null) {
+      user.set("adRewardDailyLimit", undefined);
+    } else if (data.adRewardDailyLimit !== undefined) {
+      user.adRewardDailyLimit = data.adRewardDailyLimit;
     }
     await user.save();
     return user;
@@ -240,6 +379,7 @@ export class AdminUserService {
       Template.deleteMany({ userId }),
       Activity.deleteMany({ userId }),
       UserAdRewardLog.deleteMany({ userId }),
+      PointsLedger.deleteMany({ userId }),
       UserUploadQuotaDaily.deleteMany({ userId }),
       UserAiUsageDaily.deleteMany({ userId }),
     ]);

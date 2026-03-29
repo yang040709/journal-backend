@@ -48,6 +48,36 @@ export interface SearchParams {
   endTime?: number;
 }
 
+/** 公开分享接口返回体：不暴露 userId 等账号字段；isOwner 由服务端根据可选 JWT 计算 */
+export interface SharedNoteView {
+  id: string;
+  title: string;
+  content: string;
+  tags: string[];
+  images: INoteImage[];
+  createdAt: unknown;
+  updatedAt: unknown;
+  isOwner: boolean;
+}
+
+export function toSharedNoteView(
+  lean: LeanNote,
+  viewerUserId?: string | null,
+): SharedNoteView {
+  return {
+    id: lean.id,
+    title: lean.title,
+    content: lean.content,
+    tags: lean.tags ?? [],
+    images: lean.images ?? [],
+    createdAt: lean.createdAt,
+    updatedAt: lean.updatedAt,
+    isOwner: Boolean(
+      viewerUserId && lean.userId && viewerUserId === lean.userId,
+    ),
+  };
+}
+
 export interface SearchNotesResult {
   items: LeanNote[];
   total: number;
@@ -403,17 +433,21 @@ export class NoteService {
   }
 
   /**
-   * 通过shareId获取分享的手帐
-   * @param shareId 分享ID
-   * @returns 手帐信息，如果不存在或未分享则返回null
+   * 通过 shareId 获取分享页展示数据（不含 userId；isOwner 依赖可选登录）
    */
-  static async getNoteByShareId(shareId: string): Promise<LeanNote | null> {
+  static async getSharedNoteForPublic(
+    shareId: string,
+    viewerUserId?: string | null,
+  ): Promise<SharedNoteView | null> {
     const note = await Note.findOne({
       shareId,
       isShare: true,
     }).lean();
 
-    return note ? toLeanNote(note) : null;
+    if (!note) {
+      return null;
+    }
+    return toSharedNoteView(toLeanNote(note), viewerUserId);
   }
 
   /**

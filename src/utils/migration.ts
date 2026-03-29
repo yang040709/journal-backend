@@ -11,8 +11,7 @@ import { coverPreviewList } from "@/constant/img.js";
  */
 export async function runMigrations() {
   console.log("🔧 检查数据库迁移...");
-  // migrateShare();
-  // migrateUsers();
+  await migrateUserPointsDefault();
 }
 
 async function migrateShare() {
@@ -74,4 +73,20 @@ async function migrateUsers() {
     { timestamps: false }, // 阻止 updatedAt 自动更新
   );
   console.log(`更新了 ${result.modifiedCount} 个旧用户数据`);
+}
+
+/** 积分功能：老用户补默认 200 分（无 points 字段或为空） */
+async function migrateUserPointsDefault() {
+  try {
+    const result = await User.updateMany(
+      { $or: [{ points: { $exists: false } }, { points: null }] },
+      { $set: { points: 200 } },
+      { timestamps: false },
+    );
+    if (result.modifiedCount > 0) {
+      console.log(`✅ 积分迁移：为 ${result.modifiedCount} 个用户补默认积分 200`);
+    }
+  } catch (e) {
+    console.error("❌ 积分字段迁移失败:", e);
+  }
 }

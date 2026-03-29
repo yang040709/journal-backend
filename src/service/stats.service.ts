@@ -11,8 +11,8 @@ export interface UserStats {
 }
 
 export interface ActivityItem {
-  type: "create" | "update" | "delete";
-  target: "noteBook" | "note" | "reminder" | "template";
+  type: "create" | "update" | "delete" | "session";
+  target: "noteBook" | "note" | "reminder" | "template" | "user";
   targetId: string;
   title: string;
   timestamp: number;

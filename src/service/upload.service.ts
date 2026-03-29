@@ -2,8 +2,8 @@ import { randomUUID } from "crypto";
 import STS from "qcloud-cos-sts";
 import UserUploadQuotaDaily, { UploadBiz } from "../model/UserUploadQuotaDaily";
 import User from "../model/User";
-import UserAdRewardLog from "../model/UserAdRewardLog";
 import { getQuotaDateContext } from "../utils/dateKey";
+import { PointsService } from "./points.service";
 
 export interface CreateCosStsInput {
   userId: string;
@@ -47,19 +47,6 @@ export interface UploadQuotaSummary {
   todayAdRewardLimit: number;
 }
 
-export interface GrantUploadAdRewardInput {
-  adProvider: string;
-  adUnitId: string;
-  rewardToken: string;
-  requestId?: string;
-}
-
-export interface GrantUploadAdRewardResult {
-  rewardQuota: number;
-  extraQuotaTotal: number;
-  duplicated: boolean;
-}
-
 const allowedImageTypes = new Set(["image/jpeg", "image/png", "image/webp"] as const);
 const allowedBizTypes = new Set<UploadBiz>(["note", "cover"]);
 
@@ -75,26 +62,6 @@ export class UploadDailyLimitExceededError extends Error {
   constructor(details: { dateKey: string; totalLimit: number; usedCount: number; remaining: number }) {
     super(`今日上传额度已用完（总额度${details.totalLimit}张）`);
     this.name = "UploadDailyLimitExceededError";
-    this.details = details;
-  }
-}
-
-export class UploadAdRewardInvalidError extends Error {
-  public readonly code = "UPLOAD_AD_REWARD_INVALID";
-
-  constructor(message: string) {
-    super(message);
-    this.name = "UploadAdRewardInvalidError";
-  }
-}
-
-export class UploadAdRewardDailyLimitExceededError extends Error {
-  public readonly code = "UPLOAD_AD_REWARD_DAILY_LIMIT_EXCEEDED";
-  public readonly details: { todayAdRewardCount: number; todayAdRewardLimit: number };
-
-  constructor(details: { todayAdRewardCount: number; todayAdRewardLimit: number }) {
-    super(`今日观看广告次数已达上限（${details.todayAdRewardCount}/${details.todayAdRewardLimit}次），明日再来`);
-    this.name = "UploadAdRewardDailyLimitExceededError";
     this.details = details;
   }
 }
@@ -122,18 +89,6 @@ export const getUploadDailyBaseLimit = (): number => {
 
 const getDailyBaseLimit = (): number => getUploadDailyBaseLimit();
 
-const getAdRewardQuotaValue = (): number => {
-  const parsed = Number(process.env.UPLOAD_AD_REWARD_VALUE ?? 3);
-  if (!Number.isFinite(parsed) || parsed <= 0) return 3;
-  return Math.floor(parsed);
-};
-
-const getDailyAdRewardLimit = (): number => {
-  const parsed = Number(process.env.UPLOAD_AD_REWARD_DAILY_LIMIT ?? 6);
-  if (!Number.isFinite(parsed) || parsed <= 0) return 6;
-  return Math.floor(parsed);
-};
-
 const getUserExtraQuotaTotal = async (userId: string): Promise<number> => {
   const user = await User.findOne({ userId }).select("uploadExtraQuotaTotal").lean();
   if (!user) return 0;
@@ -141,19 +96,12 @@ const getUserExtraQuotaTotal = async (userId: string): Promise<number> => {
   return Math.max(0, Math.floor(value));
 };
 
-const getTodayAdRewardCount = async (userId: string): Promise<number> => {
-  const { dateKey } = getQuotaDateContext();
-  const startOfDay = new Date(`${dateKey}T00:00:00+08:00`);
-  const endOfDay = new Date(`${dateKey}T23:59:59.999+08:00`);
-  const count = await UserAdRewardLog.countDocuments({
-    userId,
-    rewardType: "upload_quota",
-    createdAt: { $gte: startOfDay, $lte: endOfDay },
-  });
-  return Math.max(0, count);
-};
-
-const ensureDailyQuotaRecord = async (userId: string, dateKey: string, baseLimit: number, extraQuota: number) => {
+export const ensureDailyQuotaRecord = async (
+  userId: string,
+  dateKey: string,
+  baseLimit: number,
+  extraQuota: number,
+) => {
   await UserUploadQuotaDaily.updateOne(
     { userId, dateKey },
     {
@@ -247,8 +195,9 @@ export class UploadService {
     const { dateKey } = getQuotaDateContext();
     const baseLimit = getDailyBaseLimit();
     const extraQuotaTotal = await getUserExtraQuotaTotal(userId);
-    const todayAdRewardLimit = getDailyAdRewardLimit();
-    const todayAdRewardCount = await getTodayAdRewardCount(userId);
+    const rules = await PointsService.getRules();
+    const todayAdRewardLimit = await PointsService.getEffectiveDailyAdLimit(userId, rules);
+    const todayAdRewardCount = await PointsService.getTodayVideoAdCount(userId);
 
     await ensureDailyQuotaRecord(userId, dateKey, baseLimit, extraQuotaTotal);
 
@@ -265,87 +214,6 @@ export class UploadService {
       todayRemaining: Math.max(0, todayTotalLimit - todayUsedCount),
       todayAdRewardCount,
       todayAdRewardLimit,
-    };
-  }
-
-  static async grantUploadAdReward(
-    userId: string,
-    input: GrantUploadAdRewardInput,
-  ): Promise<GrantUploadAdRewardResult> {
-    const rewardToken = String(input.rewardToken || "").trim();
-    if (!rewardToken) {
-      throw new UploadAdRewardInvalidError("奖励凭证不能为空");
-    }
-
-    const existed = await UserAdRewardLog.findOne({ rewardToken }).lean();
-    if (existed) {
-      if (existed.userId !== userId) {
-        throw new UploadAdRewardInvalidError("奖励凭证无效");
-      }
-      const extraQuotaTotal = await getUserExtraQuotaTotal(userId);
-      return {
-        rewardQuota: Number(existed.rewardValue || getAdRewardQuotaValue()),
-        extraQuotaTotal,
-        duplicated: true,
-      };
-    }
-
-    const dailyLimit = getDailyAdRewardLimit();
-    const todayCount = await getTodayAdRewardCount(userId);
-    if (todayCount >= dailyLimit) {
-      throw new UploadAdRewardDailyLimitExceededError({
-        todayAdRewardCount: todayCount,
-        todayAdRewardLimit: dailyLimit,
-      });
-    }
-
-    const rewardQuota = getAdRewardQuotaValue();
-    try {
-      await UserAdRewardLog.create({
-        userId,
-        rewardToken,
-        rewardType: "upload_quota",
-        rewardValue: rewardQuota,
-        adProvider: String(input.adProvider || "").trim(),
-        adUnitId: String(input.adUnitId || "").trim(),
-        requestId: String(input.requestId || "").trim(),
-        status: "success",
-      });
-    } catch (err: any) {
-      if (err?.code === 11000) {
-        const extraQuotaTotal = await getUserExtraQuotaTotal(userId);
-        return {
-          rewardQuota,
-          extraQuotaTotal,
-          duplicated: true,
-        };
-      }
-      throw err;
-    }
-
-    const updatedUser = await User.findOneAndUpdate(
-      { userId },
-      {
-        $setOnInsert: {
-          userId,
-        },
-        $inc: {
-          uploadExtraQuotaTotal: rewardQuota,
-        },
-      },
-      { upsert: true, new: true },
-    ).lean();
-
-    const extraQuotaTotal = Math.max(0, Number((updatedUser as any)?.uploadExtraQuotaTotal || 0));
-
-    const { dateKey } = getQuotaDateContext();
-    const baseLimit = getDailyBaseLimit();
-    await ensureDailyQuotaRecord(userId, dateKey, baseLimit, extraQuotaTotal);
-
-    return {
-      rewardQuota,
-      extraQuotaTotal,
-      duplicated: false,
     };
   }
 

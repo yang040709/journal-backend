@@ -1,7 +1,11 @@
 import Router from "@koa/router";
 import { NoteService } from "../service/note.service";
 import { success, error } from "../utils/response";
-import { authMiddleware } from "../middlewares/auth.middleware";
+import {
+  authMiddleware,
+  optionalAuthMiddleware,
+  AuthContext,
+} from "../middlewares/auth.middleware";
 
 const router = new Router({
   prefix: "/share",
@@ -9,10 +13,10 @@ const router = new Router({
 
 /**
  * @route GET /share/:shareId
- * @desc 通过shareId获取分享的手帐（无需鉴权）
+ * @desc 通过 shareId 获取分享手帐（无需鉴权；可选 Bearer，与作者一致时返回 isOwner: true）
  * @access Public
  */
-router.get("/:shareId", async (ctx) => {
+router.get("/:shareId", optionalAuthMiddleware, async (ctx: AuthContext) => {
   try {
     const { shareId } = ctx.params;
 
@@ -21,7 +25,8 @@ router.get("/:shareId", async (ctx) => {
       return;
     }
 
-    const note = await NoteService.getNoteByShareId(shareId);
+    const viewerId = ctx.user?.userId;
+    const note = await NoteService.getSharedNoteForPublic(shareId, viewerId);
 
     if (!note) {
       error(ctx, "手帐不存在或未分享或被关闭分享", 1004, 404);
@@ -82,9 +87,9 @@ router.post("/notes/:id/share", authMiddleware, async (ctx) => {
  * @desc 获取用户的分享手帐列表
  * @access Private
  */
-router.get("/notes/shared", authMiddleware, async (ctx) => {
+router.get("/notes/shared", authMiddleware, async (ctx: AuthContext) => {
   try {
-    const userId = ctx.state.user?.id;
+    const userId = ctx.user?.userId;
 
     if (!userId) {
       error(ctx, "用户未登录", 1006, 401);

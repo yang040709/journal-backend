@@ -16,6 +16,7 @@ import TemplateRouter from "./routes/template.routes";
 import ShareRouter from "./routes/share.routes";
 import CoverRouter from "./routes/cover.routes";
 import UploadRouter from "./routes/upload.routes";
+import PointsRouter from "./routes/points.routes";
 import AssetRouter from "./routes/asset.routes";
 import AdminRouter from "./routes/admin.routes";
 import { adminCorsMiddleware } from "./middlewares/adminCors.middleware";
@@ -88,6 +89,7 @@ app.use(ShareRouter.routes()).use(ShareRouter.allowedMethods());
 app.use(CoverRouter.routes()).use(CoverRouter.allowedMethods());
 app.use(AssetRouter.routes()).use(AssetRouter.allowedMethods());
 app.use(UploadRouter.routes()).use(UploadRouter.allowedMethods());
+app.use(PointsRouter.routes()).use(PointsRouter.allowedMethods());
 
 // 注意：404处理现在由 errorMiddleware 自动处理
 // 当没有匹配的路由时，errorMiddleware 会捕获并返回 404 响应

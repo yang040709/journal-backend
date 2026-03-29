@@ -1,6 +1,6 @@
 import { Document, Schema, model } from "mongoose";
 
-export type AdRewardType = "upload_quota" | "ai_journal_quota";
+export type AdRewardType = "upload_quota" | "ai_journal_quota" | "points";
 
 export interface IUserAdRewardLog extends Document {
   userId: string;
@@ -31,7 +31,7 @@ const userAdRewardLogSchema = new Schema(
     rewardType: {
       type: String,
       required: true,
-      enum: ["upload_quota", "ai_journal_quota"],
+      enum: ["upload_quota", "ai_journal_quota", "points"],
       default: "upload_quota",
     },
     rewardValue: {

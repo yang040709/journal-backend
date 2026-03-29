@@ -2,8 +2,14 @@ import { Schema, model, Document } from "mongoose";
 import { LeanActivity } from "../types/mongoose";
 
 export interface IActivity extends Document {
-  type: "create" | "update" | "delete" | "share_enable" | "share_disable";
-  target: "noteBook" | "note" | "reminder" | "template" | "cover";
+  type:
+    | "create"
+    | "update"
+    | "delete"
+    | "share_enable"
+    | "share_disable"
+    | "session";
+  target: "noteBook" | "note" | "reminder" | "template" | "cover" | "user";
   targetId: string;
   title: string;
   userId: string;
@@ -14,12 +20,19 @@ const activitySchema = new Schema(
   {
     type: {
       type: String,
-      enum: ["create", "update", "delete", "share_enable", "share_disable"],
+      enum: [
+        "create",
+        "update",
+        "delete",
+        "share_enable",
+        "share_disable",
+        "session",
+      ],
       required: [true, "活动类型不能为空"],
     },
     target: {
       type: String,
-      enum: ["noteBook", "note", "reminder", "template", "cover"],
+      enum: ["noteBook", "note", "reminder", "template", "cover", "user"],
       required: [true, "活动目标不能为空"],
     },
     targetId: {

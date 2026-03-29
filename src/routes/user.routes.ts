@@ -2,6 +2,7 @@ import Router from "@koa/router";
 import { success, error, ErrorCodes } from "../utils/response";
 import { UserService } from "../service/user.service";
 import { refreshToken, verifyToken } from "../utils/jwt";
+import { authMiddleware, AuthContext } from "../middlewares/auth.middleware";
 import { z } from "zod";
 
 const router = new Router({
@@ -145,6 +146,40 @@ router.post("/refresh", async (ctx) => {
         500,
       );
     }
+  }
+});
+
+/**
+ * @swagger
+ * /auth/session:
+ *   post:
+ *     tags:
+ *       - 认证
+ *     summary: 上报本地会话启动
+ *     description: 客户端已持有有效 JWT、未走微信 code 登录时调用，用于记录活动日志；需 Bearer Token
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: 已受理（活动异步写入）
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 ok:
+ *                   type: boolean
+ *                   example: true
+ *       401:
+ *         description: 未认证或 Token 无效
+ */
+router.post("/session", authMiddleware, async (ctx: AuthContext) => {
+  try {
+    UserService.recordClientSession(ctx.user!.userId);
+    success(ctx, { ok: true }, "已记录");
+  } catch (err) {
+    console.error("会话上报失败:", err);
+    error(ctx, "会话上报失败", ErrorCodes.INTERNAL_ERROR, 500);
   }
 });
 

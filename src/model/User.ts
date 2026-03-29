@@ -3,6 +3,10 @@ import { coverPreviewList } from "../constant/img";
 
 export interface IUser extends Document {
   userId: string;
+  /** 积分余额（看广告、兑换额度、后台调整） */
+  points: number;
+  /** 覆盖全局的每日激励视频次数上限；未设置则使用后台配置的默认值 */
+  adRewardDailyLimit?: number | null;
   /** 广告等额外 AI 调用次数（预留，当前未接入） */
   aiBonusQuota: number;
   uploadExtraQuotaTotal: number;
@@ -27,6 +31,16 @@ const userSchema = new Schema(
       index: true,
       unique: true,
       required: true,
+    },
+    points: {
+      type: Number,
+      default: 200,
+      min: 0,
+    },
+    adRewardDailyLimit: {
+      type: Number,
+      min: 1,
+      max: 999,
     },
     aiBonusQuota: {
       type: Number,

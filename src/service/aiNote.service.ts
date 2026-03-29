@@ -1,10 +1,10 @@
 import OpenAI from "openai";
 import User from "../model/User";
 import UserAiUsageDaily from "../model/UserAiUsageDaily";
-import UserAdRewardLog from "../model/UserAdRewardLog";
 import { getQuotaDateContext } from "../utils/dateKey";
 import { AI_NOTE_SYSTEM_PROMPT, buildAiNoteUserMessage } from "./aiNote.prompts";
 import { sanitizeModelText } from "./aiTextSanitize";
+import { ActivityLogger } from "../utils/ActivityLogger";
 import {
   getAiDailyBaseLimit,
   getUserAiBonusQuota,
@@ -12,6 +12,7 @@ import {
   reserveOneAiUsageOrThrow,
   remainingAfterUse,
 } from "./aiUsageQuota";
+import { PointsService } from "./points.service";
 
 export type AiNoteMode = "generate" | "rewrite" | "continue";
 
@@ -40,63 +41,6 @@ export interface AiJournalQuotaSummary {
   todayAdRewardLimit: number;
 }
 
-export interface GrantAiJournalAdRewardInput {
-  adProvider: string;
-  adUnitId: string;
-  rewardToken: string;
-  requestId?: string;
-}
-
-export interface GrantAiJournalAdRewardResult {
-  rewardQuota: number;
-  bonusQuota: number;
-  duplicated: boolean;
-}
-
-export class AiJournalAdRewardInvalidError extends Error {
-  public readonly code = "AI_JOURNAL_AD_REWARD_INVALID";
-
-  constructor(message: string) {
-    super(message);
-    this.name = "AiJournalAdRewardInvalidError";
-  }
-}
-
-export class AiJournalAdRewardDailyLimitExceededError extends Error {
-  public readonly code = "AI_JOURNAL_AD_REWARD_DAILY_LIMIT_EXCEEDED";
-  public readonly details: { todayAdRewardCount: number; todayAdRewardLimit: number };
-
-  constructor(details: { todayAdRewardCount: number; todayAdRewardLimit: number }) {
-    super(`今日观看广告次数已达上限（${details.todayAdRewardCount}/${details.todayAdRewardLimit}次），明日再来`);
-    this.name = "AiJournalAdRewardDailyLimitExceededError";
-    this.details = details;
-  }
-}
-
-const getAiAdRewardValue = (): number => {
-  const parsed = Number(process.env.AI_AD_REWARD_VALUE ?? 5);
-  if (!Number.isFinite(parsed) || parsed <= 0) return 5;
-  return Math.floor(parsed);
-};
-
-const getAiDailyAdRewardLimit = (): number => {
-  const parsed = Number(process.env.AI_AD_REWARD_DAILY_LIMIT ?? 6);
-  if (!Number.isFinite(parsed) || parsed <= 0) return 6;
-  return Math.floor(parsed);
-};
-
-const getTodayAiAdRewardCount = async (userId: string): Promise<number> => {
-  const { dateKey } = getQuotaDateContext();
-  const startOfDay = new Date(`${dateKey}T00:00:00+08:00`);
-  const endOfDay = new Date(`${dateKey}T23:59:59.999+08:00`);
-  const count = await UserAdRewardLog.countDocuments({
-    userId,
-    rewardType: "ai_journal_quota",
-    createdAt: { $gte: startOfDay, $lte: endOfDay },
-  });
-  return Math.max(0, count);
-};
-
 export class AiNoteService {
   /**
    * 查询今日 AI 写手帐额度（不扣减、不调用模型），含今日激励广告观看次数
@@ -109,8 +53,9 @@ export class AiNoteService {
     const doc = await UserAiUsageDaily.findOne({ userId, dateKey }).lean();
     const used = doc?.usedCount ?? 0;
     const remainingToday = Math.max(0, dailyLimit - used);
-    const todayAdRewardCount = await getTodayAiAdRewardCount(userId);
-    const todayAdRewardLimit = getAiDailyAdRewardLimit();
+    const rules = await PointsService.getRules();
+    const todayAdRewardCount = await PointsService.getTodayVideoAdCount(userId);
+    const todayAdRewardLimit = await PointsService.getEffectiveDailyAdLimit(userId, rules);
     return {
       remainingToday,
       dailyBaseLimit: baseLimit,
@@ -125,83 +70,6 @@ export class AiNoteService {
   /** @deprecated 使用 getQuotaSummary */
   static async getRemainingToday(userId: string): Promise<AiJournalQuotaSummary> {
     return this.getQuotaSummary(userId);
-  }
-
-  static async grantAiJournalAdReward(
-    userId: string,
-    input: GrantAiJournalAdRewardInput,
-  ): Promise<GrantAiJournalAdRewardResult> {
-    const rewardToken = String(input.rewardToken || "").trim();
-    if (!rewardToken) {
-      throw new AiJournalAdRewardInvalidError("奖励凭证不能为空");
-    }
-
-    const existed = await UserAdRewardLog.findOne({ rewardToken }).lean();
-    if (existed) {
-      if (existed.userId !== userId) {
-        throw new AiJournalAdRewardInvalidError("奖励凭证无效");
-      }
-      const bonusQuota = await getUserAiBonusQuota(userId);
-      return {
-        rewardQuota: Number(existed.rewardValue || getAiAdRewardValue()),
-        bonusQuota,
-        duplicated: true,
-      };
-    }
-
-    const dailyLimit = getAiDailyAdRewardLimit();
-    const todayCount = await getTodayAiAdRewardCount(userId);
-    if (todayCount >= dailyLimit) {
-      throw new AiJournalAdRewardDailyLimitExceededError({
-        todayAdRewardCount: todayCount,
-        todayAdRewardLimit: dailyLimit,
-      });
-    }
-
-    const rewardQuota = getAiAdRewardValue();
-    try {
-      await UserAdRewardLog.create({
-        userId,
-        rewardToken,
-        rewardType: "ai_journal_quota",
-        rewardValue: rewardQuota,
-        adProvider: String(input.adProvider || "").trim(),
-        adUnitId: String(input.adUnitId || "").trim(),
-        requestId: String(input.requestId || "").trim(),
-        status: "success",
-      });
-    } catch (err: any) {
-      if (err?.code === 11000) {
-        const bonusQuota = await getUserAiBonusQuota(userId);
-        return {
-          rewardQuota,
-          bonusQuota,
-          duplicated: true,
-        };
-      }
-      throw err;
-    }
-
-    const updatedUser = await User.findOneAndUpdate(
-      { userId },
-      {
-        $setOnInsert: {
-          userId,
-        },
-        $inc: {
-          aiBonusQuota: rewardQuota,
-        },
-      },
-      { upsert: true, new: true },
-    ).lean();
-
-    const bonusQuota = Math.max(0, Number((updatedUser as any)?.aiBonusQuota || 0));
-
-    return {
-      rewardQuota,
-      bonusQuota,
-      duplicated: false,
-    };
   }
 
   static async generate(input: AiNoteGenerateInput): Promise<AiNoteGenerateResult> {
