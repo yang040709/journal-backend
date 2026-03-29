@@ -1,0 +1,84 @@
+# 开发环境：与生产 docker-compose.yml 隔离（独立卷、端口、镜像 tag）
+# 部署目录建议 /opt/journal-dev，详见 docs/spec/feature-dev-deploy-技术文档.md
+version: "3.8"
+
+name: journal-dev
+
+services:
+  app:
+    image: yang0709/journal-backend:dev
+    ports:
+      - "3002:3000"
+    environment:
+      - MONGO_URI=mongodb://mongo:27017/journal
+      - JWT_SECRET=${JWT_SECRET}
+      - WX_APPID=${WX_APPID}
+      - WX_SECRET=${WX_SECRET}
+      - REDIS_URL=${REDIS_URL}
+      - SENSITIVE_WORDS_KEY=${SENSITIVE_WORDS_KEY}
+      - PORT=3000
+      - LOG_LEVEL=${LOG_LEVEL}
+      - LOG_DIR=/app/logs
+      - LOG_MAX_SIZE=${LOG_MAX_SIZE}
+      - LOG_MAX_FILES=${LOG_MAX_FILES}
+      - NODE_ENV=${NODE_ENV}
+      - COS_SECRET_ID=${COS_SECRET_ID}
+      - COS_SECRET_KEY=${COS_SECRET_KEY}
+      - COS_BUCKET=${COS_BUCKET}
+      - COS_REGION=${COS_REGION}
+      - COS_PUBLIC_DOMAIN=${COS_PUBLIC_DOMAIN}
+      - COS_UPLOAD_DIR=${COS_UPLOAD_DIR}
+      - COS_STS_DURATION_SECONDS=${COS_STS_DURATION_SECONDS}
+      - COS_MAX_FILE_SIZE_MB=${COS_MAX_FILE_SIZE_MB}
+      - UPLOAD_DAILY_BASE_LIMIT=${UPLOAD_DAILY_BASE_LIMIT}
+      - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY}
+      - DEEPSEEK_API_BASE=${DEEPSEEK_API_BASE}
+      - DEEPSEEK_MODEL=${DEEPSEEK_MODEL}
+      - AI_DAILY_BASE_LIMIT=${AI_DAILY_BASE_LIMIT}
+      - ADMIN_JWT_SECRET=${ADMIN_JWT_SECRET}
+      - ADMIN_JWT_EXPIRES_IN=${ADMIN_JWT_EXPIRES_IN}
+      - ADMIN_BOOTSTRAP_USERNAME=${ADMIN_BOOTSTRAP_USERNAME}
+      - ADMIN_BOOTSTRAP_PASSWORD=${ADMIN_BOOTSTRAP_PASSWORD}
+    volumes:
+      - ./logs:/app/logs
+    depends_on:
+      - mongo
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "20m"
+        max-file: "10"
+
+  mongo:
+    image: mongo:7
+    ports:
+      - "127.0.0.1:27019:27017"
+    volumes:
+      - mongo_data_dev:/data/db
+
+  backup:
+    image: mongo:7
+    volumes:
+      - ./backups:/backups
+    environment:
+      - MONGO_URI=mongodb://mongo:27017/journal
+      - BACKUP_RETENTION_DAYS=7
+    entrypoint: >
+      sh -c "
+      while true; do
+        FILENAME=/backups/backup-$$(date +%Y%m%d-%H%M%S).archive.gz;
+        echo \"Starting backup to $$FILENAME... \";
+        mongodump --uri=\"$$MONGO_URI\" --archive=\"$$FILENAME\" --gzip;
+        if [ $$? -eq 0 ]; then
+          echo 'Backup successful.';
+          find /backups -name 'backup-*.archive.gz' -mtime +$$BACKUP_RETENTION_DAYS -delete;
+        else
+          echo 'Backup failed!';
+        fi
+        sleep 86400;
+      done"
+    depends_on:
+      - mongo
+
+volumes:
+  mongo_data_dev:

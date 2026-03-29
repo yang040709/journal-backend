@@ -19,8 +19,44 @@ const refreshSchema = z.object({
 });
 
 /**
- * @route POST /auth/login
- * @desc 用户登录
+ * @swagger
+ * /auth/login:
+ *   post:
+ *     tags:
+ *       - 认证
+ *     summary: 用户登录
+ *     description: 使用微信登录凭证进行用户登录
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - code
+ *             properties:
+ *               code:
+ *                 type: string
+ *                 description: 微信登录凭证
+ *                 example: "023abc123def456"
+ *     responses:
+ *       200:
+ *         description: 登录成功
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 token:
+ *                   type: string
+ *                   description: JWT令牌
+ *                   example: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+ *                 user:
+ *                   $ref: '#/components/schemas/User'
+ *       400:
+ *         description: 参数验证失败
+ *       500:
+ *         description: 服务器内部错误
  */
 router.post("/login", async (ctx) => {
   try {
@@ -38,8 +74,44 @@ router.post("/login", async (ctx) => {
 });
 
 /**
- * @route POST /auth/refresh
- * @desc 刷新token
+ * @swagger
+ * /auth/refresh:
+ *   post:
+ *     tags:
+ *       - 认证
+ *     summary: 刷新JWT令牌
+ *     description: 使用旧的JWT令牌刷新获取新的令牌
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - token
+ *             properties:
+ *               token:
+ *                 type: string
+ *                 description: 旧的JWT令牌
+ *                 example: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+ *     responses:
+ *       200:
+ *         description: 令牌刷新成功
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 token:
+ *                   type: string
+ *                   description: 新的JWT令牌
+ *                   example: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+ *       400:
+ *         description: 参数验证失败
+ *       401:
+ *         description: 无效的令牌或令牌无法刷新
+ *       500:
+ *         description: 服务器内部错误
  */
 router.post("/refresh", async (ctx) => {
   try {
@@ -70,7 +142,7 @@ router.post("/refresh", async (ctx) => {
         ctx,
         err.message || "刷新token失败",
         ErrorCodes.INTERNAL_ERROR,
-        500
+        500,
       );
     }
   }

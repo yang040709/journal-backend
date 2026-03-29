@@ -59,3 +59,5 @@ bower_components/
 # Misc
 .DS_Store
 Thumbs.db
+
+output

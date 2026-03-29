@@ -7,6 +7,7 @@ import {
   ErrorCodes,
 } from "../utils/response";
 import { TemplateService } from "../service/template.service";
+import { AiTemplateService } from "../service/aiTemplate.service";
 import { z } from "zod";
 
 const router = new Router({
@@ -67,6 +68,28 @@ const batchDeleteSchema = z.object({
   templateIds: z.array(z.string()).min(1, "至少需要提供一个模板ID"),
 });
 
+const aiTemplateGenerateSchema = z.discriminatedUnion("mode", [
+  z.object({
+    mode: z.literal("template_generate"),
+    name: z.string().min(1, "模板名称不能为空").max(100),
+    description: z.string().max(500).optional().default(""),
+    hint: z.string().max(500).optional(),
+  }),
+  z.object({
+    mode: z.literal("template_rewrite"),
+    hint: z.string().max(500).optional(),
+    template: z.object({
+      name: z.string().min(1).max(100),
+      description: z.string().max(500).optional().default(""),
+      fields: z.object({
+        title: z.string().min(1),
+        content: z.string().min(1),
+        tags: z.array(z.string()).optional().default([]),
+      }),
+    }),
+  }),
+]);
+
 /**
  * @route GET /templates
  * @desc 获取用户模板列表
@@ -106,6 +129,64 @@ router.get("/all", async (ctx: AuthContext) => {
   } catch (err) {
     console.error("获取所有模板失败:", err);
     error(ctx, "获取所有模板失败", ErrorCodes.INTERNAL_ERROR, 500);
+  }
+});
+
+/**
+ * @route POST /templates/ai/generate
+ * @desc AI 生成或润色模板（与手帐 AI 共用日额度）
+ */
+router.post("/ai/generate", async (ctx: AuthContext) => {
+  try {
+    const userId = ctx.user!.userId;
+    const body = aiTemplateGenerateSchema.parse(ctx.request.body);
+    const result = await AiTemplateService.generate({
+      userId,
+      mode: body.mode,
+      ...(body.mode === "template_generate"
+        ? {
+            name: body.name,
+            description: body.description,
+            hint: body.hint,
+          }
+        : {
+            hint: body.hint,
+            template: {
+              name: body.template.name,
+              description: body.template.description,
+              fields: {
+                title: body.template.fields.title,
+                content: body.template.fields.content,
+                tags: body.template.fields.tags,
+              },
+            },
+          }),
+    });
+    success(ctx, result, "ok");
+  } catch (err) {
+    if (err instanceof z.ZodError) {
+      error(ctx, "参数验证失败", ErrorCodes.PARAM_ERROR, 400);
+      return;
+    }
+    const message = err instanceof Error ? err.message : "AI 生成模板失败";
+    const code =
+      err instanceof Error && (err as Error & { code?: string }).code === "AI_DAILY_LIMIT_EXCEEDED"
+        ? ErrorCodes.AI_DAILY_LIMIT_EXCEEDED
+        : undefined;
+    if (code === ErrorCodes.AI_DAILY_LIMIT_EXCEEDED) {
+      error(ctx, message, ErrorCodes.AI_DAILY_LIMIT_EXCEEDED, 429);
+      return;
+    }
+    if (message === "AI service not configured") {
+      error(ctx, "AI 服务未配置", ErrorCodes.INTERNAL_ERROR, 500);
+      return;
+    }
+    if (message === "请先填写模板名称" || message === "请先填写标题模板与内容模板后再改写") {
+      error(ctx, message, ErrorCodes.PARAM_ERROR, 400);
+      return;
+    }
+    console.error("AI 模板生成失败:", err);
+    error(ctx, message, ErrorCodes.INTERNAL_ERROR, 500);
   }
 });
 

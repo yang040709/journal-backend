@@ -11,6 +11,8 @@ export interface ITemplate extends Document {
     tags: string[];
   };
   isSystem: boolean;
+  /** 系统模板稳定键（与种子常量 id 一致），用于 C 端列表 id */
+  systemKey?: string;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -55,6 +57,12 @@ const templateSchema = new Schema(
       default: false,
       index: true,
     },
+    systemKey: {
+      type: String,
+      trim: true,
+      sparse: true,
+      unique: true,
+    },
   },
   {
     timestamps: true,
@@ -71,6 +79,7 @@ const templateSchema = new Schema(
 templateSchema.index({ userId: 1, createdAt: -1 });
 templateSchema.index({ userId: 1, updatedAt: -1 });
 templateSchema.index({ isSystem: 1 });
+templateSchema.index({ userId: 1, isSystem: 1 });
 templateSchema.index({ name: "text", description: "text" });
 
 // 添加虚拟字段id

@@ -1,8 +1,47 @@
+import mongoose from "mongoose";
 import Template, { ITemplate, LeanTemplate } from "../model/Template";
 import { ActivityLogger } from "../utils/ActivityLogger";
 // import { ErrorCodes } from "../utils/response";
 import { toLeanTemplateArray, toLeanTemplate } from "../utils/typeUtils";
 import { noteTemplates } from "@/constant/templates.js";
+import type { FlattenMaps } from "mongoose";
+
+/** C 端列表：系统模板 id 使用 systemKey，与历史常量 id 一致 */
+export function templateDocToClientLean(
+  doc: FlattenMaps<ITemplate>,
+): LeanTemplate {
+  const lean = toLeanTemplate(doc);
+  if (doc.isSystem) {
+    return {
+      ...lean,
+      id: doc.systemKey || lean.id,
+      systemKey: doc.systemKey,
+      mongoId: doc._id.toString(),
+    } as LeanTemplate;
+  }
+  return lean;
+}
+
+async function getSystemTemplatesFallbackConstant(): Promise<LeanTemplate[]> {
+  return noteTemplates.map((template) => ({
+    id: template.id,
+    userId: "system",
+    name: template.name,
+    description: template.description,
+    fields: template.fields,
+    isSystem: true,
+    createdAt: new Date(),
+    updatedAt: new Date(),
+  })) as LeanTemplate[];
+}
+
+export async function loadSystemTemplatesForClient(): Promise<LeanTemplate[]> {
+  const docs = await Template.find({ isSystem: true }).sort({ name: 1 }).lean();
+  if (docs.length === 0) {
+    return getSystemTemplatesFallbackConstant();
+  }
+  return docs.map((d) => templateDocToClientLean(d));
+}
 
 export interface CreateTemplateData {
   name: string;
@@ -107,8 +146,48 @@ export class TemplateService {
     id: string,
     userId: string,
   ): Promise<LeanTemplate | null> {
-    const template = await Template.findOne({ _id: id, userId }).lean();
-    return template ? toLeanTemplate(template) : null;
+    const userT = await Template.findOne({
+      _id: id,
+      userId,
+      isSystem: false,
+    }).lean();
+    if (userT) {
+      return toLeanTemplate(userT);
+    }
+
+    if (mongoose.Types.ObjectId.isValid(id)) {
+      const sysByMongo = await Template.findOne({
+        _id: id,
+        isSystem: true,
+      }).lean();
+      if (sysByMongo) {
+        return templateDocToClientLean(sysByMongo);
+      }
+    }
+
+    const sysByKey = await Template.findOne({
+      systemKey: id,
+      isSystem: true,
+    }).lean();
+    if (sysByKey) {
+      return templateDocToClientLean(sysByKey);
+    }
+
+    const fromConst = noteTemplates.find((t) => t.id === id);
+    if (fromConst) {
+      return {
+        id: fromConst.id,
+        userId: "system",
+        name: fromConst.name,
+        description: fromConst.description,
+        fields: fromConst.fields,
+        isSystem: true,
+        createdAt: new Date(0),
+        updatedAt: new Date(0),
+      } as LeanTemplate;
+    }
+
+    return null;
   }
 
   /**
@@ -192,19 +271,8 @@ export class TemplateService {
    * 获取所有模板（系统模板 + 用户自定义模板）
    */
   static async getAllTemplates(userId: string): Promise<LeanTemplate[]> {
-    // 获取系统模板（从常量文件转换）
-    const systemTemplates = noteTemplates.map((template) => ({
-      id: template.id,
-      userId: "system",
-      name: template.name,
-      description: template.description,
-      fields: template.fields,
-      isSystem: true,
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    })) as LeanTemplate[];
+    const systemTemplates = await loadSystemTemplatesForClient();
 
-    // 获取用户自定义模板
     const userTemplates = await Template.find({ userId, isSystem: false })
       .sort({ updatedAt: -1 })
       .lean();

@@ -1,7 +1,6 @@
 import NoteBook from "../model/NoteBook";
 import Note from "../model/Note";
 import { ActivityLogger } from "../utils/ActivityLogger";
-import { defaultNoteBook } from "../constant/img";
 
 export interface ExportData {
   version: string;

@@ -15,11 +15,32 @@ import ReminderRouter from "./routes/reminder.routes";
 import TemplateRouter from "./routes/template.routes";
 import ShareRouter from "./routes/share.routes";
 import CoverRouter from "./routes/cover.routes";
+import UploadRouter from "./routes/upload.routes";
+import AssetRouter from "./routes/asset.routes";
+import AdminRouter from "./routes/admin.routes";
+import { adminCorsMiddleware } from "./middlewares/adminCors.middleware";
+import { staticFilesMiddleware } from "./middlewares/staticFiles.middleware";
 import { startAllSchedulers } from "./scheduler";
+import SwaggerJSdoc from "swagger-jsdoc";
+import swaggerOptions from "./config/swaggerOptions";
+// import swaggerUi from "swagger-ui-koa";
+import { koaSwagger } from "koa2-swagger-ui";
+
+const specs = SwaggerJSdoc(swaggerOptions);
 
 const app = new Koa();
 
+app.use(
+  koaSwagger({
+    routePrefix: "/docs", // 访问路径
+    swaggerOptions: {
+      spec: specs, // 直接传入你的 swaggerOptions 生成的 specs
+    },
+  }),
+);
 // 中间件
+app.use(adminCorsMiddleware);
+app.use(staticFilesMiddleware);
 app.use(bodyParser());
 
 // 请求ID中间件（放在最前面）
@@ -55,6 +76,7 @@ app.use(async (ctx, next) => {
 });
 
 // 路由
+app.use(AdminRouter.routes()).use(AdminRouter.allowedMethods());
 app.use(UserRouter.routes()).use(UserRouter.allowedMethods());
 app.use(NoteBookRouter.routes()).use(NoteBookRouter.allowedMethods());
 app.use(NoteRouter.routes()).use(NoteRouter.allowedMethods());
@@ -64,6 +86,8 @@ app.use(ReminderRouter.routes()).use(ReminderRouter.allowedMethods());
 app.use(TemplateRouter.routes()).use(TemplateRouter.allowedMethods());
 app.use(ShareRouter.routes()).use(ShareRouter.allowedMethods());
 app.use(CoverRouter.routes()).use(CoverRouter.allowedMethods());
+app.use(AssetRouter.routes()).use(AssetRouter.allowedMethods());
+app.use(UploadRouter.routes()).use(UploadRouter.allowedMethods());
 
 // 注意：404处理现在由 errorMiddleware 自动处理
 // 当没有匹配的路由时，errorMiddleware 会捕获并返回 404 响应

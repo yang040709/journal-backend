@@ -11,12 +11,12 @@ export interface SuccessResponse<T = any> {
 }
 
 /**
- * 错误响应格式
+ * 错误响应格式（业务错误可将补充信息放在 data，如上传额度超限时的 limit/used/remaining）
  */
 export interface ErrorResponse {
   code: number;
   message: string;
-  data: null;
+  data: unknown;
   timestamp: number;
 }
 
@@ -39,18 +39,20 @@ export const success = <T = any>(
 
 /**
  * 创建错误响应
+ * @param data 可选；为 null/undefined 时与历史行为一致（body.data 为 null）
  */
 export const error = (
   ctx: Context,
   message: string,
   code: number = 9999,
-  status: number = 400
+  status: number = 400,
+  data: unknown = null,
 ): void => {
   ctx.status = status;
   ctx.body = {
     code,
     message,
-    data: null,
+    data: data === undefined ? null : data,
     timestamp: Date.now(),
   };
 };
@@ -113,6 +115,19 @@ export const ErrorCodes = {
   USER_CREDENTIALS_ERROR: 3001,
   USER_ALREADY_EXISTS: 3002,
   USER_NOT_FOUND: 3003,
+
+  // 上传错误
+  UPLOAD_DAILY_LIMIT_EXCEEDED: 4001,
+  UPLOAD_AD_REWARD_INVALID: 4002,
+  UPLOAD_AD_REWARD_DUPLICATE: 4003,
+  UPLOAD_AD_REWARD_PROVIDER_ERROR: 4004,
+  UPLOAD_AD_REWARD_DAILY_LIMIT_EXCEEDED: 4005, // 今日观看广告次数已达上限
+
+  // AI 写手帐
+  AI_DAILY_LIMIT_EXCEEDED: 4101,
+  AI_AD_REWARD_INVALID: 4102,
+  AI_AD_REWARD_DAILY_LIMIT_EXCEEDED: 4103,
+  AI_AD_REWARD_PROVIDER_ERROR: 4104,
 
   // 服务器错误
   INTERNAL_ERROR: 9999,

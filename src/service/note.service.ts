@@ -1,17 +1,22 @@
-import Note, { INote, LeanNote } from "../model/Note";
+import Note, { INote, INoteImage, LeanNote } from "../model/Note";
 import NoteBook, { LeanNoteBook } from "../model/NoteBook";
 import { ActivityLogger } from "../utils/ActivityLogger";
 import { ErrorCodes } from "../utils/response";
 import { toLeanNoteArray, toLeanNote } from "../utils/typeUtils";
 import { checkNoteContent } from "../utils/sensitive-encrypted";
 import { nanoid } from "nanoid";
+import { NotePresetTagService } from "./notePresetTag.service";
+import { recordFromNoteImages } from "./userImageAsset.service";
 
 export interface CreateNoteData {
   noteBookId: string;
   title: string;
   content: string;
   tags?: string[];
+  images?: INoteImage[];
   userId: string;
+  /** 可选：来自系统模板时传 Template.systemKey */
+  appliedSystemTemplateKey?: string;
 }
 
 export interface UpdateNoteData {
@@ -19,6 +24,7 @@ export interface UpdateNoteData {
   content?: string;
   tags?: string[];
   noteBookId?: string;
+  images?: INoteImage[];
 }
 
 export interface PaginationParams {
@@ -34,10 +40,17 @@ export interface PaginationParams {
 
 export interface SearchParams {
   q: string;
+  page?: number;
+  limit?: number;
   noteBookId?: string;
   tags?: string[];
   startTime?: number;
   endTime?: number;
+}
+
+export interface SearchNotesResult {
+  items: LeanNote[];
+  total: number;
 }
 
 export class NoteService {
@@ -54,14 +67,19 @@ export class NoteService {
       throw new Error("手帐本不存在或无权访问");
     }
 
+    const key = data.appliedSystemTemplateKey?.trim();
+    const presetTags = await NotePresetTagService.getTagNames();
+    const tags = NotePresetTagService.filterToPreset(data.tags || [], presetTags);
     const note = new Note({
       noteBookId: data.noteBookId,
       title: data.title,
       content: data.content,
-      tags: data.tags || [],
+      tags,
+      images: data.images || [],
       userId: data.userId,
       isShare: false,
       shareId: nanoid(12),
+      ...(key ? { appliedSystemTemplateKey: key.slice(0, 120) } : {}),
     });
 
     await note.save();
@@ -80,6 +98,8 @@ export class NoteService {
       },
       { blocking: false },
     );
+
+    recordFromNoteImages(data.userId, String(note.id), data.images || []);
 
     return note;
   }
@@ -186,7 +206,12 @@ export class NoteService {
 
     if (data.title !== undefined) note.title = data.title;
     if (data.content !== undefined) note.content = data.content;
-    if (data.tags !== undefined) note.tags = data.tags;
+    if (data.tags !== undefined) {
+      const presetTags = await NotePresetTagService.getTagNames();
+      note.tags = NotePresetTagService.filterToPreset(data.tags, presetTags);
+    }
+    const previousImages = data.images !== undefined ? [...(note.images || [])] : null;
+    if (data.images !== undefined) note.images = data.images;
 
     await note.save();
 
@@ -201,6 +226,12 @@ export class NoteService {
       },
       { blocking: false },
     );
+
+    if (data.images !== undefined && previousImages) {
+      const oldKeys = new Set(previousImages.map((i) => i.key));
+      const added = data.images.filter((i) => !oldKeys.has(i.key));
+      recordFromNoteImages(userId, String(note.id), added);
+    }
 
     return note;
   }
@@ -285,12 +316,12 @@ export class NoteService {
   }
 
   /**
-   * 搜索手帐
+   * 搜索手帐（分页）
    */
   static async searchNotes(
     userId: string,
     params: SearchParams,
-  ): Promise<LeanNote[]> {
+  ): Promise<SearchNotesResult> {
     const query: any = { userId };
 
     // 文本搜索 - 使用正则表达式替代 $text
@@ -325,13 +356,23 @@ export class NoteService {
       }
     }
 
+    const page = params.page ?? 1;
+    const limit = params.limit ?? 20;
+    const skip = (page - 1) * limit;
+
+    const total = await Note.countDocuments(query);
+
     const notes = await Note.find(query)
       .select("-content") // 排除 content 字段，减少网络传输
       .sort({ updatedAt: -1 })
-      .limit(100)
+      .skip(skip)
+      .limit(limit)
       .lean();
 
-    return toLeanNoteArray(notes);
+    return {
+      items: toLeanNoteArray(notes),
+      total,
+    };
   }
 
   /**
@@ -408,6 +449,9 @@ export class NoteService {
         note.content = checkResult.processedContent;
       }
       note.isShare = true;
+      if (!note.firstSharedAt) {
+        note.firstSharedAt = new Date();
+      }
     } else {
       // 关闭分享
       note.isShare = false;

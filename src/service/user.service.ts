@@ -3,7 +3,8 @@ import User from "../model/User";
 import NoteBook from "../model/NoteBook";
 import { signToken } from "../utils/jwt";
 import { ActivityLogger } from "../utils/ActivityLogger";
-import { coverPreviewList, defaultNoteBook } from "../constant/img";
+import { CoverService } from "./cover.service";
+import { InitialUserNotebookConfigService } from "./initialUserNotebookConfig.service";
 
 export interface LoginResult {
   token: string;
@@ -29,9 +30,10 @@ export class UserService {
         isNewUser = false;
       } else {
         // 用户不存在，创建新用户
+        const sysCovers = await CoverService.getSystemCovers();
         user = await User.create({
           userId: openid,
-          quickCovers: coverPreviewList.slice(0, 11),
+          quickCovers: sysCovers.slice(0, 11),
           quickCoversUpdatedAt: new Date(),
         });
         isNewUser = true;
@@ -110,11 +112,13 @@ export class UserService {
   }
 
   /**
-   * 为新用户创建默认手帐本
+   * 为新用户创建默认手帐本（登录注册与后台「新增用户」均可调用）
    */
-  private static async createDefaultNoteBooks(userId: string): Promise<void> {
+  static async createDefaultNoteBooks(userId: string): Promise<void> {
     try {
-      const noteBooks = defaultNoteBook.map((noteBook) => ({
+      const templates =
+        await InitialUserNotebookConfigService.resolveTemplatesForNewUser();
+      const noteBooks = templates.map((noteBook) => ({
         title: noteBook.title,
         coverImg: noteBook.coverImg,
         count: 0,

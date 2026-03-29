@@ -4,6 +4,8 @@ import app, { startSchedulersAfterDBConnection } from "./app";
 import { connectDB } from "./config/db";
 import { runMigrations } from "./utils/migration";
 import { initSensitiveFilter } from "./utils/sensitive-encrypted";
+import { ensureAdminBootstrap } from "./service/adminBootstrap.service";
+import { ensureSystemTemplates } from "./service/systemTemplateSeed.service";
 
 dotenv.config();
 
@@ -38,6 +40,9 @@ const init = async () => {
 
     // 执行数据库迁移
     await runMigrations();
+
+    await ensureAdminBootstrap();
+    await ensureSystemTemplates();
 
     // 初始化敏感词过滤器
     console.log("🔐 正在初始化敏感词过滤器...");

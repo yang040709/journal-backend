@@ -99,7 +99,8 @@ Authorization: Bearer <your-jwt-token>
 | PUT    | `/notes/:id`          | 更新手帐     |
 | DELETE | `/notes/:id`          | 删除手帐     |
 | POST   | `/notes/batch-delete` | 批量删除手帐 |
-| GET    | `/notes/search`       | 搜索手帐     |
+| GET    | `/notes/search`       | 搜索手帐（旧版，`data` 为数组，单次最多 100 条） |
+| GET    | `/notes/search/page`  | 搜索手帐（分页，`data.items`） |
 | GET    | `/notes/recent`       | 获取最近手帐 |
 
 #### 统计信息
