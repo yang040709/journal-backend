@@ -10,6 +10,9 @@ import { TemplateService } from "../service/template.service";
 import { AiTemplateService } from "../service/aiTemplate.service";
 import { z } from "zod";
 
+const MAX_PAGE_DEPTH = 10_000;
+const MIN_SEARCH_LENGTH = 1;
+
 const router = new Router({
   prefix: "/templates",
 });
@@ -60,7 +63,14 @@ const paginationSchema = z.object({
     .optional()
     .default("updatedAt"),
   order: z.enum(["asc", "desc"]).optional().default("desc"),
-  search: z.string().optional(),
+  search: z.preprocess((v) => {
+    if (v == null) return undefined;
+    const s = String(v).trim();
+    return s.length ? s : undefined;
+  }, z.string().min(MIN_SEARCH_LENGTH, `搜索关键词至少 ${MIN_SEARCH_LENGTH} 个字符`).optional()),
+}).refine((val) => val.page * val.limit <= MAX_PAGE_DEPTH, {
+  message: `分页深度超过限制（page*limit <= ${MAX_PAGE_DEPTH}）`,
+  path: ["page"],
 });
 
 // 批量删除请求验证
@@ -110,6 +120,11 @@ router.get("/", async (ctx: AuthContext) => {
   } catch (err) {
     if (err instanceof z.ZodError) {
       error(ctx, "参数验证失败", ErrorCodes.PARAM_ERROR, 400);
+    } else if (
+      err instanceof Error &&
+      (err.message.includes("分页深度超过限制") || err.message.includes("搜索关键词至少"))
+    ) {
+      error(ctx, err.message, ErrorCodes.PARAM_ERROR, 400);
     } else {
       console.error("获取模板列表失败:", err);
       error(ctx, "获取模板列表失败", ErrorCodes.INTERNAL_ERROR, 500);

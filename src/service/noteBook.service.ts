@@ -24,6 +24,10 @@ export interface PaginationParams {
 }
 
 export class NoteBookService {
+  private static getTrashExpireAt(base: Date = new Date()): Date {
+    return new Date(base.getTime() + 7 * 24 * 60 * 60 * 1000);
+  }
+
   /**
    * 创建手帐本
    */
@@ -33,6 +37,9 @@ export class NoteBookService {
       coverImg: data.coverImg || "",
       count: 0,
       userId: data.userId,
+      isDeleted: false,
+      deletedAt: null,
+      deleteExpireAt: null,
     });
 
     await noteBook.save();
@@ -67,12 +74,12 @@ export class NoteBookService {
     const sortOrder = params.order === "asc" ? 1 : -1;
 
     const [items, total] = await Promise.all([
-      NoteBook.find({ userId })
+      NoteBook.find({ userId, isDeleted: { $ne: true } })
         .sort({ [sortField]: sortOrder })
         .skip(skip)
         .limit(limit)
         .lean(),
-      NoteBook.countDocuments({ userId }),
+      NoteBook.countDocuments({ userId, isDeleted: { $ne: true } }),
     ]);
 
     return { items: toLeanNoteBookArray(items), total };
@@ -85,7 +92,11 @@ export class NoteBookService {
     id: string,
     userId: string,
   ): Promise<LeanNoteBook | null> {
-    const noteBook = await NoteBook.findOne({ _id: id, userId }).lean();
+    const noteBook = await NoteBook.findOne({
+      _id: id,
+      userId,
+      isDeleted: { $ne: true },
+    }).lean();
     return noteBook ? toLeanNoteBook(noteBook) : null;
   }
 
@@ -97,7 +108,11 @@ export class NoteBookService {
     userId: string,
     data: UpdateNoteBookData,
   ): Promise<INoteBook | null> {
-    const noteBook = await NoteBook.findOne({ _id: id, userId });
+    const noteBook = await NoteBook.findOne({
+      _id: id,
+      userId,
+      isDeleted: { $ne: true },
+    });
     if (!noteBook) {
       return null;
     }
@@ -127,16 +142,32 @@ export class NoteBookService {
    * 删除手帐本
    */
   static async deleteNoteBook(id: string, userId: string): Promise<boolean> {
-    const noteBook = await NoteBook.findOne({ _id: id, userId });
+    const noteBook = await NoteBook.findOne({
+      _id: id,
+      userId,
+      isDeleted: { $ne: true },
+    });
     if (!noteBook) {
       return false;
     }
 
-    // 删除手帐本下的所有手帐
-    await Note.deleteMany({ noteBookId: id, userId });
-
-    // 删除手帐本
-    await NoteBook.deleteOne({ _id: id, userId });
+    const deletedAt = new Date();
+    const deleteExpireAt = NoteBookService.getTrashExpireAt(deletedAt);
+    await NoteBook.updateOne(
+      { _id: id, userId, isDeleted: { $ne: true } },
+      { $set: { isDeleted: true, deletedAt, deleteExpireAt, count: 0 } },
+    );
+    await Note.updateMany(
+      { noteBookId: id, userId, isDeleted: { $ne: true } },
+      {
+        $set: {
+          isDeleted: true,
+          deletedAt,
+          deleteExpireAt,
+          isShare: false,
+        },
+      },
+    );
 
     // 记录活动
     ActivityLogger.record(
@@ -160,12 +191,20 @@ export class NoteBookService {
     id: string,
     userId: string,
   ): Promise<{ noteCount: number } | null> {
-    const noteBook = await NoteBook.findOne({ _id: id, userId }).lean();
+    const noteBook = await NoteBook.findOne({
+      _id: id,
+      userId,
+      isDeleted: { $ne: true },
+    }).lean();
     if (!noteBook) {
       return null;
     }
     // 重新计算手帐数量以确保准确性
-    const noteCount = await Note.countDocuments({ noteBookId: id, userId });
+    const noteCount = await Note.countDocuments({
+      noteBookId: id,
+      userId,
+      isDeleted: { $ne: true },
+    });
     // 如果数量不一致，更新手帐本的数量
     if (noteCount !== noteBook.count) {
       await NoteBook.updateOne({ _id: id }, { count: noteCount });
@@ -180,7 +219,11 @@ export class NoteBookService {
     noteBookId: string,
     userId: string,
   ): Promise<boolean> {
-    const noteBook = await NoteBook.findOne({ _id: noteBookId, userId });
+    const noteBook = await NoteBook.findOne({
+      _id: noteBookId,
+      userId,
+      isDeleted: { $ne: true },
+    });
     return !!noteBook;
   }
 }

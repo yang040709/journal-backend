@@ -78,7 +78,6 @@ const templateSchema = new Schema(
 // 创建索引
 templateSchema.index({ userId: 1, createdAt: -1 });
 templateSchema.index({ userId: 1, updatedAt: -1 });
-templateSchema.index({ isSystem: 1 });
 templateSchema.index({ userId: 1, isSystem: 1 });
 templateSchema.index({ name: "text", description: "text" });
 

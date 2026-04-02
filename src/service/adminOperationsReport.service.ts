@@ -12,8 +12,10 @@ import {
   zonedRangeUtcBounds,
 } from "../utils/zonedDayBounds";
 import { CoverService } from "./cover.service";
+import { CACHE_CONFIG } from "../config/cache";
+import { buildCacheKey, getOrSetCache } from "../utils/cache";
 
-const MAX_RANGE_DAYS = 730;
+export const MAX_RANGE_DAYS = 730;
 
 export type DailyPoint = { date: string; count: number };
 export type NamedCount = { name: string; count: number };
@@ -55,20 +57,28 @@ export class AdminOperationsReportService {
   static async getReport(startDate: string, endDate: string) {
     const { timezone: tz } = getQuotaDateContext();
     AdminOperationsReportService.validateRange(startDate, endDate, tz);
-
-    const { fromInclusive, toExclusive } = zonedRangeUtcBounds(
-      startDate,
-      endDate,
-      tz,
+    const cacheKey = buildCacheKey(
+      "stats",
+      "v1",
+      "admin",
+      "operations-report",
+      { startDate, endDate, tz },
     );
-    const dayKeys = enumerateZonedYmdInclusive(startDate, endDate, tz);
 
-    const systemCovers = await CoverService.getSystemCovers();
-    const systemCoverSet = new Set(systemCovers);
-    const excludedNotebookTitles =
-      await InitialUserNotebookConfigService.getExcludedNotebookTitles();
+    return getOrSetCache(cacheKey, CACHE_CONFIG.admin.operationsReportTtlSeconds, async () => {
+      const { fromInclusive, toExclusive } = zonedRangeUtcBounds(
+        startDate,
+        endDate,
+        tz,
+      );
+      const dayKeys = enumerateZonedYmdInclusive(startDate, endDate, tz);
 
-    const dateMatch = { $gte: fromInclusive, $lt: toExclusive };
+      const systemCovers = await CoverService.getSystemCovers();
+      const systemCoverSet = new Set(systemCovers);
+      const excludedNotebookTitles =
+        await InitialUserNotebookConfigService.getExcludedNotebookTitles();
+
+      const dateMatch = { $gte: fromInclusive, $lt: toExclusive };
 
     const [
       tagAgg,
@@ -450,28 +460,29 @@ export class AdminOperationsReportService {
       count: r.total,
     }));
 
-    return {
-      statsTimezone: tz,
-      range: { startDate, endDate },
-      generatedAt: new Date().toISOString(),
-      systemCoverUsage,
-      tagUsage,
-      systemTemplateUsage,
-      dailyNewUsers: fillDaily(dayKeys, newUsersByDay),
-      dailyNewNotes: fillDaily(dayKeys, newNotesByDay),
-      dailyFirstShareNotes: fillDaily(dayKeys, firstShareByDay),
-      topNoteBookTitles,
-      topUploadUsers,
-      topAiUsers,
-      dailyNewNoteBooks: fillDaily(dayKeys, notebooksByDay),
-      dailyDistinctNoteCreators: fillDaily(dayKeys, creatorsByDay),
-      dailyNotesWithImages: fillDaily(dayKeys, withImagesByDay),
-      dailyAiCallsTotal: fillDaily(dayKeys, aiDay),
-      dailyUploadImagesNoteTotal: fillDaily(dayKeys, uploadDay),
-      dailyNewUserTemplates: fillDaily(dayKeys, userTplByDay),
-      dailyRemindersCreated: fillDaily(dayKeys, remCByDay),
-      dailyRemindersSent: fillDaily(dayKeys, remSByDay),
-      notesByHour,
-    };
+      return {
+        statsTimezone: tz,
+        range: { startDate, endDate },
+        generatedAt: new Date().toISOString(),
+        systemCoverUsage,
+        tagUsage,
+        systemTemplateUsage,
+        dailyNewUsers: fillDaily(dayKeys, newUsersByDay),
+        dailyNewNotes: fillDaily(dayKeys, newNotesByDay),
+        dailyFirstShareNotes: fillDaily(dayKeys, firstShareByDay),
+        topNoteBookTitles,
+        topUploadUsers,
+        topAiUsers,
+        dailyNewNoteBooks: fillDaily(dayKeys, notebooksByDay),
+        dailyDistinctNoteCreators: fillDaily(dayKeys, creatorsByDay),
+        dailyNotesWithImages: fillDaily(dayKeys, withImagesByDay),
+        dailyAiCallsTotal: fillDaily(dayKeys, aiDay),
+        dailyUploadImagesNoteTotal: fillDaily(dayKeys, uploadDay),
+        dailyNewUserTemplates: fillDaily(dayKeys, userTplByDay),
+        dailyRemindersCreated: fillDaily(dayKeys, remCByDay),
+        dailyRemindersSent: fillDaily(dayKeys, remSByDay),
+        notesByHour,
+      };
+    });
   }
 }

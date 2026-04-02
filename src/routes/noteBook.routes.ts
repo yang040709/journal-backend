@@ -356,7 +356,7 @@ router.delete("/:id", async (ctx: AuthContext) => {
       return;
     }
 
-    success(ctx, { deleted: true }, "删除手帐本成功");
+    success(ctx, { deleted: true }, "手帐本已删除，手帐本内的手帐已移入废纸篓");
   } catch (err) {
     console.error("删除手帐本失败:", err);
     error(ctx, "删除手帐本失败", ErrorCodes.INTERNAL_ERROR, 500);

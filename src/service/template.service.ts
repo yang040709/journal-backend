@@ -71,6 +71,9 @@ export interface PaginationParams {
   search?: string;
 }
 
+const MAX_PAGE_DEPTH = 10_000;
+const MIN_SEARCH_KEYWORD_LENGTH = 1;
+
 export class TemplateService {
   /**
    * 创建自定义模板
@@ -113,6 +116,9 @@ export class TemplateService {
   ): Promise<{ items: LeanTemplate[]; total: number }> {
     const page = Math.max(1, params.page || 1);
     const limit = Math.min(100, Math.max(1, params.limit || 20));
+    if (page * limit > MAX_PAGE_DEPTH) {
+      throw new Error(`分页深度超过限制（page*limit <= ${MAX_PAGE_DEPTH}）`);
+    }
     const skip = (page - 1) * limit;
 
     const sortField = params.sortBy || "updatedAt";
@@ -123,7 +129,12 @@ export class TemplateService {
 
     // 搜索筛选
     if (params.search) {
-      const searchRegex = new RegExp(params.search, "i");
+      const keyword = params.search.trim();
+      if (keyword.length < MIN_SEARCH_KEYWORD_LENGTH) {
+        throw new Error(`搜索关键词至少 ${MIN_SEARCH_KEYWORD_LENGTH} 个字符`);
+      }
+      const safeKeyword = keyword.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      const searchRegex = new RegExp(safeKeyword, "i");
       query.$or = [{ name: searchRegex }, { description: searchRegex }];
     }
 

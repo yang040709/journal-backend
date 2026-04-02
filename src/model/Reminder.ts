@@ -91,7 +91,8 @@ const reminderSchema = new Schema(
 reminderSchema.index({ userId: 1, remindTime: 1 });
 reminderSchema.index({ remindTime: 1, sendStatus: 1 });
 reminderSchema.index({ subscriptionStatus: 1, sendStatus: 1 });
-reminderSchema.index({ noteId: 1 });
+reminderSchema.index({ userId: 1, remindTime: -1 });
+reminderSchema.index({ userId: 1, sendStatus: 1, remindTime: -1 });
 
 // 添加虚拟字段id
 reminderSchema.virtual("id").get(function (this: any) {

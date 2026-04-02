@@ -12,12 +12,42 @@ import { z } from "zod";
 import { NotePresetTagService } from "../service/notePresetTag.service";
 import { UserNoteCustomTagService } from "../service/userNoteCustomTag.service";
 
+const MAX_PAGE_DEPTH = 10_000;
+const MIN_SEARCH_KEYWORD_LENGTH = 1;
+
+function hasAllowedPageDepth(page: number, limit: number): boolean {
+  return page * limit <= MAX_PAGE_DEPTH;
+}
+
 const router = new Router({
   prefix: "/notes",
 });
 
 // 所有路由都需要认证
 router.use(authMiddleware);
+
+const presetTagsQuerySchema = z.object({
+  q: z
+    .string()
+    .optional()
+    .transform((val) => (typeof val === "string" ? val.trim() : "")),
+});
+
+function filterTagsByKeyword(tags: string[], keyword: string): string[] {
+  if (!keyword) return tags;
+  const lowerKeyword = keyword.toLocaleLowerCase();
+  return tags.filter((tag) => {
+    if (!tag) return false;
+    return (
+      tag.includes(keyword) || tag.toLocaleLowerCase().includes(lowerKeyword)
+    );
+  });
+}
+
+function isGuardrailError(err: unknown): err is Error {
+  if (!(err instanceof Error)) return false;
+  return err.message.includes("分页深度超过限制") || err.message.includes("搜索关键词至少");
+}
 
 /**
  * @swagger
@@ -29,25 +59,37 @@ router.use(authMiddleware);
  *     description: data.tags 为合并去重后的可选列表；data.systemTags、data.customTags 分区展示用
  *     security:
  *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: q
+ *         required: false
+ *         schema:
+ *           type: string
+ *         description: 标签关键字（按包含关系过滤，忽略大小写）
  *     responses:
  *       200:
  *         description: 成功
  */
 /**
- * 获取可选标签：系统预设 + 当前用户自定义合并为 tags；并返回 systemTags、customTags（须在 /:id 等动态段之前注册）
+ * 获取可选标签：系统预设 + 当前用户自定义合并为 tags；可通过 q 关键字过滤
  */
 router.get("/preset-tags", async (ctx: AuthContext) => {
   try {
+    const query = presetTagsQuerySchema.parse(ctx.query);
     const userId = ctx.user!.userId;
     const systemTags = await NotePresetTagService.getTagNames();
     const customTags = await UserNoteCustomTagService.list(userId);
-    const tags = UserNoteCustomTagService.mergeSelectableTags(
-      systemTags,
-      customTags,
+    const tags = filterTagsByKeyword(
+      UserNoteCustomTagService.mergeSelectableTags(systemTags, customTags),
+      query.q,
     );
     success(
       ctx,
-      { tags, systemTags, customTags },
+      {
+        tags,
+        systemTags: filterTagsByKeyword(systemTags, query.q),
+        customTags: filterTagsByKeyword(customTags, query.q),
+      },
       "获取预设标签成功",
     );
   } catch (err) {
@@ -208,11 +250,14 @@ const paginationSchema = z.object({
     }),
   startTime: z.coerce.number().optional(),
   endTime: z.coerce.number().optional(),
+}).refine((val) => hasAllowedPageDepth(val.page, val.limit), {
+  message: `分页深度超过限制（page*limit <= ${MAX_PAGE_DEPTH}）`,
+  path: ["page"],
 });
 
 // 搜索参数验证（分页规则与 paginationSchema 一致）
 const searchSchema = z.object({
-  q: z.string().min(1, "搜索关键词不能为空"),
+  q: z.string().trim().min(MIN_SEARCH_KEYWORD_LENGTH, `搜索关键词至少 ${MIN_SEARCH_KEYWORD_LENGTH} 个字符`),
   page: z.coerce.number().int().positive().optional().default(1),
   limit: z.coerce.number().int().min(1).max(100).optional().default(20),
   noteBookId: z.string().optional(),
@@ -226,11 +271,14 @@ const searchSchema = z.object({
     }),
   startTime: z.coerce.number().optional(),
   endTime: z.coerce.number().optional(),
+}).refine((val) => hasAllowedPageDepth(val.page, val.limit), {
+  message: `分页深度超过限制（page*limit <= ${MAX_PAGE_DEPTH}）`,
+  path: ["page"],
 });
 
 /** 旧版客户端：GET /notes/search，data 为数组；单次最多 100 条，无分页元数据 */
 const searchLegacySchema = z.object({
-  q: z.string().min(1, "搜索关键词不能为空"),
+  q: z.string().trim().min(MIN_SEARCH_KEYWORD_LENGTH, `搜索关键词至少 ${MIN_SEARCH_KEYWORD_LENGTH} 个字符`),
   limit: z.coerce.number().int().min(1).max(100).optional().default(100),
   noteBookId: z.string().optional(),
   tags: z
@@ -248,6 +296,9 @@ const searchLegacySchema = z.object({
 // 批量删除请求验证
 const batchDeleteSchema = z.object({
   noteIds: z.array(z.string()).min(1, "至少需要提供一个手帐ID"),
+});
+const restoreNoteSchema = z.object({
+  targetNoteBookId: z.string().optional(),
 });
 
 // AI 写手帐
@@ -363,10 +414,39 @@ router.get("/", async (ctx: AuthContext) => {
   } catch (err) {
     if (err instanceof z.ZodError) {
       error(ctx, "参数验证失败", ErrorCodes.PARAM_ERROR, 400);
+    } else if (isGuardrailError(err)) {
+      error(ctx, err.message, ErrorCodes.PARAM_ERROR, 400);
     } else {
       console.error("获取手帐列表失败:", err);
       error(ctx, "获取手帐列表失败", ErrorCodes.INTERNAL_ERROR, 500);
     }
+  }
+});
+
+router.get("/trash", async (ctx: AuthContext) => {
+  try {
+    const userId = ctx.user!.userId;
+    const params = paginationSchema.parse(ctx.query);
+    const result = await NoteService.getTrashNotes(userId, params);
+    paginatedSuccess(
+      ctx,
+      result.items,
+      result.total,
+      params.page,
+      params.limit,
+      "获取废纸篓手帐成功",
+    );
+  } catch (err) {
+    if (err instanceof z.ZodError) {
+      error(ctx, "参数验证失败", ErrorCodes.PARAM_ERROR, 400);
+      return;
+    }
+    if (isGuardrailError(err)) {
+      error(ctx, err.message, ErrorCodes.PARAM_ERROR, 400);
+      return;
+    }
+    console.error("获取废纸篓手帐失败:", err);
+    error(ctx, "获取废纸篓手帐失败", ErrorCodes.INTERNAL_ERROR, 500);
   }
 });
 
@@ -469,6 +549,8 @@ router.get("/search/page", async (ctx: AuthContext) => {
   } catch (err) {
     if (err instanceof z.ZodError) {
       error(ctx, "参数验证失败", ErrorCodes.PARAM_ERROR, 400);
+    } else if (isGuardrailError(err)) {
+      error(ctx, err.message, ErrorCodes.PARAM_ERROR, 400);
     } else {
       console.error("搜索手帐失败:", err);
       error(ctx, "搜索手帐失败", ErrorCodes.INTERNAL_ERROR, 500);
@@ -559,6 +641,8 @@ router.get("/search", async (ctx: AuthContext) => {
   } catch (err) {
     if (err instanceof z.ZodError) {
       error(ctx, "参数验证失败", ErrorCodes.PARAM_ERROR, 400);
+    } else if (isGuardrailError(err)) {
+      error(ctx, err.message, ErrorCodes.PARAM_ERROR, 400);
     } else {
       console.error("搜索手帐失败:", err);
       error(ctx, "搜索手帐失败", ErrorCodes.INTERNAL_ERROR, 500);
@@ -968,10 +1052,59 @@ router.delete("/:id", async (ctx: AuthContext) => {
       return;
     }
 
-    success(ctx, { deleted: true }, "删除手帐成功");
+    success(ctx, { deleted: true }, "已移入废纸篓");
   } catch (err) {
     console.error("删除手帐失败:", err);
     error(ctx, "删除手帐失败", ErrorCodes.INTERNAL_ERROR, 500);
+  }
+});
+
+router.post("/:id/restore", async (ctx: AuthContext) => {
+  try {
+    const userId = ctx.user!.userId;
+    const { id } = ctx.params;
+    const body = restoreNoteSchema.parse(ctx.request.body || {});
+    const restored = await NoteService.restoreNote(id, userId, body.targetNoteBookId);
+    if (!restored) {
+      error(ctx, "手帐不存在", ErrorCodes.NOTE_NOT_FOUND, 404);
+      return;
+    }
+    success(
+      ctx,
+      {
+        note: restored.note,
+        restoredToNoteBookId: restored.restoredToNoteBookId,
+        restoredToNoteBookTitle: restored.restoredToNoteBookTitle,
+      },
+      "恢复手帐成功",
+    );
+  } catch (err) {
+    if (err instanceof z.ZodError) {
+      error(ctx, "参数验证失败", ErrorCodes.PARAM_ERROR, 400);
+      return;
+    }
+    if (err instanceof Error && err.message === "目标手帐本不存在或已删除") {
+      error(ctx, err.message, ErrorCodes.NOTEBOOK_NOT_FOUND, 404);
+      return;
+    }
+    console.error("恢复手帐失败:", err);
+    error(ctx, "恢复手帐失败", ErrorCodes.INTERNAL_ERROR, 500);
+  }
+});
+
+router.delete("/:id/purge", async (ctx: AuthContext) => {
+  try {
+    const userId = ctx.user!.userId;
+    const { id } = ctx.params;
+    const deleted = await NoteService.purgeNote(id, userId);
+    if (!deleted) {
+      error(ctx, "手帐不存在", ErrorCodes.NOTE_NOT_FOUND, 404);
+      return;
+    }
+    success(ctx, { deleted: true }, "彻底删除成功");
+  } catch (err) {
+    console.error("彻底删除手帐失败:", err);
+    error(ctx, "彻底删除手帐失败", ErrorCodes.INTERNAL_ERROR, 500);
   }
 });
 
@@ -1029,7 +1162,7 @@ router.post("/batch-delete", async (ctx: AuthContext) => {
       userId,
     );
 
-    success(ctx, { deletedCount }, `成功删除 ${deletedCount} 条手帐`);
+    success(ctx, { deletedCount }, `已移入废纸篓 ${deletedCount} 条手帐`);
   } catch (err) {
     if (err instanceof z.ZodError) {
       error(ctx, "参数验证失败", ErrorCodes.PARAM_ERROR, 400);

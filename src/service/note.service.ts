@@ -5,8 +5,6 @@ import { ErrorCodes } from "../utils/response";
 import { toLeanNoteArray, toLeanNote } from "../utils/typeUtils";
 import { checkNoteContent } from "../utils/sensitive-encrypted";
 import { nanoid } from "nanoid";
-import { NotePresetTagService } from "./notePresetTag.service";
-import { UserNoteCustomTagService } from "./userNoteCustomTag.service";
 import { recordFromNoteImages } from "./userImageAsset.service";
 
 export interface CreateNoteData {
@@ -84,7 +82,91 @@ export interface SearchNotesResult {
   total: number;
 }
 
+const TRASH_RETAIN_DAYS = 7;
+const NOTE_TAG_MAX_LENGTH = 20;
+const NOTE_TAG_MAX_COUNT = 100;
+const MAX_PAGE_DEPTH = 10_000;
+const MIN_SEARCH_KEYWORD_LENGTH = 1;
+
+function sanitizeNoteTags(tags: unknown): string[] {
+  if (!Array.isArray(tags)) return [];
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const raw of tags) {
+    const s = String(raw ?? "").trim();
+    if (!s || seen.has(s)) continue;
+    if (s.length > NOTE_TAG_MAX_LENGTH) continue;
+    seen.add(s);
+    out.push(s);
+    if (out.length >= NOTE_TAG_MAX_COUNT) break;
+  }
+  return out;
+}
+
 export class NoteService {
+  private static getTrashExpireAt(base: Date = new Date()): Date {
+    return new Date(base.getTime() + TRASH_RETAIN_DAYS * 24 * 60 * 60 * 1000);
+  }
+
+  private static async resolveRestoreNoteBookId(
+    userId: string,
+    currentNoteBookId: string,
+    targetNoteBookId?: string,
+  ): Promise<{ noteBookId: string; title: string }> {
+    if (targetNoteBookId) {
+      const target = await NoteBook.findOne({
+        _id: targetNoteBookId,
+        userId,
+        isDeleted: { $ne: true },
+      });
+      if (!target) {
+        throw new Error("目标手帐本不存在或已删除");
+      }
+      return {
+        noteBookId: String(target.id),
+        title: target.title,
+      };
+    }
+
+    const current = await NoteBook.findOne({
+      _id: currentNoteBookId,
+      userId,
+      isDeleted: { $ne: true },
+    });
+    if (current) {
+      return {
+        noteBookId: String(current.id),
+        title: current.title,
+      };
+    }
+
+    const fallback = await NoteBook.findOne({
+      userId,
+      isDeleted: { $ne: true },
+    }).sort({ updatedAt: -1 });
+    if (fallback) {
+      return {
+        noteBookId: String(fallback.id),
+        title: fallback.title,
+      };
+    }
+
+    const created = new NoteBook({
+      title: "已恢复手帐",
+      coverImg: "",
+      count: 0,
+      userId,
+      isDeleted: false,
+      deletedAt: null,
+      deleteExpireAt: null,
+    });
+    await created.save();
+    return {
+      noteBookId: String(created.id),
+      title: created.title,
+    };
+  }
+
   /**
    * 创建手帐
    */
@@ -93,16 +175,14 @@ export class NoteService {
     const noteBook = await NoteBook.findOne({
       _id: data.noteBookId,
       userId: data.userId,
+      isDeleted: { $ne: true },
     });
     if (!noteBook) {
       throw new Error("手帐本不存在或无权访问");
     }
 
     const key = data.appliedSystemTemplateKey?.trim();
-    const allowedTags = await UserNoteCustomTagService.getAllowedTagNames(
-      data.userId,
-    );
-    const tags = NotePresetTagService.filterToPreset(data.tags || [], allowedTags);
+    const tags = sanitizeNoteTags(data.tags || []);
     const note = new Note({
       noteBookId: data.noteBookId,
       title: data.title,
@@ -113,6 +193,9 @@ export class NoteService {
       isShare: false,
       shareId: nanoid(12),
       ...(key ? { appliedSystemTemplateKey: key.slice(0, 120) } : {}),
+      isDeleted: false,
+      deletedAt: null,
+      deleteExpireAt: null,
     });
 
     await note.save();
@@ -146,13 +229,16 @@ export class NoteService {
   ): Promise<{ items: LeanNote[]; total: number }> {
     const page = Math.max(1, params.page || 1);
     const limit = Math.min(100, Math.max(1, params.limit || 20));
+    if (page * limit > MAX_PAGE_DEPTH) {
+      throw new Error(`分页深度超过限制（page*limit <= ${MAX_PAGE_DEPTH}）`);
+    }
     const skip = (page - 1) * limit;
 
     const sortField = params.sortBy || "updatedAt";
     const sortOrder = params.order === "asc" ? 1 : -1;
 
     // 构建查询条件
-    const query: any = { userId };
+    const query: any = { userId, isDeleted: { $ne: true } };
 
     // 手帐本筛选
     if (params.noteBookId) {
@@ -197,7 +283,7 @@ export class NoteService {
     id: string,
     userId: string,
   ): Promise<LeanNote | null> {
-    const note = await Note.findOne({ _id: id, userId }).lean();
+    const note = await Note.findOne({ _id: id, userId, isDeleted: { $ne: true } }).lean();
     return note ? toLeanNote(note) : null;
   }
 
@@ -209,7 +295,7 @@ export class NoteService {
     userId: string,
     data: UpdateNoteData,
   ): Promise<INote | null> {
-    const note = await Note.findOne({ _id: id, userId });
+    const note = await Note.findOne({ _id: id, userId, isDeleted: { $ne: true } });
     if (!note) {
       return null;
     }
@@ -223,6 +309,7 @@ export class NoteService {
       const newNoteBook = await NoteBook.findOne({
         _id: newNoteBookId,
         userId,
+        isDeleted: { $ne: true },
       });
       if (!newNoteBook) {
         throw new Error("目标手帐本不存在或无权访问");
@@ -240,8 +327,7 @@ export class NoteService {
     if (data.title !== undefined) note.title = data.title;
     if (data.content !== undefined) note.content = data.content;
     if (data.tags !== undefined) {
-      const allowedTags = await UserNoteCustomTagService.getAllowedTagNames(userId);
-      note.tags = NotePresetTagService.filterToPreset(data.tags, allowedTags);
+      note.tags = sanitizeNoteTags(data.tags);
     }
     const previousImages = data.images !== undefined ? [...(note.images || [])] : null;
     if (data.images !== undefined) note.images = data.images;
@@ -273,13 +359,24 @@ export class NoteService {
    * 删除手帐
    */
   static async deleteNote(id: string, userId: string): Promise<boolean> {
-    const note = await Note.findOne({ _id: id, userId });
+    const note = await Note.findOne({ _id: id, userId, isDeleted: { $ne: true } });
     if (!note) {
       return false;
     }
 
-    // 删除手帐
-    await Note.deleteOne({ _id: id, userId });
+    const deletedAt = new Date();
+    const deleteExpireAt = NoteService.getTrashExpireAt(deletedAt);
+    await Note.updateOne(
+      { _id: id, userId, isDeleted: { $ne: true } },
+      {
+        $set: {
+          isDeleted: true,
+          deletedAt,
+          deleteExpireAt,
+          isShare: false,
+        },
+      },
+    );
 
     // 更新手帐本的手帐数量
     await NoteBook.updateOne({ _id: note.noteBookId }, { $inc: { count: -1 } });
@@ -311,7 +408,11 @@ export class NoteService {
     }
 
     // 获取要删除的手帐信息，以便更新手帐本计数
-    const notes = await Note.find({ _id: { $in: noteIds }, userId });
+    const notes = await Note.find({
+      _id: { $in: noteIds },
+      userId,
+      isDeleted: { $ne: true },
+    });
     if (!notes.length) {
       return 0;
     }
@@ -323,8 +424,19 @@ export class NoteService {
         (noteBookCounts[note.noteBookId] || 0) + 1;
     });
 
-    // 批量删除手帐
-    const result = await Note.deleteMany({ _id: { $in: noteIds }, userId });
+    const deletedAt = new Date();
+    const deleteExpireAt = NoteService.getTrashExpireAt(deletedAt);
+    const result = await Note.updateMany(
+      { _id: { $in: noteIds }, userId, isDeleted: { $ne: true } },
+      {
+        $set: {
+          isDeleted: true,
+          deletedAt,
+          deleteExpireAt,
+          isShare: false,
+        },
+      },
+    );
 
     // 更新手帐本计数
     const updatePromises = Object.entries(noteBookCounts).map(
@@ -339,13 +451,13 @@ export class NoteService {
         type: "delete",
         target: "note",
         targetId: "batch",
-        title: `批量删除手帐：共删除${result.deletedCount}条`,
+        title: `批量删除手帐：共删除${result.modifiedCount || 0}条`,
         userId,
       },
       { blocking: false },
     );
 
-    return result.deletedCount || 0;
+    return result.modifiedCount || 0;
   }
 
   /**
@@ -355,12 +467,15 @@ export class NoteService {
     userId: string,
     params: SearchParams,
   ): Promise<SearchNotesResult> {
-    const query: any = { userId };
+    const query: any = { userId, isDeleted: { $ne: true } };
 
     // 文本搜索 - 使用正则表达式替代 $text
     if (params.q) {
       const keyword = params.q.trim();
       if (keyword) {
+        if (keyword.length < MIN_SEARCH_KEYWORD_LENGTH) {
+          throw new Error(`搜索关键词至少 ${MIN_SEARCH_KEYWORD_LENGTH} 个字符`);
+        }
         // 转义正则特殊字符，防止注入或报错
         const safeKeyword = keyword.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
         const searchRegex = new RegExp(safeKeyword, "i"); // i = 忽略大小写
@@ -391,6 +506,9 @@ export class NoteService {
 
     const page = params.page ?? 1;
     const limit = params.limit ?? 20;
+    if (page * limit > MAX_PAGE_DEPTH) {
+      throw new Error(`分页深度超过限制（page*limit <= ${MAX_PAGE_DEPTH}）`);
+    }
     const skip = (page - 1) * limit;
 
     const total = await Note.countDocuments(query);
@@ -415,7 +533,7 @@ export class NoteService {
     userId: string,
     limit: number = 10,
   ): Promise<LeanNote[]> {
-    const notes = await Note.find({ userId })
+    const notes = await Note.find({ userId, isDeleted: { $ne: true } })
       .select("-content") // 排除 content 字段，减少网络传输
       .sort({ updatedAt: -1 })
       .limit(Math.min(limit, 100))
@@ -431,7 +549,7 @@ export class NoteService {
     noteId: string,
     userId: string,
   ): Promise<boolean> {
-    const note = await Note.findOne({ _id: noteId, userId });
+    const note = await Note.findOne({ _id: noteId, userId, isDeleted: { $ne: true } });
     return !!note;
   }
 
@@ -445,6 +563,7 @@ export class NoteService {
     const note = await Note.findOne({
       shareId,
       isShare: true,
+      isDeleted: { $ne: true },
     }).lean();
 
     if (!note) {
@@ -465,7 +584,7 @@ export class NoteService {
     userId: string,
     share: boolean,
   ): Promise<INote | null> {
-    const note = await Note.findOne({ _id: noteId, userId });
+    const note = await Note.findOne({ _id: noteId, userId, isDeleted: { $ne: true } });
     if (!note) {
       return null;
     }
@@ -531,11 +650,71 @@ export class NoteService {
     const notes = await Note.find({
       userId,
       isShare: true,
+      isDeleted: { $ne: true },
     })
       .select("-content") // 排除 content 字段，减少网络传输
       .sort({ updatedAt: -1 })
       .lean();
 
     return toLeanNoteArray(notes);
+  }
+
+  static async getTrashNotes(
+    userId: string,
+    params: PaginationParams = {},
+  ): Promise<{ items: LeanNote[]; total: number }> {
+    const page = Math.max(1, params.page || 1);
+    const limit = Math.min(100, Math.max(1, params.limit || 20));
+    if (page * limit > MAX_PAGE_DEPTH) {
+      throw new Error(`分页深度超过限制（page*limit <= ${MAX_PAGE_DEPTH}）`);
+    }
+    const skip = (page - 1) * limit;
+    const now = new Date();
+    const query = {
+      userId,
+      isDeleted: true,
+      deleteExpireAt: { $gt: now },
+    };
+
+    const [items, total] = await Promise.all([
+      Note.find(query).sort({ deletedAt: -1 }).skip(skip).limit(limit).lean(),
+      Note.countDocuments(query),
+    ]);
+
+    return { items: toLeanNoteArray(items), total };
+  }
+
+  static async restoreNote(
+    id: string,
+    userId: string,
+    targetNoteBookId?: string,
+  ): Promise<{ note: INote; restoredToNoteBookId: string; restoredToNoteBookTitle: string } | null> {
+    const note = await Note.findOne({ _id: id, userId, isDeleted: true });
+    if (!note) {
+      return null;
+    }
+
+    const { noteBookId, title } = await NoteService.resolveRestoreNoteBookId(
+      userId,
+      note.noteBookId,
+      targetNoteBookId,
+    );
+    note.noteBookId = noteBookId;
+    note.isDeleted = false;
+    note.deletedAt = null;
+    note.deleteExpireAt = null;
+    await note.save();
+    await NoteBook.updateOne({ _id: noteBookId }, { $inc: { count: 1 } });
+
+    return {
+      note,
+      restoredToNoteBookId: noteBookId,
+      restoredToNoteBookTitle: title,
+    };
+  }
+
+  static async purgeNote(id: string, userId: string): Promise<boolean> {
+    const result = await Note.deleteOne({ _id: id, userId, isDeleted: true });
+    return Boolean(result.deletedCount);
   }
 }

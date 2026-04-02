@@ -127,6 +127,29 @@ export interface PointsSummary {
   };
 }
 
+type LedgerFlowType = "income" | "expense";
+
+interface UserTransactionQuery {
+  page: number;
+  pageSize: number;
+  flowType: "all" | LedgerFlowType;
+}
+
+interface AdminTransactionQuery extends UserTransactionQuery {
+  userId?: string;
+  keyword?: string;
+  bizType?: string;
+  startTime?: Date;
+  endTime?: Date;
+}
+
+const MAX_PAGE_DEPTH = 10_000;
+const MIN_KEYWORD_LENGTH = 2;
+
+function buildFlowTypeFromDelta(pointsDelta: number): LedgerFlowType {
+  return pointsDelta >= 0 ? "income" : "expense";
+}
+
 async function loadRulesDocRaw(): Promise<Record<string, unknown> | null> {
   const doc = await SystemConfig.findOne({ configKey: SYSTEM_CONFIG_POINTS_RULES_KEY })
     .select("pointsRules")
@@ -326,6 +349,29 @@ export class PointsService {
       { upsert: true, new: true },
     ).lean();
     const points = Math.max(0, Math.floor(Number((updatedUser as { points?: number })?.points ?? 0)));
+    const balanceBefore = Math.max(0, points - rewardPoints);
+
+    try {
+      await PointsLedger.create({
+        userId,
+        kind: "ad_reward",
+        bizType: "ad_reward",
+        bizId: rewardToken,
+        title: "观看广告奖励",
+        flowType: buildFlowTypeFromDelta(rewardPoints),
+        pointsDelta: rewardPoints,
+        balanceBefore,
+        balanceAfter: points,
+        operatorType: "system",
+        operatorId: "points.ad_reward",
+        operatorName: "system",
+      });
+    } catch (err: unknown) {
+      const e = err as { code?: number };
+      if (e?.code !== 11000) {
+        throw err;
+      }
+    }
 
     void ActivityLogger.record(
       {
@@ -396,15 +442,26 @@ export class PointsService {
     }
 
     const ledgerKind = kind === "upload" ? "exchange_upload" : "exchange_ai";
+    const bizType = kind === "upload" ? "exchange_image_quota" : "exchange_ai_quota";
+    const balanceAfter = Math.max(0, Math.floor(Number((updated as { points?: number }).points ?? 0)));
+    const balanceBefore = balanceAfter + cost;
     await PointsLedger.create({
       userId,
       kind: ledgerKind,
+      bizType,
+      title: kind === "upload" ? "兑换图片上传额度" : "兑换 AI 次数",
+      flowType: buildFlowTypeFromDelta(-cost),
       pointsDelta: -cost,
+      balanceBefore,
+      balanceAfter,
       quotaDelta: gain,
       ruleSnapshot,
+      operatorType: "user",
+      operatorId: userId,
+      operatorName: userId,
     });
 
-    const points = Math.max(0, Math.floor(Number((updated as { points?: number }).points ?? 0)));
+    const points = balanceAfter;
     const uploadExtra = Math.max(
       0,
       Math.floor(Number((updated as { uploadExtraQuotaTotal?: number }).uploadExtraQuotaTotal ?? 0)),
@@ -441,6 +498,117 @@ export class PointsService {
     return { points, quotaGain: gain, aiBonusQuota: aiBonus };
   }
 
+  private static serializeLedgerRow(row: Record<string, unknown>) {
+    const pointsDelta = Number(row.pointsDelta ?? 0);
+    const type = pointsDelta >= 0 ? "income" : "expense";
+    const kind = String(row.kind ?? "");
+    const titleByKind: Record<string, string> = {
+      ad_reward: "观看广告奖励",
+      exchange_upload: "兑换图片上传额度",
+      exchange_ai: "兑换 AI 次数",
+      admin_adjust: "后台积分调整",
+    };
+    const occurredAt = row.createdAt instanceof Date ? row.createdAt.toISOString() : row.createdAt;
+    return {
+      id: String(row._id ?? ""),
+      title: String(row.title || titleByKind[kind] || "积分变动"),
+      type,
+      bizType: String(row.bizType || kind || "unknown"),
+      change: pointsDelta,
+      balanceBefore: Number(row.balanceBefore ?? 0),
+      balanceAfter: Number(row.balanceAfter ?? 0),
+      occurredAt,
+      remark: String(row.remark || row.reason || ""),
+      operatorType: row.operatorType || null,
+      operatorId: row.operatorId || row.adminId || null,
+      operatorName: row.operatorName || row.adminUsername || null,
+      userId: row.userId ? String(row.userId) : undefined,
+    };
+  }
+
+  private static buildLedgerQuery(
+    query: UserTransactionQuery | AdminTransactionQuery,
+    fixedUserId?: string,
+  ): Record<string, unknown> {
+    const q: Record<string, unknown> = {};
+    if (fixedUserId) {
+      q.userId = fixedUserId;
+    } else if ((query as AdminTransactionQuery).userId) {
+      q.userId = String((query as AdminTransactionQuery).userId).trim();
+    }
+    if (query.flowType === "income") {
+      q.pointsDelta = { $gt: 0 };
+    } else if (query.flowType === "expense") {
+      q.pointsDelta = { $lt: 0 };
+    }
+    const adminQuery = query as AdminTransactionQuery;
+    if (adminQuery.bizType?.trim()) {
+      q.bizType = adminQuery.bizType.trim();
+    }
+    if (adminQuery.keyword?.trim()) {
+      q.userId = { $regex: adminQuery.keyword.trim(), $options: "i" };
+    }
+    if (adminQuery.startTime || adminQuery.endTime) {
+      const createdAt: Record<string, Date> = {};
+      if (adminQuery.startTime) createdAt.$gte = adminQuery.startTime;
+      if (adminQuery.endTime) createdAt.$lte = adminQuery.endTime;
+      q.createdAt = createdAt;
+    }
+    return q;
+  }
+
+  static async listUserTransactions(userId: string, query: UserTransactionQuery) {
+    const page = Math.max(1, Math.floor(Number(query.page || 1)));
+    const pageSize = Math.min(50, Math.max(1, Math.floor(Number(query.pageSize || 20))));
+    if (page * pageSize > MAX_PAGE_DEPTH) {
+      throw new Error(`分页深度超过限制（page*pageSize <= ${MAX_PAGE_DEPTH}）`);
+    }
+    const skip = (page - 1) * pageSize;
+    const q = PointsService.buildLedgerQuery(query, userId);
+    const [rows, total, user] = await Promise.all([
+      PointsLedger.find(q).sort({ createdAt: -1 }).skip(skip).limit(pageSize).lean(),
+      PointsLedger.countDocuments(q),
+      User.findOne({ userId }).select("points").lean(),
+    ]);
+    const currentBalance = Math.max(0, Math.floor(Number((user as { points?: number })?.points ?? 0)));
+    return {
+      list: rows.map((row) => PointsService.serializeLedgerRow(row as unknown as Record<string, unknown>)),
+      pagination: {
+        page,
+        pageSize,
+        total,
+        hasMore: skip + rows.length < total,
+      },
+      summary: { currentBalance },
+    };
+  }
+
+  static async adminListTransactions(query: AdminTransactionQuery) {
+    const page = Math.max(1, Math.floor(Number(query.page || 1)));
+    const pageSize = Math.min(100, Math.max(1, Math.floor(Number(query.pageSize || 20))));
+    if (page * pageSize > MAX_PAGE_DEPTH) {
+      throw new Error(`分页深度超过限制（page*pageSize <= ${MAX_PAGE_DEPTH}）`);
+    }
+    if (query.keyword?.trim() && query.keyword.trim().length < MIN_KEYWORD_LENGTH) {
+      throw new Error(`搜索关键词至少 ${MIN_KEYWORD_LENGTH} 个字符`);
+    }
+    const skip = (page - 1) * pageSize;
+    const q = PointsService.buildLedgerQuery(query);
+    const [rows, total] = await Promise.all([
+      PointsLedger.find(q).sort({ createdAt: -1 }).skip(skip).limit(pageSize).lean(),
+      PointsLedger.countDocuments(q),
+    ]);
+    return {
+      list: rows.map((row) => PointsService.serializeLedgerRow(row as unknown as Record<string, unknown>)),
+      pagination: {
+        page,
+        pageSize,
+        total,
+        hasMore: skip + rows.length < total,
+      },
+    };
+  }
+
   static async adminSetPoints(
     userId: string,
     newPoints: number,
@@ -460,10 +628,19 @@ export class PointsService {
       await PointsLedger.create({
         userId,
         kind: "admin_adjust",
+        bizType: "admin_adjust",
+        title: "后台积分调整",
+        flowType: buildFlowTypeFromDelta(delta),
         pointsDelta: delta,
+        balanceBefore: prev,
+        balanceAfter: next,
         reason: reason.trim(),
         adminId: admin.id,
         adminUsername: admin.username,
+        operatorType: "admin",
+        operatorId: admin.id,
+        operatorName: admin.username,
+        remark: reason.trim(),
       });
     }
     return { points: next };

@@ -2,7 +2,7 @@ import dotenv from "dotenv";
 import app, { startSchedulersAfterDBConnection } from "./app";
 
 import { connectDB } from "./config/db";
-import { runMigrations } from "./utils/migration";
+import { runMigrations, migrateSoftDeleteBackfill } from "./utils/migration";
 import { initSensitiveFilter } from "./utils/sensitive-encrypted";
 import { ensureAdminBootstrap } from "./service/adminBootstrap.service";
 import { ensureSystemTemplates } from "./service/systemTemplateSeed.service";
@@ -40,6 +40,8 @@ const init = async () => {
 
     // 执行数据库迁移
     await runMigrations();
+    // 兼容旧版本数据：自动补齐软删除字段（幂等，部署后会自动执行）
+    await migrateSoftDeleteBackfill();
 
     await ensureAdminBootstrap();
     await ensureSystemTemplates();

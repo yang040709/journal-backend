@@ -6,6 +6,9 @@ export interface INoteBook extends Document {
   coverImg?: string;
   count: number;
   userId: string;
+  isDeleted: boolean;
+  deletedAt?: Date | null;
+  deleteExpireAt?: Date | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -32,6 +35,22 @@ const noteBookSchema = new Schema(
       required: [true, "用户ID不能为空"],
       index: true,
     },
+    isDeleted: {
+      type: Boolean,
+      default: false,
+      index: true,
+    },
+    deletedAt: {
+      type: Date,
+      default: null,
+      sparse: true,
+    },
+    deleteExpireAt: {
+      type: Date,
+      default: null,
+      sparse: true,
+      index: true,
+    },
   },
   {
     timestamps: true,
@@ -47,6 +66,8 @@ const noteBookSchema = new Schema(
 // 创建索引
 noteBookSchema.index({ userId: 1, createdAt: -1 });
 noteBookSchema.index({ userId: 1, updatedAt: -1 });
+noteBookSchema.index({ userId: 1, isDeleted: 1, updatedAt: -1 });
+noteBookSchema.index({ userId: 1, isDeleted: 1, deleteExpireAt: 1 });
 
 // 添加虚拟字段id
 noteBookSchema.virtual("id").get(function (this: any) {

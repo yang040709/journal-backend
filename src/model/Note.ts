@@ -14,6 +14,9 @@ export interface INote extends Document {
   appliedSystemTemplateKey?: string;
   /** 首次开启分享时间（运营按日统计用） */
   firstSharedAt?: Date;
+  isDeleted: boolean;
+  deletedAt?: Date | null;
+  deleteExpireAt?: Date | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -134,6 +137,22 @@ const noteSchema = new Schema(
       sparse: true,
       index: true,
     },
+    isDeleted: {
+      type: Boolean,
+      default: false,
+      index: true,
+    },
+    deletedAt: {
+      type: Date,
+      default: null,
+      sparse: true,
+    },
+    deleteExpireAt: {
+      type: Date,
+      default: null,
+      sparse: true,
+      index: true,
+    },
   },
   {
     timestamps: true,
@@ -149,9 +168,10 @@ const noteSchema = new Schema(
 // 创建索引
 noteSchema.index({ userId: 1, createdAt: -1 });
 noteSchema.index({ userId: 1, updatedAt: -1 });
+noteSchema.index({ userId: 1, isDeleted: 1, updatedAt: -1 });
+noteSchema.index({ userId: 1, isDeleted: 1, deleteExpireAt: 1 });
 noteSchema.index({ noteBookId: 1, createdAt: -1 });
 noteSchema.index({ noteBookId: 1, updatedAt: -1 });
-noteSchema.index({ tags: 1 });
 noteSchema.index({ isShare: 1, createdAt: -1 });
 noteSchema.index({ title: "text", content: "text" });
 

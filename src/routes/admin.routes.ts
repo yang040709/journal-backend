@@ -27,7 +27,10 @@ import { AdminTemplateService } from "../service/adminTemplate.service";
 import { AdminReminderService } from "../service/adminReminder.service";
 import { AdminUserCoverService } from "../service/adminUserCover.service";
 import { AdminStatsService } from "../service/adminStats.service";
-import { AdminOperationsReportService } from "../service/adminOperationsReport.service";
+import {
+  AdminOperationsReportService,
+  MAX_RANGE_DAYS,
+} from "../service/adminOperationsReport.service";
 import { AdminQuotaService } from "../service/adminQuota.service";
 import { CoverService } from "../service/cover.service";
 import User from "../model/User";
@@ -41,6 +44,23 @@ import {
   MAX_INITIAL_NOTEBOOK_COUNT,
   MAX_INITIAL_NOTEBOOK_TEMPLATES,
 } from "../service/initialUserNotebookConfig.service";
+
+const MAX_PAGE_DEPTH = 10_000;
+const MIN_SEARCH_LENGTH = 2;
+
+function optionalKeywordSchema(max = 128) {
+  return z.preprocess((v) => {
+    if (v == null || v === "") return undefined;
+    const s = String(v).trim();
+    return s.length ? s : undefined;
+  }, z.string().min(MIN_SEARCH_LENGTH, `搜索关键词至少 ${MIN_SEARCH_LENGTH} 个字符`).max(max).optional());
+}
+
+function daySpanInclusive(startDate: string, endDate: string): number {
+  const a = new Date(`${startDate}T12:00:00Z`).getTime();
+  const b = new Date(`${endDate}T12:00:00Z`).getTime();
+  return Math.floor((b - a) / 86400000) + 1;
+}
 
 const loginSchema = z.object({
   username: z.string().min(1),
@@ -57,6 +77,9 @@ const paginationSchema = z.object({
   order: z.enum(["asc", "desc"]).optional().default("desc"),
   userId: z.string().optional(),
   noteBookId: z.string().optional(),
+}).refine((val) => val.page * val.limit <= MAX_PAGE_DEPTH, {
+  message: `分页深度超过限制（page*limit <= ${MAX_PAGE_DEPTH}）`,
+  path: ["page"],
 });
 
 const tagsQuery = z.preprocess((val) => {
@@ -75,7 +98,7 @@ const tagsQuery = z.preprocess((val) => {
   return undefined;
 }, z.array(z.string()).optional());
 
-const noteListQuerySchema = paginationSchema.extend({
+const noteListQuerySchema = paginationSchema.safeExtend({
   tags: tagsQuery,
   startTime: z.coerce.number().optional(),
   endTime: z.coerce.number().optional(),
@@ -87,11 +110,7 @@ const noteListQuerySchema = paginationSchema.extend({
       return undefined;
     }, z.boolean().optional()),
   /** 标题/正文全文检索（MongoDB $text）；与 tags 同时传时忽略 tags */
-  q: z.preprocess((v) => {
-    if (v == null || v === "") return undefined;
-    const s = String(v).trim();
-    return s.length ? s : undefined;
-  }, z.string().min(1).max(100).optional()),
+  q: optionalKeywordSchema(100),
 });
 
 const userListQuerySchema = z.object({
@@ -102,6 +121,9 @@ const userListQuerySchema = z.object({
   createdAtFrom: z.coerce.number().optional(),
   /** 注册时间上限（毫秒时间戳，含当日结束） */
   createdAtTo: z.coerce.number().optional(),
+}).refine((val) => val.page * val.limit <= MAX_PAGE_DEPTH, {
+  message: `分页深度超过限制（page*limit <= ${MAX_PAGE_DEPTH}）`,
+  path: ["page"],
 });
 
 /** 用户 Activity 分页：id 为 User MongoDB _id */
@@ -121,10 +143,13 @@ const userActivityQuerySchema = z.object({
   target: z
     .enum(["noteBook", "note", "reminder", "template", "cover", "user"])
     .optional(),
+}).refine((val) => val.page * val.limit <= MAX_PAGE_DEPTH, {
+  message: `分页深度超过限制（page*limit <= ${MAX_PAGE_DEPTH}）`,
+  path: ["page"],
 });
 
 /** 全站 Activity 分页；可选 userId 为业务用户 id（与 Activity.userId 一致） */
-const activityListQuerySchema = userActivityQuerySchema.extend({
+const activityListQuerySchema = userActivityQuerySchema.safeExtend({
   userId: z.preprocess((v) => {
     if (v === undefined || v === null || v === "") return undefined;
     const s = String(v).trim();
@@ -138,6 +163,9 @@ const quotaDailyListQuerySchema = z.object({
   userId: z.string().optional(),
   dateKeyFrom: z.string().optional(),
   dateKeyTo: z.string().optional(),
+}).refine((val) => val.page * val.limit <= MAX_PAGE_DEPTH, {
+  message: `分页深度超过限制（page*limit <= ${MAX_PAGE_DEPTH}）`,
+  path: ["page"],
 });
 
 const operationsReportQuerySchema = z.object({
@@ -147,6 +175,12 @@ const operationsReportQuerySchema = z.object({
   endDate: z
     .string()
     .regex(/^\d{4}-\d{2}-\d{2}$/, "endDate 须为 YYYY-MM-DD"),
+}).refine((val) => val.startDate <= val.endDate, {
+  message: "开始日期不能晚于结束日期",
+  path: ["startDate"],
+}).refine((val) => daySpanInclusive(val.startDate, val.endDate) <= MAX_RANGE_DAYS, {
+  message: `时间跨度不能超过 ${MAX_RANGE_DAYS} 天`,
+  path: ["endDate"],
 });
 
 const adRewardLogListQuerySchema = z.object({
@@ -156,6 +190,9 @@ const adRewardLogListQuerySchema = z.object({
   rewardType: z.enum(["upload_quota", "ai_journal_quota", "points"]).optional(),
   createdAtFrom: z.coerce.number().optional(),
   createdAtTo: z.coerce.number().optional(),
+}).refine((val) => val.page * val.limit <= MAX_PAGE_DEPTH, {
+  message: `分页深度超过限制（page*limit <= ${MAX_PAGE_DEPTH}）`,
+  path: ["page"],
 });
 
 const noteImageSchema = z.object({
@@ -295,7 +332,10 @@ const templateListQuerySchema = z.object({
     .default("updatedAt"),
   order: z.enum(["asc", "desc"]).optional().default("desc"),
   userId: z.string().optional(),
-  search: z.string().optional(),
+  search: optionalKeywordSchema(100),
+}).refine((val) => val.page * val.limit <= MAX_PAGE_DEPTH, {
+  message: `分页深度超过限制（page*limit <= ${MAX_PAGE_DEPTH}）`,
+  path: ["page"],
 });
 
 const reminderListQuerySchema = z.object({
@@ -314,6 +354,9 @@ const reminderListQuerySchema = z.object({
     .optional(),
   remindTimeFrom: z.coerce.date().optional(),
   remindTimeTo: z.coerce.date().optional(),
+}).refine((val) => val.page * val.limit <= MAX_PAGE_DEPTH, {
+  message: `分页深度超过限制（page*limit <= ${MAX_PAGE_DEPTH}）`,
+  path: ["page"],
 });
 
 const adminUpdateReminderSchema = z.object({
@@ -1587,7 +1630,63 @@ authed.put(
 const pointsRuleLogQuerySchema = z.object({
   page: z.coerce.number().int().positive().optional().default(1),
   limit: z.coerce.number().int().min(1).max(100).optional().default(20),
+}).refine((val) => val.page * val.limit <= MAX_PAGE_DEPTH, {
+  message: `分页深度超过限制（page*limit <= ${MAX_PAGE_DEPTH}）`,
+  path: ["page"],
 });
+
+const pointsTransactionsQuerySchema = z.object({
+  page: z.coerce.number().int().positive().optional().default(1),
+  pageSize: z.coerce.number().int().min(1).max(100).optional().default(20),
+  flowType: z.enum(["all", "income", "expense"]).optional().default("all"),
+  bizType: z.string().trim().max(100).optional(),
+  userId: z.string().trim().max(128).optional(),
+  keyword: optionalKeywordSchema(128),
+  startTime: z.coerce.number().optional(),
+  endTime: z.coerce.number().optional(),
+}).refine((val) => val.page * val.pageSize <= MAX_PAGE_DEPTH, {
+  message: `分页深度超过限制（page*pageSize <= ${MAX_PAGE_DEPTH}）`,
+  path: ["page"],
+});
+
+authed.get(
+  "/points/transactions",
+  requireAdminPage(ADMIN_PAGE_USERS),
+  async (ctx) => {
+    try {
+      const q = pointsTransactionsQuerySchema.parse(ctx.query);
+      const data = await PointsService.adminListTransactions({
+        page: q.page,
+        pageSize: q.pageSize,
+        flowType: q.flowType,
+        bizType: q.bizType,
+        userId: q.userId,
+        keyword: q.keyword,
+        startTime: q.startTime != null ? new Date(q.startTime) : undefined,
+        endTime: q.endTime != null ? new Date(q.endTime) : undefined,
+      });
+      success(ctx, data);
+    } catch (e) {
+      if (e instanceof z.ZodError) {
+        error(ctx, "参数验证失败", ErrorCodes.PARAM_ERROR, 400);
+        return;
+      }
+      if (
+        e instanceof Error &&
+        (e.message.includes("分页深度超过限制") || e.message.includes("搜索关键词至少"))
+      ) {
+        error(ctx, e.message, ErrorCodes.PARAM_ERROR, 400);
+        return;
+      }
+      error(
+        ctx,
+        e instanceof Error ? e.message : "加载失败",
+        ErrorCodes.INTERNAL_ERROR,
+        500,
+      );
+    }
+  },
+);
 
 authed.get(
   "/points/rule-change-logs",

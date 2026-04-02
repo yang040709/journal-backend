@@ -29,6 +29,12 @@ const exchangeSchema = z.object({
   kind: z.enum(["upload", "ai"]),
 });
 
+const transactionsQuerySchema = z.object({
+  page: z.coerce.number().int().positive().optional().default(1),
+  pageSize: z.coerce.number().int().min(1).max(50).optional().default(20),
+  flowType: z.enum(["all", "income", "expense"]).optional().default("all"),
+});
+
 router.get("/summary", async (ctx: AuthContext) => {
   const userId = ctx.user!.userId;
   const requestId = ctx.state.requestId || "unknown";
@@ -108,6 +114,24 @@ router.post("/exchange", async (ctx: AuthContext) => {
     const message = err instanceof Error ? err.message : "兑换失败";
     logger.error("积分兑换失败", { requestId, userId, error: message });
     error(ctx, "兑换失败，请稍后重试", ErrorCodes.INTERNAL_ERROR, 500);
+  }
+});
+
+router.get("/transactions", async (ctx: AuthContext) => {
+  const userId = ctx.user!.userId;
+  const requestId = ctx.state.requestId || "unknown";
+  try {
+    const query = transactionsQuerySchema.parse(ctx.query);
+    const data = await PointsService.listUserTransactions(userId, query);
+    success(ctx, data, "ok");
+  } catch (err) {
+    if (err instanceof z.ZodError) {
+      error(ctx, "参数验证失败", ErrorCodes.PARAM_ERROR, 400);
+      return;
+    }
+    const message = err instanceof Error ? err.message : "获取积分流水失败";
+    logger.error("获取积分流水失败", { requestId, userId, error: message });
+    error(ctx, "获取积分流水失败", ErrorCodes.INTERNAL_ERROR, 500);
   }
 });
 

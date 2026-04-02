@@ -3,6 +3,7 @@
  */
 
 import Note from "../model/Note.js";
+import NoteBook from "../model/NoteBook.js";
 import User from "@/model/User.js";
 import { coverPreviewList } from "@/constant/img.js";
 
@@ -12,6 +13,49 @@ import { coverPreviewList } from "@/constant/img.js";
 export async function runMigrations() {
   console.log("🔧 检查数据库迁移...");
   await migrateUserPointsDefault();
+}
+
+/**
+ * 软删除兼容迁移：
+ * 给历史数据补齐 isDeleted / deletedAt / deleteExpireAt，保证旧版本数据可见。
+ */
+export async function migrateSoftDeleteBackfill() {
+  try {
+    const [noteResult, noteBookResult] = await Promise.all([
+      Note.updateMany(
+        { isDeleted: { $exists: false } },
+        {
+          $set: {
+            isDeleted: false,
+            deletedAt: null,
+            deleteExpireAt: null,
+          },
+        },
+        { timestamps: false },
+      ),
+      NoteBook.updateMany(
+        { isDeleted: { $exists: false } },
+        {
+          $set: {
+            isDeleted: false,
+            deletedAt: null,
+            deleteExpireAt: null,
+          },
+        },
+        { timestamps: false },
+      ),
+    ]);
+
+    if (noteResult.modifiedCount > 0 || noteBookResult.modifiedCount > 0) {
+      console.log(
+        `✅ 软删除兼容迁移完成：notes=${noteResult.modifiedCount}, notebooks=${noteBookResult.modifiedCount}`,
+      );
+    } else {
+      console.log("✅ 软删除兼容迁移检查通过：无旧数据需补齐");
+    }
+  } catch (e) {
+    console.error("❌ 软删除兼容迁移失败:", e);
+  }
 }
 
 async function migrateShare() {

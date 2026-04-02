@@ -66,4 +66,6 @@ const userAdRewardLogSchema = new Schema(
   },
 );
 
+userAdRewardLogSchema.index({ userId: 1, rewardType: 1, createdAt: -1 });
+
 export default model<IUserAdRewardLog>("UserAdRewardLog", userAdRewardLogSchema);
