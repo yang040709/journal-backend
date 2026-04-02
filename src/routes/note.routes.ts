@@ -650,6 +650,22 @@ router.get("/search", async (ctx: AuthContext) => {
   }
 });
 
+router.get("/:id/trash-detail", async (ctx: AuthContext) => {
+  try {
+    const userId = ctx.user!.userId;
+    const { id } = ctx.params;
+    const note = await NoteService.getTrashNoteById(id, userId);
+    if (!note) {
+      error(ctx, "手帐不存在", ErrorCodes.NOTE_NOT_FOUND, 404);
+      return;
+    }
+    success(ctx, note, "获取废纸篓手帐成功");
+  } catch (err) {
+    console.error("获取废纸篓手帐失败:", err);
+    error(ctx, "获取废纸篓手帐失败", ErrorCodes.INTERNAL_ERROR, 500);
+  }
+});
+
 /**
  * @swagger
  * /notes/ai/generate:

@@ -287,6 +287,19 @@ export class NoteService {
     return note ? toLeanNote(note) : null;
   }
 
+  static async getTrashNoteById(
+    id: string,
+    userId: string,
+  ): Promise<LeanNote | null> {
+    const note = await Note.findOne({
+      _id: id,
+      userId,
+      isDeleted: true,
+      deleteExpireAt: { $gt: new Date() },
+    }).lean();
+    return note ? toLeanNote(note) : null;
+  }
+
   /**
    * 更新手帐
    */
