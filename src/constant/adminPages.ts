@@ -5,12 +5,14 @@ export const ADMIN_PAGE_USERS = "users";
 export const ADMIN_PAGE_TEMPLATES = "templates";
 export const ADMIN_PAGE_REMINDERS = "reminders";
 export const ADMIN_PAGE_NOTE_TAGS = "note_tags";
+export const ADMIN_PAGE_AI_STYLES = "ai_styles";
 /** 仅超级管理员，不通过 allowedPages 分配 */
 export const ADMIN_PAGE_ADMINS = "admins";
 
 export const ASSIGNABLE_ADMIN_PAGES = [
   ADMIN_PAGE_NOTES,
   ADMIN_PAGE_NOTE_TAGS,
+  ADMIN_PAGE_AI_STYLES,
   ADMIN_PAGE_NOTEBOOKS,
   ADMIN_PAGE_USERS,
   ADMIN_PAGE_TEMPLATES,

@@ -390,6 +390,7 @@ export class PointsService {
   static async exchange(
     userId: string,
     kind: "upload" | "ai",
+    opts?: { requestId?: string },
   ): Promise<{
     points: number;
     quotaGain: number;
@@ -445,10 +446,15 @@ export class PointsService {
     const bizType = kind === "upload" ? "exchange_image_quota" : "exchange_ai_quota";
     const balanceAfter = Math.max(0, Math.floor(Number((updated as { points?: number }).points ?? 0)));
     const balanceBefore = balanceAfter + cost;
+    const bizId =
+      opts?.requestId && String(opts.requestId).trim()
+        ? String(opts.requestId).trim()
+        : `exchange_${userId}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
     await PointsLedger.create({
       userId,
       kind: ledgerKind,
       bizType,
+      bizId,
       title: kind === "upload" ? "兑换图片上传额度" : "兑换 AI 次数",
       flowType: buildFlowTypeFromDelta(-cost),
       pointsDelta: -cost,
@@ -474,7 +480,7 @@ export class PointsService {
     if (kind === "upload") {
       const { dateKey } = getQuotaDateContext();
       const { ensureDailyQuotaRecord, getUploadDailyBaseLimit } = await import("./upload.service.js");
-      const base = getUploadDailyBaseLimit();
+      const base = await getUploadDailyBaseLimit();
       await ensureDailyQuotaRecord(userId, dateKey, base, uploadExtra);
     }
 

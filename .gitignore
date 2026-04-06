@@ -40,6 +40,7 @@ pids
 .vscode/
 *.swp
 *.swo
+.cursor_*.txt
 .DS_Store
 *.sublime-project
 *.sublime-workspace

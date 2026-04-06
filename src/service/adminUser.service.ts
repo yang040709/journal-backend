@@ -92,11 +92,14 @@ export class AdminUserService {
     ]);
     const aiByUser = new Map(aiRows.map((r) => [r.userId, r.usedCount ?? 0]));
     const uploadByUser = new Map(uploadRows.map((r) => [r.userId, r.usedCount ?? 0]));
-    const uploadBase = getUploadDailyBaseLimit();
+    const [uploadBase, aiBase] = await Promise.all([
+      getUploadDailyBaseLimit(),
+      getAiDailyBaseLimit(),
+    ]);
 
     return users.map((user) => {
       const base = AdminUserService.serializeUser(user);
-      const aiDailyLimit = getAiDailyBaseLimit() + (user.aiBonusQuota ?? 0);
+      const aiDailyLimit = aiBase + (user.aiBonusQuota ?? 0);
       const aiUsedToday = aiByUser.get(user.userId) ?? 0;
       const extra = Math.max(0, Math.floor(Number(user.uploadExtraQuotaTotal ?? 0)));
       const uploadTotalLimitToday = Math.max(0, uploadBase + extra);

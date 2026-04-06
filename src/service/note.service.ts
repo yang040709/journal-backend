@@ -389,10 +389,15 @@ export class NoteService {
           isShare: false,
         },
       },
+      { timestamps: false },
     );
 
     // 更新手帐本的手帐数量
-    await NoteBook.updateOne({ _id: note.noteBookId }, { $inc: { count: -1 } });
+    await NoteBook.updateOne(
+      { _id: note.noteBookId },
+      { $inc: { count: -1 } },
+      { timestamps: false },
+    );
 
     // 记录活动
     void ActivityLogger.record(
@@ -449,12 +454,17 @@ export class NoteService {
           isShare: false,
         },
       },
+      { timestamps: false },
     );
 
     // 更新手帐本计数
     const updatePromises = Object.entries(noteBookCounts).map(
       ([noteBookId, count]) =>
-        NoteBook.updateOne({ _id: noteBookId }, { $inc: { count: -count } }),
+        NoteBook.updateOne(
+          { _id: noteBookId },
+          { $inc: { count: -count } },
+          { timestamps: false },
+        ),
     );
     await Promise.all(updatePromises);
 

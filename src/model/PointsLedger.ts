@@ -45,7 +45,7 @@ const pointsLedgerSchema = new Schema(
     kind: {
       type: String,
       required: true,
-      enum: ["exchange_upload", "exchange_ai", "admin_adjust"],
+      enum: ["ad_reward", "exchange_upload", "exchange_ai", "admin_adjust"],
       index: true,
     },
     pointsDelta: {

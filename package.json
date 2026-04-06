@@ -4,7 +4,7 @@
   "description": "",
   "main": "./src/index.ts",
   "scripts": {
-    "dev": "concurrently \"pnpm run build:watch\" \"pnpm run start:watch\"",
+    "dev": "tsup --watch --onSuccess \"node dist/index.js\"",
     "build": "tsup",
     "build:watch": "tsup --watch",
     "swagger:export": "npx tsx scripts/exportSwagger.ts",

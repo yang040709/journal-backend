@@ -1,11 +1,11 @@
 import User from "../model/User";
 import UserAiUsageDaily from "../model/UserAiUsageDaily";
 import { getQuotaDateContext } from "../utils/dateKey";
+import { QuotaBaseLimitsService } from "./quotaBaseLimits.service";
 
-export const getAiDailyBaseLimit = (): number => {
-  const parsed = Number(process.env.AI_DAILY_BASE_LIMIT ?? 5);
-  if (!Number.isFinite(parsed) || parsed < 0) return 5;
-  return Math.floor(parsed);
+export const getAiDailyBaseLimit = async (): Promise<number> => {
+  const limits = await QuotaBaseLimitsService.getQuotaBaseLimits();
+  return limits.aiDailyBaseLimit;
 };
 
 export const getUserAiBonusQuota = async (userId: string): Promise<number> => {
@@ -17,7 +17,7 @@ export const getUserAiBonusQuota = async (userId: string): Promise<number> => {
 
 /** 当日可用总次数（基础 + 永久额外） */
 export const getAiDailyLimitForUser = async (userId: string): Promise<number> => {
-  const baseLimit = getAiDailyBaseLimit();
+  const baseLimit = await getAiDailyBaseLimit();
   const bonus = await getUserAiBonusQuota(userId);
   return baseLimit + bonus;
 };

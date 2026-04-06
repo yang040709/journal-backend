@@ -6,6 +6,7 @@ import { runMigrations, migrateSoftDeleteBackfill } from "./utils/migration";
 import { initSensitiveFilter } from "./utils/sensitive-encrypted";
 import { ensureAdminBootstrap } from "./service/adminBootstrap.service";
 import { ensureSystemTemplates } from "./service/systemTemplateSeed.service";
+import { AiStyleService } from "./service/aiStyle.service";
 
 dotenv.config();
 
@@ -45,6 +46,7 @@ const init = async () => {
 
     await ensureAdminBootstrap();
     await ensureSystemTemplates();
+    await AiStyleService.ensureSeed();
 
     // 初始化敏感词过滤器
     console.log("🔐 正在初始化敏感词过滤器...");

@@ -5,6 +5,8 @@ export const SYSTEM_CONFIG_NOTE_PRESET_TAGS_KEY = "note_preset_tags";
 export const SYSTEM_CONFIG_INITIAL_NOTEBOOKS_KEY = "initial_user_notebooks";
 /** 积分规则（JSON 存于 pointsRules，见 PointsService） */
 export const SYSTEM_CONFIG_POINTS_RULES_KEY = "points_rules";
+/** 上传/AI 每日基础额度（JSON 存于 quotaBaseLimits） */
+export const SYSTEM_CONFIG_QUOTA_BASE_LIMITS_KEY = "quota_base_limits";
 
 export type InitialNotebookTemplate = { title: string; coverImg: string };
 
@@ -19,6 +21,8 @@ export interface ISystemConfig extends Document {
   initialNotebookCount: number;
   /** 仅 configKey=points_rules 使用：积分/广告/兑换配置 */
   pointsRules?: Record<string, unknown> | null;
+  /** 仅 configKey=quota_base_limits 使用：上传/AI 每日基础额度 */
+  quotaBaseLimits?: Record<string, unknown> | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -53,6 +57,9 @@ const systemConfigSchema = new Schema(
       default: 0,
     },
     pointsRules: {
+      type: Schema.Types.Mixed,
+    },
+    quotaBaseLimits: {
       type: Schema.Types.Mixed,
     },
   },

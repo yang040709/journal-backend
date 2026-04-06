@@ -8,6 +8,7 @@ import {
 } from "../utils/response";
 import { NoteService } from "../service/note.service";
 import { AiNoteService } from "../service/aiNote.service";
+import { AiStyleService } from "../service/aiStyle.service";
 import { z } from "zod";
 import { NotePresetTagService } from "../service/notePresetTag.service";
 import { UserNoteCustomTagService } from "../service/userNoteCustomTag.service";
@@ -308,6 +309,17 @@ const aiGenerateSchema = z.object({
   content: z.string().optional(),
   tags: z.array(z.string()).optional().default([]),
   hint: z.string().optional(),
+  styleKey: z.string().trim().max(64).optional(),
+});
+
+router.get("/ai/styles", async (ctx: AuthContext) => {
+  try {
+    const data = await AiStyleService.listEnabledForClient();
+    success(ctx, data, "ok");
+  } catch (err) {
+    console.error("获取 AI 风格列表失败:", err);
+    error(ctx, "获取 AI 风格列表失败", ErrorCodes.INTERNAL_ERROR, 500);
+  }
 });
 
 /**
@@ -737,6 +749,7 @@ router.post("/ai/generate", async (ctx: AuthContext) => {
       content: body.content,
       tags: body.tags,
       hint: body.hint,
+      styleKey: body.styleKey,
     });
     success(ctx, result, "ok");
   } catch (err) {

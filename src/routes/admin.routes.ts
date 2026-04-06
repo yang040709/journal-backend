@@ -12,6 +12,7 @@ import {
   ADMIN_PAGE_TEMPLATES,
   ADMIN_PAGE_REMINDERS,
   ADMIN_PAGE_NOTE_TAGS,
+  ADMIN_PAGE_AI_STYLES,
 } from "../constant/adminPages";
 import {
   success,
@@ -39,6 +40,9 @@ import { PointsService } from "../service/points.service";
 import { listByUser } from "../service/userImageAsset.service";
 import { NotePresetTagService } from "../service/notePresetTag.service";
 import { UserNoteCustomTagService } from "../service/userNoteCustomTag.service";
+import { QuotaBaseLimitsService } from "../service/quotaBaseLimits.service";
+import { AiStyleService } from "../service/aiStyle.service";
+import { AiNoteService } from "../service/aiNote.service";
 import {
   InitialUserNotebookConfigService,
   MAX_INITIAL_NOTEBOOK_COUNT,
@@ -187,7 +191,7 @@ const adRewardLogListQuerySchema = z.object({
   page: z.coerce.number().int().positive().optional().default(1),
   limit: z.coerce.number().int().min(1).max(100).optional().default(20),
   userId: z.string().optional(),
-  rewardType: z.enum(["upload_quota", "ai_journal_quota", "points"]).optional(),
+  rewardType: z.enum(["points"]).optional(),
   createdAtFrom: z.coerce.number().optional(),
   createdAtTo: z.coerce.number().optional(),
 }).refine((val) => val.page * val.limit <= MAX_PAGE_DEPTH, {
@@ -277,6 +281,15 @@ const adminPointsRulesPutSchema = z.object({
     })
     .optional(),
 });
+
+const adminQuotaBaseLimitsPutSchema = z
+  .object({
+    uploadDailyBaseLimit: z.number().int().min(0).max(999).optional(),
+    aiDailyBaseLimit: z.number().int().min(0).max(999).optional(),
+  })
+  .refine((v) => v.uploadDailyBaseLimit !== undefined || v.aiDailyBaseLimit !== undefined, {
+    message: "至少提供一个要更新的字段",
+  });
 
 const createAdminSchema = z.object({
   username: z.string().min(2).max(64),
@@ -396,6 +409,45 @@ const adminCustomCoverBodySchema = z.object({
     .union([z.string().url("缩略图URL格式不正确"), z.literal("")])
     .optional(),
   thumbKey: z.union([z.string().trim().min(1, "缩略图Key不能为空"), z.literal("")]).optional(),
+});
+
+const aiStyleModePromptsSchema = z.object({
+  generate: z.string().optional(),
+  rewrite: z.string().optional(),
+  continue: z.string().optional(),
+});
+
+const aiStyleCreateSchema = z.object({
+  styleKey: z.string().trim().min(2).max(64),
+  name: z.string().trim().min(1).max(50),
+  subtitle: z.string().trim().max(120).optional().default(""),
+  description: z.string().trim().max(500).optional().default(""),
+  category: z.enum(["diary", "structured", "social"]).optional().default("diary"),
+  order: z.coerce.number().int().min(0).max(9999).optional().default(100),
+  enabled: z.boolean().optional().default(true),
+  isDefault: z.boolean().optional().default(false),
+  isRecommended: z.boolean().optional().default(false),
+  systemPrompt: z.string().trim().min(1),
+  userPromptTemplate: z.string().trim().min(1),
+  modePrompts: aiStyleModePromptsSchema.optional().default({}),
+  maxOutputChars: z.coerce.number().int().min(50).max(4000).optional(),
+  emojiPolicy: z.enum(["forbid", "low", "normal"]).optional(),
+  outputFormat: z.string().trim().max(200).optional().default(""),
+});
+
+const aiStyleUpdateSchema = aiStyleCreateSchema.partial();
+
+const aiStyleEnableSchema = z.object({
+  enabled: z.boolean(),
+});
+
+const aiStylePreviewSchema = z.object({
+  styleKey: z.string().trim().min(2).max(64).optional(),
+  mode: z.enum(["generate", "rewrite", "continue"]),
+  title: z.string().optional(),
+  content: z.string().optional(),
+  tags: z.array(z.string()).optional().default([]),
+  hint: z.string().optional(),
 });
 
 const router = new Router({ prefix: "/admin" });
@@ -655,6 +707,177 @@ authed.put(
         e instanceof Error ? e.message : "保存失败",
         ErrorCodes.PARAM_ERROR,
       );
+    }
+  },
+);
+
+authed.get(
+  "/ai/styles",
+  requireAdminPage(ADMIN_PAGE_AI_STYLES),
+  async (ctx) => {
+    try {
+      const rows = await AiStyleService.listForAdmin();
+      success(ctx, rows);
+    } catch (e) {
+      error(
+        ctx,
+        e instanceof Error ? e.message : "加载失败",
+        ErrorCodes.INTERNAL_ERROR,
+        500,
+      );
+    }
+  },
+);
+
+authed.post(
+  "/ai/styles",
+  requireAdminPage(ADMIN_PAGE_AI_STYLES),
+  async (ctx) => {
+    try {
+      const body = aiStyleCreateSchema.parse(ctx.request.body);
+      const row = await AiStyleService.createForAdmin({
+        ...body,
+        updatedBy: ctx.state.admin?.username || "",
+      });
+      success(ctx, row);
+    } catch (e) {
+      if (e instanceof z.ZodError) {
+        error(ctx, "参数验证失败", ErrorCodes.PARAM_ERROR, 400);
+        return;
+      }
+      error(
+        ctx,
+        e instanceof Error ? e.message : "创建失败",
+        ErrorCodes.PARAM_ERROR,
+      );
+    }
+  },
+);
+
+authed.get(
+  "/ai/styles/:id",
+  requireAdminPage(ADMIN_PAGE_AI_STYLES),
+  async (ctx) => {
+    try {
+      const row = await AiStyleService.getByIdForAdmin(ctx.params.id);
+      if (!row) {
+        error(ctx, "风格不存在", ErrorCodes.NOT_FOUND, 404);
+        return;
+      }
+      success(ctx, row);
+    } catch (e) {
+      error(
+        ctx,
+        e instanceof Error ? e.message : "加载失败",
+        ErrorCodes.INTERNAL_ERROR,
+        500,
+      );
+    }
+  },
+);
+
+authed.put(
+  "/ai/styles/:id",
+  requireAdminPage(ADMIN_PAGE_AI_STYLES),
+  async (ctx) => {
+    try {
+      const body = aiStyleUpdateSchema.parse(ctx.request.body);
+      const row = await AiStyleService.updateForAdmin(ctx.params.id, {
+        ...body,
+        updatedBy: ctx.state.admin?.username || "",
+      });
+      if (!row) {
+        error(ctx, "风格不存在", ErrorCodes.NOT_FOUND, 404);
+        return;
+      }
+      success(ctx, row);
+    } catch (e) {
+      if (e instanceof z.ZodError) {
+        error(ctx, "参数验证失败", ErrorCodes.PARAM_ERROR, 400);
+        return;
+      }
+      error(
+        ctx,
+        e instanceof Error ? e.message : "保存失败",
+        ErrorCodes.PARAM_ERROR,
+      );
+    }
+  },
+);
+
+authed.post(
+  "/ai/styles/:id/enable",
+  requireAdminPage(ADMIN_PAGE_AI_STYLES),
+  async (ctx) => {
+    try {
+      const body = aiStyleEnableSchema.parse(ctx.request.body);
+      const row = await AiStyleService.setEnabled(ctx.params.id, body.enabled);
+      if (!row) {
+        error(ctx, "风格不存在", ErrorCodes.NOT_FOUND, 404);
+        return;
+      }
+      success(ctx, row);
+    } catch (e) {
+      if (e instanceof z.ZodError) {
+        error(ctx, "参数验证失败", ErrorCodes.PARAM_ERROR, 400);
+        return;
+      }
+      error(
+        ctx,
+        e instanceof Error ? e.message : "保存失败",
+        ErrorCodes.PARAM_ERROR,
+      );
+    }
+  },
+);
+
+authed.post(
+  "/ai/styles/:id/set-default",
+  requireAdminPage(ADMIN_PAGE_AI_STYLES),
+  async (ctx) => {
+    try {
+      const row = await AiStyleService.setDefault(ctx.params.id);
+      if (!row) {
+        error(ctx, "风格不存在", ErrorCodes.NOT_FOUND, 404);
+        return;
+      }
+      success(ctx, row);
+    } catch (e) {
+      error(
+        ctx,
+        e instanceof Error ? e.message : "设置默认失败",
+        ErrorCodes.PARAM_ERROR,
+      );
+    }
+  },
+);
+
+authed.post(
+  "/ai/styles/preview",
+  requireAdminPage(ADMIN_PAGE_AI_STYLES),
+  async (ctx) => {
+    try {
+      const body = aiStylePreviewSchema.parse(ctx.request.body);
+      const result = await AiNoteService.preview({
+        styleKey: body.styleKey,
+        mode: body.mode,
+        title: body.title,
+        content: body.content,
+        tags: body.tags,
+        hint: body.hint,
+      });
+      success(ctx, result);
+    } catch (e) {
+      if (e instanceof z.ZodError) {
+        error(ctx, "参数验证失败", ErrorCodes.PARAM_ERROR, 400);
+        return;
+      }
+      const msg = e instanceof Error ? e.message : "预览失败";
+      if (msg === "AI service not configured") {
+        error(ctx, "AI 服务未配置", ErrorCodes.INTERNAL_ERROR, 500);
+        return;
+      }
+      error(ctx, msg, ErrorCodes.PARAM_ERROR, 400);
     }
   },
 );
@@ -1596,6 +1819,47 @@ authed.get(
         e instanceof Error ? e.message : "加载失败",
         ErrorCodes.INTERNAL_ERROR,
         500,
+      );
+    }
+  },
+);
+
+authed.get(
+  "/quota/base-limits",
+  requireSuperAdmin(),
+  async (ctx) => {
+    try {
+      const data = await QuotaBaseLimitsService.getForAdmin();
+      success(ctx, data);
+    } catch (e) {
+      error(
+        ctx,
+        e instanceof Error ? e.message : "加载失败",
+        ErrorCodes.INTERNAL_ERROR,
+        500,
+      );
+    }
+  },
+);
+
+authed.put(
+  "/quota/base-limits",
+  requireSuperAdmin(),
+  async (ctx) => {
+    try {
+      const body = adminQuotaBaseLimitsPutSchema.parse(ctx.request.body);
+      await QuotaBaseLimitsService.setFromAdmin(body);
+      const data = await QuotaBaseLimitsService.getForAdmin();
+      success(ctx, data);
+    } catch (e) {
+      if (e instanceof z.ZodError) {
+        error(ctx, "参数验证失败", ErrorCodes.PARAM_ERROR, 400);
+        return;
+      }
+      error(
+        ctx,
+        e instanceof Error ? e.message : "保存失败",
+        ErrorCodes.PARAM_ERROR,
       );
     }
   },

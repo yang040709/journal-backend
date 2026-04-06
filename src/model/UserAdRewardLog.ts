@@ -1,6 +1,10 @@
 import { Document, Schema, model } from "mongoose";
 
-export type AdRewardType = "upload_quota" | "ai_journal_quota" | "points";
+/**
+ * 本项目线上口径：看广告仅发放积分（points）。
+ * 其他 rewardType 为历史/预留，不在当前版本使用。
+ */
+export type AdRewardType = "points";
 
 export interface IUserAdRewardLog extends Document {
   userId: string;
@@ -31,8 +35,8 @@ const userAdRewardLogSchema = new Schema(
     rewardType: {
       type: String,
       required: true,
-      enum: ["upload_quota", "ai_journal_quota", "points"],
-      default: "upload_quota",
+      enum: ["points"],
+      default: "points",
     },
     rewardValue: {
       type: Number,

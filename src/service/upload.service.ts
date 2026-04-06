@@ -3,6 +3,7 @@ import STS from "qcloud-cos-sts";
 import UserUploadQuotaDaily, { UploadBiz } from "../model/UserUploadQuotaDaily";
 import User from "../model/User";
 import { getQuotaDateContext } from "../utils/dateKey";
+import { QuotaBaseLimitsService } from "./quotaBaseLimits.service";
 export interface CreateCosStsInput {
   userId: string;
   biz: UploadBiz;
@@ -77,13 +78,12 @@ const getRequiredEnv = (name: string): string => {
 };
 
 /** 与 C 端上传日基础额度一致，供管理端列表等只读场景复用 */
-export const getUploadDailyBaseLimit = (): number => {
-  const parsed = Number(process.env.UPLOAD_DAILY_BASE_LIMIT ?? 15);
-  if (!Number.isFinite(parsed) || parsed < 0) return 15;
-  return Math.floor(parsed);
+export const getUploadDailyBaseLimit = async (): Promise<number> => {
+  const limits = await QuotaBaseLimitsService.getQuotaBaseLimits();
+  return limits.uploadDailyBaseLimit;
 };
 
-const getDailyBaseLimit = (): number => getUploadDailyBaseLimit();
+const getDailyBaseLimit = async (): Promise<number> => getUploadDailyBaseLimit();
 
 const getUserExtraQuotaTotal = async (userId: string): Promise<number> => {
   const user = await User.findOne({ userId }).select("uploadExtraQuotaTotal").lean();
@@ -121,7 +121,7 @@ export const ensureDailyQuotaRecord = async (
 
 const consumeDailyQuota = async (userId: string, biz: UploadBiz) => {
   const { dateKey } = getQuotaDateContext();
-  const baseLimit = getDailyBaseLimit();
+  const baseLimit = await getDailyBaseLimit();
   const extraQuota = await getUserExtraQuotaTotal(userId);
 
   await ensureDailyQuotaRecord(userId, dateKey, baseLimit, extraQuota);
@@ -189,7 +189,7 @@ const createCosResource = (bucket: string, region: string, key: string): string 
 export class UploadService {
   static async getUploadQuotaSummary(userId: string): Promise<UploadQuotaSummary> {
     const { dateKey } = getQuotaDateContext();
-    const baseLimit = getDailyBaseLimit();
+    const baseLimit = await getDailyBaseLimit();
     const extraQuotaTotal = await getUserExtraQuotaTotal(userId);
 
     await ensureDailyQuotaRecord(userId, dateKey, baseLimit, extraQuotaTotal);
