@@ -217,7 +217,7 @@ export class UploadService {
       throw new Error("不支持的文件类型");
     }
 
-    const maxFileSizeMb = toNumber(process.env.COS_MAX_FILE_SIZE_MB, 10);
+    const maxFileSizeMb = toNumber(process.env.COS_MAX_FILE_SIZE_MB, 1);
     const maxFileSizeBytes = maxFileSizeMb * 1024 * 1024;
     if (input.fileSize > maxFileSizeBytes) {
       throw new Error(`文件大小超过限制，最大 ${maxFileSizeMb}MB`);
