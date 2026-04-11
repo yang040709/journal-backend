@@ -1,7 +1,6 @@
 import Note, { INote, INoteImage, LeanNote } from "../model/Note";
 import NoteBook, { LeanNoteBook } from "../model/NoteBook";
 import { ActivityLogger } from "../utils/ActivityLogger";
-import { ErrorCodes } from "../utils/response";
 import { toLeanNoteArray, toLeanNote } from "../utils/typeUtils";
 import { checkNoteContent } from "../utils/sensitive-encrypted";
 import { nanoid } from "nanoid";
@@ -25,6 +24,8 @@ export interface UpdateNoteData {
   tags?: string[];
   noteBookId?: string;
   images?: INoteImage[];
+  isFavorite?: boolean;
+  isPinned?: boolean;
 }
 
 export interface PaginationParams {
@@ -36,6 +37,8 @@ export interface PaginationParams {
   tags?: string[];
   startTime?: number;
   endTime?: number;
+  /** 仅返回已收藏手帐 */
+  favoriteOnly?: boolean;
 }
 
 export interface SearchParams {
@@ -46,6 +49,9 @@ export interface SearchParams {
   tags?: string[];
   startTime?: number;
   endTime?: number;
+  favoriteOnly?: boolean;
+  sortBy?: string;
+  order?: "asc" | "desc";
 }
 
 /** 公开分享接口返回体：不暴露 userId 等账号字段；isOwner 由服务端根据可选 JWT 计算 */
@@ -65,6 +71,14 @@ export class ShareAccessError extends Error {
   constructor(code: string, message: string) {
     super(message);
     this.code = code;
+  }
+}
+
+/** 手帐本内置顶条数超过上限 */
+export class NotePinLimitExceededError extends Error {
+  constructor(message: string = "置顶数量已达上限，请先取消其他置顶") {
+    super(message);
+    this.name = "NotePinLimitExceededError";
   }
 }
 
@@ -97,6 +111,52 @@ const NOTE_TAG_MAX_COUNT = 100;
 const MAX_PAGE_DEPTH = 10_000;
 const MIN_SEARCH_KEYWORD_LENGTH = 1;
 const WECHAT_OPENID_PATTERN = /^o[A-Za-z0-9_-]{15,63}$/;
+const MAX_PINNED_PER_NOTEBOOK = 5;
+
+type NoteListSortField = "createdAt" | "updatedAt" | "title" | "favoritedAt";
+
+/** 列表/搜索统一排序：有 noteBookId 时置顶优先；收藏列表未指定 sortBy 时默认 favoritedAt desc */
+function buildNoteListSortClause(opts: {
+  noteBookId?: string;
+  favoriteOnly?: boolean;
+  sortBy?: string;
+  order?: "asc" | "desc";
+}): Record<string, 1 | -1> {
+  const favoriteOnly = Boolean(opts.favoriteOnly);
+  let sortField = (opts.sortBy ?? "").trim();
+  let sortOrder: 1 | -1 = opts.order === "asc" ? 1 : -1;
+
+  if (favoriteOnly && !sortField) {
+    sortField = "favoritedAt";
+    sortOrder = -1;
+  }
+  if (!sortField) {
+    sortField = "updatedAt";
+  }
+
+  const allowed: NoteListSortField[] = [
+    "createdAt",
+    "updatedAt",
+    "title",
+    "favoritedAt",
+  ];
+  const sf = (
+    allowed.includes(sortField as NoteListSortField)
+      ? sortField
+      : "updatedAt"
+  ) as NoteListSortField;
+
+  const secondary: Record<string, 1 | -1> = { [sf]: sortOrder };
+
+  if (opts.noteBookId) {
+    return {
+      isPinned: -1,
+      pinnedAt: -1,
+      ...secondary,
+    };
+  }
+  return secondary;
+}
 
 function isLikelyWeChatOpenId(value: unknown): boolean {
   const id = String(value || "").trim();
@@ -250,11 +310,19 @@ export class NoteService {
     }
     const skip = (page - 1) * limit;
 
-    const sortField = params.sortBy || "updatedAt";
-    const sortOrder = params.order === "asc" ? 1 : -1;
+    const sortClause = buildNoteListSortClause({
+      noteBookId: params.noteBookId,
+      favoriteOnly: params.favoriteOnly,
+      sortBy: params.sortBy,
+      order: params.order,
+    });
 
     // 构建查询条件
     const query: any = { userId, isDeleted: { $ne: true } };
+
+    if (params.favoriteOnly) {
+      query.isFavorite = true;
+    }
 
     // 手帐本筛选
     if (params.noteBookId) {
@@ -282,7 +350,7 @@ export class NoteService {
     const [items, total] = await Promise.all([
       Note.find(query)
         .select("-content") // 排除 content 字段，减少网络传输
-        .sort({ [sortField]: sortOrder })
+        .sort(sortClause)
         .skip(skip)
         .limit(limit)
         .lean(),
@@ -351,6 +419,8 @@ export class NoteService {
       ]);
 
       note.noteBookId = newNoteBookId;
+      note.isPinned = false;
+      note.pinnedAt = null;
     }
 
     if (data.title !== undefined) note.title = data.title;
@@ -360,6 +430,36 @@ export class NoteService {
     }
     const previousImages = data.images !== undefined ? [...(note.images || [])] : null;
     if (data.images !== undefined) note.images = data.images;
+
+    if (data.isFavorite !== undefined) {
+      note.isFavorite = data.isFavorite;
+      note.favoritedAt = data.isFavorite ? new Date() : null;
+    }
+
+    if (data.isPinned !== undefined) {
+      if (data.isPinned) {
+        const wasPinned = Boolean(note.isPinned);
+        if (!wasPinned) {
+          const pinnedCount = await Note.countDocuments({
+            userId,
+            noteBookId: note.noteBookId,
+            isPinned: true,
+            isDeleted: { $ne: true },
+            _id: { $ne: note._id },
+          });
+          if (pinnedCount >= MAX_PINNED_PER_NOTEBOOK) {
+            throw new NotePinLimitExceededError();
+          }
+        }
+        note.isPinned = true;
+        if (!wasPinned) {
+          note.pinnedAt = new Date();
+        }
+      } else {
+        note.isPinned = false;
+        note.pinnedAt = null;
+      }
+    }
 
     await note.save();
 
@@ -532,6 +632,10 @@ export class NoteService {
       query.tags = { $all: params.tags };
     }
 
+    if (params.favoriteOnly) {
+      query.isFavorite = true;
+    }
+
     // 时间范围筛选
     if (params.startTime || params.endTime) {
       query.createdAt = {};
@@ -550,11 +654,18 @@ export class NoteService {
     }
     const skip = (page - 1) * limit;
 
+    const sortClause = buildNoteListSortClause({
+      noteBookId: params.noteBookId,
+      favoriteOnly: params.favoriteOnly,
+      sortBy: params.sortBy,
+      order: params.order,
+    });
+
     const total = await Note.countDocuments(query);
 
     const notes = await Note.find(query)
       .select("-content") // 排除 content 字段，减少网络传输
-      .sort({ updatedAt: -1 })
+      .sort(sortClause)
       .skip(skip)
       .limit(limit)
       .lean();

@@ -110,6 +110,8 @@ export const ErrorCodes = {
 
   // 手帐错误
   NOTE_NOT_FOUND: 2002,
+  /** 同一手帐本内置顶数量超过上限 */
+  NOTE_PIN_LIMIT_EXCEEDED: 2009,
   SHARE_LOCAL_RISK_BLOCKED: 2003,
   SHARE_NOT_FOUND: 2004,
   SHARE_DISABLED_BY_AUTHOR: 2005,

@@ -6,7 +6,7 @@ import {
   paginatedSuccess,
   ErrorCodes,
 } from "../utils/response";
-import { NoteService } from "../service/note.service";
+import { NoteService, NotePinLimitExceededError } from "../service/note.service";
 import { ShareSecurityTaskService } from "../service/shareSecurityTask.service";
 import { AiNoteService } from "../service/aiNote.service";
 import { AiStyleService } from "../service/aiStyle.service";
@@ -230,53 +230,94 @@ const updateNoteSchema = z.object({
   tags: z.array(z.string()).optional(),
   noteBookId: z.string().optional(),
   images: z.array(noteImageSchema).max(9, "最多上传9张图片").optional(),
+  isFavorite: z.boolean().optional(),
+  isPinned: z.boolean().optional(),
 });
+
+function parseFavoriteOnlyQuery(
+  v: string | boolean | undefined,
+): boolean {
+  if (v === undefined || v === null) return false;
+  if (typeof v === "boolean") return v;
+  const s = String(v).trim().toLowerCase();
+  if (s === "") return false;
+  return s === "true" || s === "1" || s === "yes";
+}
 
 // 分页参数验证
-const paginationSchema = z.object({
-  page: z.coerce.number().int().positive().optional().default(1),
-  limit: z.coerce.number().int().min(1).max(100).optional().default(20),
-  sortBy: z
-    .enum(["createdAt", "updatedAt", "title"])
-    .optional()
-    .default("updatedAt"),
-  order: z.enum(["asc", "desc"]).optional().default("desc"),
-  noteBookId: z.string().optional(),
-  tags: z
-    .union([z.string(), z.array(z.string())])
-    .optional()
-    .transform((val) => {
-      if (!val) return undefined;
-      if (Array.isArray(val)) return val;
-      return [val];
-    }),
-  startTime: z.coerce.number().optional(),
-  endTime: z.coerce.number().optional(),
-}).refine((val) => hasAllowedPageDepth(val.page, val.limit), {
-  message: `分页深度超过限制（page*limit <= ${MAX_PAGE_DEPTH}）`,
-  path: ["page"],
-});
+const paginationSchema = z
+  .object({
+    page: z.coerce.number().int().positive().optional().default(1),
+    limit: z.coerce.number().int().min(1).max(100).optional().default(20),
+    sortBy: z
+      .enum(["createdAt", "updatedAt", "title", "favoritedAt"])
+      .optional(),
+    order: z.enum(["asc", "desc"]).optional().default("desc"),
+    noteBookId: z.string().optional(),
+    favoriteOnly: z
+      .union([z.string(), z.boolean()])
+      .optional()
+      .transform(parseFavoriteOnlyQuery),
+    tags: z
+      .union([z.string(), z.array(z.string())])
+      .optional()
+      .transform((val) => {
+        if (!val) return undefined;
+        if (Array.isArray(val)) return val;
+        return [val];
+      }),
+    startTime: z.coerce.number().optional(),
+    endTime: z.coerce.number().optional(),
+  })
+  .refine((val) => hasAllowedPageDepth(val.page, val.limit), {
+    message: `分页深度超过限制（page*limit <= ${MAX_PAGE_DEPTH}）`,
+    path: ["page"],
+  })
+  .refine(
+    (val) => !(val.sortBy === "favoritedAt" && !val.favoriteOnly),
+    {
+      message: "仅当 favoriteOnly 为 true 时可使用 favoritedAt 排序",
+      path: ["sortBy"],
+    },
+  );
 
 // 搜索参数验证（分页规则与 paginationSchema 一致）
-const searchSchema = z.object({
-  q: z.string().trim().min(MIN_SEARCH_KEYWORD_LENGTH, `搜索关键词至少 ${MIN_SEARCH_KEYWORD_LENGTH} 个字符`),
-  page: z.coerce.number().int().positive().optional().default(1),
-  limit: z.coerce.number().int().min(1).max(100).optional().default(20),
-  noteBookId: z.string().optional(),
-  tags: z
-    .union([z.string(), z.array(z.string())])
-    .optional()
-    .transform((val) => {
-      if (!val) return undefined;
-      if (Array.isArray(val)) return val;
-      return [val];
-    }),
-  startTime: z.coerce.number().optional(),
-  endTime: z.coerce.number().optional(),
-}).refine((val) => hasAllowedPageDepth(val.page, val.limit), {
-  message: `分页深度超过限制（page*limit <= ${MAX_PAGE_DEPTH}）`,
-  path: ["page"],
-});
+const searchSchema = z
+  .object({
+    q: z.string().trim().min(MIN_SEARCH_KEYWORD_LENGTH, `搜索关键词至少 ${MIN_SEARCH_KEYWORD_LENGTH} 个字符`),
+    page: z.coerce.number().int().positive().optional().default(1),
+    limit: z.coerce.number().int().min(1).max(100).optional().default(20),
+    noteBookId: z.string().optional(),
+    favoriteOnly: z
+      .union([z.string(), z.boolean()])
+      .optional()
+      .transform(parseFavoriteOnlyQuery),
+    sortBy: z
+      .enum(["createdAt", "updatedAt", "title", "favoritedAt"])
+      .optional(),
+    order: z.enum(["asc", "desc"]).optional().default("desc"),
+    tags: z
+      .union([z.string(), z.array(z.string())])
+      .optional()
+      .transform((val) => {
+        if (!val) return undefined;
+        if (Array.isArray(val)) return val;
+        return [val];
+      }),
+    startTime: z.coerce.number().optional(),
+    endTime: z.coerce.number().optional(),
+  })
+  .refine((val) => hasAllowedPageDepth(val.page, val.limit), {
+    message: `分页深度超过限制（page*limit <= ${MAX_PAGE_DEPTH}）`,
+    path: ["page"],
+  })
+  .refine(
+    (val) => !(val.sortBy === "favoritedAt" && !val.favoriteOnly),
+    {
+      message: "仅当 favoriteOnly 为 true 时可使用 favoritedAt 排序",
+      path: ["sortBy"],
+    },
+  );
 
 /** 旧版客户端：GET /notes/search，data 为数组；单次最多 100 条，无分页元数据 */
 const searchLegacySchema = z.object({
@@ -1027,7 +1068,9 @@ router.put("/:id", async (ctx: AuthContext) => {
   } catch (err) {
     if (err instanceof z.ZodError) {
       error(ctx, "参数验证失败", ErrorCodes.PARAM_ERROR, 400);
-    } else if (err.message === "目标手帐本不存在或无权访问") {
+    } else if (err instanceof NotePinLimitExceededError) {
+      error(ctx, err.message, ErrorCodes.NOTE_PIN_LIMIT_EXCEEDED, 400);
+    } else if (err instanceof Error && err.message === "目标手帐本不存在或无权访问") {
       error(ctx, err.message, ErrorCodes.NOTEBOOK_NOT_FOUND, 404);
     } else {
       console.error("更新手帐失败:", err);

@@ -19,6 +19,12 @@ export interface INote extends Document {
   isDeleted: boolean;
   deletedAt?: Date | null;
   deleteExpireAt?: Date | null;
+  /** 收藏（全局） */
+  isFavorite: boolean;
+  favoritedAt?: Date | null;
+  /** 置顶（仅当前 noteBookId 内列表排序） */
+  isPinned: boolean;
+  pinnedAt?: Date | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -161,6 +167,26 @@ const noteSchema = new Schema(
       sparse: true,
       index: true,
     },
+    isFavorite: {
+      type: Boolean,
+      default: false,
+      index: true,
+    },
+    favoritedAt: {
+      type: Date,
+      default: null,
+      sparse: true,
+    },
+    isPinned: {
+      type: Boolean,
+      default: false,
+      index: true,
+    },
+    pinnedAt: {
+      type: Date,
+      default: null,
+      sparse: true,
+    },
   },
   {
     timestamps: true,
@@ -182,6 +208,8 @@ noteSchema.index({ noteBookId: 1, createdAt: -1 });
 noteSchema.index({ noteBookId: 1, updatedAt: -1 });
 noteSchema.index({ isShare: 1, createdAt: -1 });
 noteSchema.index({ title: "text", content: "text" });
+noteSchema.index({ userId: 1, isFavorite: 1, favoritedAt: -1 });
+noteSchema.index({ userId: 1, noteBookId: 1, isPinned: -1, pinnedAt: -1 });
 
 // 添加虚拟字段id
 noteSchema.virtual("id").get(function (this: any) {
