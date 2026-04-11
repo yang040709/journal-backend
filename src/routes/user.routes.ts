@@ -19,6 +19,16 @@ const refreshSchema = z.object({
   token: z.string().min(1, "Token不能为空"),
 });
 
+const updateMeProfileSchema = z
+  .object({
+    nickname: z.string().trim().min(1, "昵称不能为空").max(32, "昵称最多 32 字").optional(),
+    avatarUrl: z.string().trim().url("头像地址格式不正确").max(1000, "头像地址过长").optional(),
+    bio: z.string().trim().max(100, "简介最多 100 字").optional(),
+  })
+  .refine((data) => Object.keys(data).length > 0, {
+    message: "至少更新一个字段",
+  });
+
 /**
  * @swagger
  * /auth/login:
@@ -180,6 +190,31 @@ router.post("/session", authMiddleware, async (ctx: AuthContext) => {
   } catch (err) {
     console.error("会话上报失败:", err);
     error(ctx, "会话上报失败", ErrorCodes.INTERNAL_ERROR, 500);
+  }
+});
+
+router.get("/me-page", authMiddleware, async (ctx: AuthContext) => {
+  try {
+    const data = await UserService.getMePage(ctx.user!.userId);
+    success(ctx, data, "获取我的页面信息成功");
+  } catch (err) {
+    console.error("获取我的页面信息失败:", err);
+    error(ctx, err.message || "获取我的页面信息失败", ErrorCodes.INTERNAL_ERROR, 500);
+  }
+});
+
+router.put("/me/profile", authMiddleware, async (ctx: AuthContext) => {
+  try {
+    const body = updateMeProfileSchema.parse(ctx.request.body || {});
+    const data = await UserService.updateMeProfile(ctx.user!.userId, body);
+    success(ctx, data, "更新资料成功");
+  } catch (err) {
+    if (err instanceof z.ZodError) {
+      error(ctx, err.issues[0]?.message || "参数验证失败", ErrorCodes.PARAM_ERROR, 400);
+      return;
+    }
+    console.error("更新资料失败:", err);
+    error(ctx, err.message || "更新资料失败", ErrorCodes.INTERNAL_ERROR, 500);
   }
 });
 

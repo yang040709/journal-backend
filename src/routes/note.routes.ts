@@ -7,6 +7,7 @@ import {
   ErrorCodes,
 } from "../utils/response";
 import { NoteService } from "../service/note.service";
+import { ShareSecurityTaskService } from "../service/shareSecurityTask.service";
 import { AiNoteService } from "../service/aiNote.service";
 import { AiStyleService } from "../service/aiStyle.service";
 import { z } from "zod";
@@ -1329,6 +1330,7 @@ router.get("/:id/share-info", async (ctx: AuthContext) => {
         shareUrl: note.shareId
           ? `/share/pages/share-note/share-note?share_id=${note.shareId}`
           : null,
+        ...(await ShareSecurityTaskService.getLatestRiskSummary(note.id)),
       },
       "获取分享信息成功",
     );

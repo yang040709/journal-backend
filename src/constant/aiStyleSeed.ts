@@ -251,7 +251,7 @@ export const AI_STYLE_SEED: AiStyleSeedItem[] = [
   },
   {
     styleKey: "xiaohongshu_light",
-    name: "小红书风（轻度谨慎版）",
+    name: "小红书风",
     subtitle: "真实分享，节奏清晰，拒绝夸大",
     category: "social",
     order: 8,

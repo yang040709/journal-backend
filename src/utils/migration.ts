@@ -6,6 +6,8 @@ import Note from "../model/Note.js";
 import NoteBook from "../model/NoteBook.js";
 import User from "@/model/User.js";
 import { coverPreviewList } from "@/constant/img.js";
+import ShareSecurityTask from "../model/ShareSecurityTask.js";
+import UserUploadQuotaDaily from "../model/UserUploadQuotaDaily.js";
 
 /**
  * 检查并执行数据库迁移
@@ -13,6 +15,10 @@ import { coverPreviewList } from "@/constant/img.js";
 export async function runMigrations() {
   console.log("🔧 检查数据库迁移...");
   await migrateUserPointsDefault();
+  await migrateUserProfileDefaults();
+  await migrateUploadBizBreakdownAvatar();
+  await migrateShareVersionDefault();
+  await ensureShareSecurityTaskIndexes();
 }
 
 /**
@@ -132,5 +138,81 @@ async function migrateUserPointsDefault() {
     }
   } catch (e) {
     console.error("❌ 积分字段迁移失败:", e);
+  }
+}
+
+/** Me 页资料兼容：老用户补齐资料字段默认值 */
+async function migrateUserProfileDefaults() {
+  try {
+    const result = await User.updateMany(
+      {
+        $or: [
+          { nickname: { $exists: false } },
+          { avatarUrl: { $exists: false } },
+          { bio: { $exists: false } },
+          { membershipText: { $exists: false } },
+        ],
+      },
+      {
+        $set: {
+          nickname: "",
+          avatarUrl: "",
+          bio: "手帐记录生活点滴",
+          membershipText: "",
+        },
+      },
+      { timestamps: false },
+    );
+
+    if (result.modifiedCount > 0) {
+      console.log(`✅ 用户资料迁移：补齐 ${result.modifiedCount} 个用户资料字段`);
+    } else {
+      console.log("✅ 用户资料迁移检查通过：无旧数据需补齐");
+    }
+  } catch (e) {
+    console.error("❌ 用户资料迁移失败:", e);
+  }
+}
+
+async function migrateShareVersionDefault() {
+  try {
+    const result = await Note.updateMany(
+      { shareVersion: { $exists: false } },
+      { $set: { shareVersion: 0 } },
+      { timestamps: false },
+    );
+    if (result.modifiedCount > 0) {
+      console.log(`✅ 分享版本迁移：补齐 ${result.modifiedCount} 条 note.shareVersion`);
+    } else {
+      console.log("✅ 分享版本迁移检查通过：无旧数据需补齐");
+    }
+  } catch (e) {
+    console.error("❌ 分享版本迁移失败:", e);
+  }
+}
+
+async function migrateUploadBizBreakdownAvatar() {
+  try {
+    const result = await UserUploadQuotaDaily.updateMany(
+      { "bizBreakdown.avatar": { $exists: false } },
+      { $set: { "bizBreakdown.avatar": 0 } },
+      { timestamps: false },
+    );
+    if (result.modifiedCount > 0) {
+      console.log(`✅ 上传额度迁移：补齐 ${result.modifiedCount} 条 bizBreakdown.avatar`);
+    } else {
+      console.log("✅ 上传额度迁移检查通过：bizBreakdown.avatar 已完整");
+    }
+  } catch (e) {
+    console.error("❌ 上传额度迁移失败:", e);
+  }
+}
+
+async function ensureShareSecurityTaskIndexes() {
+  try {
+    await ShareSecurityTask.syncIndexes();
+    console.log("✅ ShareSecurityTask 索引同步完成");
+  } catch (e) {
+    console.error("❌ ShareSecurityTask 索引同步失败:", e);
   }
 }

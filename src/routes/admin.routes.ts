@@ -13,6 +13,7 @@ import {
   ADMIN_PAGE_REMINDERS,
   ADMIN_PAGE_NOTE_TAGS,
   ADMIN_PAGE_AI_STYLES,
+  ADMIN_PAGE_GALLERY,
 } from "../constant/adminPages";
 import {
   success,
@@ -48,6 +49,7 @@ import {
   MAX_INITIAL_NOTEBOOK_COUNT,
   MAX_INITIAL_NOTEBOOK_TEMPLATES,
 } from "../service/initialUserNotebookConfig.service";
+import { AdminGalleryService } from "../service/adminGallery.service";
 
 const MAX_PAGE_DEPTH = 10_000;
 const MIN_SEARCH_LENGTH = 2;
@@ -115,6 +117,19 @@ const noteListQuerySchema = paginationSchema.safeExtend({
     }, z.boolean().optional()),
   /** 标题/正文全文检索（MongoDB $text）；与 tags 同时传时忽略 tags */
   q: optionalKeywordSchema(100),
+});
+
+const riskNoteListQuerySchema = z.object({
+  page: z.coerce.number().int().positive().optional().default(1),
+  limit: z.coerce.number().int().min(1).max(100).optional().default(20),
+  userId: z.string().optional(),
+  riskStatus: z.enum(["reject_local", "reject_wechat", "risky_wechat", "error"]).optional(),
+  keyword: optionalKeywordSchema(100),
+  startTime: z.coerce.number().optional(),
+  endTime: z.coerce.number().optional(),
+}).refine((val) => val.page * val.limit <= MAX_PAGE_DEPTH, {
+  message: `分页深度超过限制（page*limit <= ${MAX_PAGE_DEPTH}）`,
+  path: ["page"],
 });
 
 const userListQuerySchema = z.object({
@@ -409,6 +424,35 @@ const adminCustomCoverBodySchema = z.object({
     .union([z.string().url("缩略图URL格式不正确"), z.literal("")])
     .optional(),
   thumbKey: z.union([z.string().trim().min(1, "缩略图Key不能为空"), z.literal("")]).optional(),
+});
+
+const adminGalleryCosStsSchema = z.object({
+  biz: z.enum(["system_cover"]).default("system_cover"),
+  fileName: z.string().min(1).max(255),
+  fileType: z.enum(["image/jpeg", "image/png", "image/webp"]),
+  fileSize: z.number().int().positive(),
+  withThumb: z.boolean().optional(),
+});
+
+const adminGalleryRecordSchema = z.object({
+  biz: z.enum(["system_cover"]).default("system_cover"),
+  url: z.string().url("主图 URL 格式不正确"),
+  storageKey: z.string().trim().min(1, "storageKey 不能为空"),
+  mimeType: z.enum(["image/jpeg", "image/png", "image/webp"]),
+  size: z.number().int().nonnegative(),
+  width: z.number().int().nonnegative().optional().default(0),
+  height: z.number().int().nonnegative().optional().default(0),
+  thumbUrl: z.string().url("缩略图 URL 格式不正确").optional(),
+  thumbKey: z.string().trim().min(1, "缩略图 key 不能为空").optional(),
+});
+
+const adminGalleryListQuerySchema = z.object({
+  page: z.coerce.number().int().positive().optional().default(1),
+  limit: z.coerce.number().int().min(1).max(100).optional().default(20),
+  biz: z.enum(["system_cover"]).optional().default("system_cover"),
+}).refine((val) => val.page * val.limit <= MAX_PAGE_DEPTH, {
+  message: `分页深度超过限制（page*limit <= ${MAX_PAGE_DEPTH}）`,
+  path: ["page"],
 });
 
 const aiStyleModePromptsSchema = z.object({
@@ -910,6 +954,50 @@ authed.get(
         ErrorCodes.PARAM_ERROR,
       );
     }
+  },
+);
+
+authed.get(
+  "/notes/risk-items",
+  requireAdminPage(ADMIN_PAGE_NOTES),
+  async (ctx) => {
+    try {
+      const q = riskNoteListQuerySchema.parse(ctx.query);
+      const { items, total } = await AdminNoteService.listRiskNotes({
+        page: q.page,
+        limit: q.limit,
+        userId: q.userId,
+        riskStatus: q.riskStatus,
+        keyword: q.keyword,
+        startTime: q.startTime,
+        endTime: q.endTime,
+      });
+      paginatedSuccess(ctx, items, total, q.page, q.limit);
+    } catch (e) {
+      error(
+        ctx,
+        e instanceof Error ? e.message : "参数错误",
+        ErrorCodes.PARAM_ERROR,
+      );
+    }
+  },
+);
+
+authed.get(
+  "/notes/risk-items/:taskId/snapshot",
+  requireAdminPage(ADMIN_PAGE_NOTES),
+  async (ctx) => {
+    const taskId = String(ctx.params.taskId || "").trim();
+    if (!taskId) {
+      error(ctx, "taskId 不能为空", ErrorCodes.PARAM_ERROR, 400);
+      return;
+    }
+    const snapshot = await AdminNoteService.getRiskTaskSnapshot(taskId);
+    if (!snapshot) {
+      error(ctx, "风控任务不存在", ErrorCodes.NOT_FOUND, 404);
+      return;
+    }
+    success(ctx, snapshot);
   },
 );
 
@@ -1751,6 +1839,86 @@ authed.delete(
         e instanceof Error ? e.message : "删除失败",
         ErrorCodes.PARAM_ERROR,
       );
+    }
+  },
+);
+
+authed.post(
+  "/gallery/cos/sts",
+  requireAdminPage(ADMIN_PAGE_GALLERY),
+  async (ctx) => {
+    try {
+      const body = adminGalleryCosStsSchema.parse(ctx.request.body);
+      const data = await AdminGalleryService.createCosStsCredential({
+        biz: body.biz,
+        fileName: body.fileName,
+        fileType: body.fileType,
+        fileSize: body.fileSize,
+        withThumb: body.withThumb,
+      });
+      success(ctx, data, "获取上传凭证成功");
+    } catch (e) {
+      if (e instanceof z.ZodError) {
+        error(ctx, "参数验证失败", ErrorCodes.PARAM_ERROR, 400);
+        return;
+      }
+      const msg = e instanceof Error ? e.message : "获取上传凭证失败";
+      error(ctx, msg, ErrorCodes.PARAM_ERROR, 400);
+    }
+  },
+);
+
+authed.post(
+  "/gallery/images",
+  requireAdminPage(ADMIN_PAGE_GALLERY),
+  async (ctx) => {
+    try {
+      const body = adminGalleryRecordSchema.parse(ctx.request.body);
+      const admin = ctx.state.admin!;
+      const row = await AdminGalleryService.recordUploadedImage({
+        biz: body.biz,
+        url: body.url,
+        storageKey: body.storageKey,
+        mimeType: body.mimeType,
+        size: body.size,
+        width: body.width,
+        height: body.height,
+        thumbUrl: body.thumbUrl,
+        thumbKey: body.thumbKey,
+        createdByAdminId: String(admin.id || ""),
+        createdByAdminUsername: admin.username,
+      });
+      success(ctx, row, "图片入库成功");
+    } catch (e) {
+      if (e instanceof z.ZodError) {
+        error(ctx, "参数验证失败", ErrorCodes.PARAM_ERROR, 400);
+        return;
+      }
+      const msg = e instanceof Error ? e.message : "图片入库失败";
+      error(ctx, msg, ErrorCodes.PARAM_ERROR, 400);
+    }
+  },
+);
+
+authed.get(
+  "/gallery/images",
+  requireAdminPage(ADMIN_PAGE_GALLERY),
+  async (ctx) => {
+    try {
+      const q = adminGalleryListQuerySchema.parse(ctx.query);
+      const { items, total, page, limit } = await AdminGalleryService.listImages({
+        page: q.page,
+        limit: q.limit,
+        biz: q.biz,
+      });
+      paginatedSuccess(ctx, items, total, page, limit, "获取图库列表成功");
+    } catch (e) {
+      if (e instanceof z.ZodError) {
+        error(ctx, "参数验证失败", ErrorCodes.PARAM_ERROR, 400);
+        return;
+      }
+      const msg = e instanceof Error ? e.message : "获取图库列表失败";
+      error(ctx, msg, ErrorCodes.INTERNAL_ERROR, 500);
     }
   },
 );

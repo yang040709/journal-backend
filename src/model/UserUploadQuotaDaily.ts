@@ -1,6 +1,6 @@
 import { Document, Schema, model } from "mongoose";
 
-export type UploadBiz = "note" | "cover";
+export type UploadBiz = "note" | "cover" | "avatar";
 
 export interface IUserUploadQuotaDaily extends Document {
   userId: string;
@@ -11,6 +11,7 @@ export interface IUserUploadQuotaDaily extends Document {
   bizBreakdown: {
     note: number;
     cover: number;
+    avatar: number;
   };
   createdAt: Date;
   updatedAt: Date;
@@ -54,6 +55,12 @@ const userUploadQuotaDailySchema = new Schema(
         min: 0,
       },
       cover: {
+        type: Number,
+        required: true,
+        default: 0,
+        min: 0,
+      },
+      avatar: {
         type: Number,
         required: true,
         default: 0,

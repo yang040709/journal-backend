@@ -10,6 +10,8 @@ export interface INote extends Document {
   userId: string;
   isShare: boolean;
   shareId?: string;
+  /** 分享版本号：每次开启分享递增，用于异步风控回写幂等 */
+  shareVersion: number;
   /** 创建时若来自系统模板，记录 Template.systemKey（运营统计用） */
   appliedSystemTemplateKey?: string;
   /** 首次开启分享时间（运营按日统计用） */
@@ -123,6 +125,12 @@ const noteSchema = new Schema(
       type: String,
       unique: true,
       sparse: true, // 允许null值存在多个
+      index: true,
+    },
+    shareVersion: {
+      type: Number,
+      default: 0,
+      min: 0,
       index: true,
     },
     appliedSystemTemplateKey: {

@@ -6,6 +6,7 @@ import { toLeanNoteArray, toLeanNote } from "../utils/typeUtils";
 import { checkNoteContent } from "../utils/sensitive-encrypted";
 import { nanoid } from "nanoid";
 import { recordFromNoteImages } from "./userImageAsset.service";
+import { ShareSecurityTaskService } from "./shareSecurityTask.service";
 
 export interface CreateNoteData {
   noteBookId: string;
@@ -59,6 +60,14 @@ export interface SharedNoteView {
   isOwner: boolean;
 }
 
+export class ShareAccessError extends Error {
+  code: string;
+  constructor(code: string, message: string) {
+    super(message);
+    this.code = code;
+  }
+}
+
 export function toSharedNoteView(
   lean: LeanNote,
   viewerUserId?: string | null,
@@ -87,6 +96,12 @@ const NOTE_TAG_MAX_LENGTH = 20;
 const NOTE_TAG_MAX_COUNT = 100;
 const MAX_PAGE_DEPTH = 10_000;
 const MIN_SEARCH_KEYWORD_LENGTH = 1;
+const WECHAT_OPENID_PATTERN = /^o[A-Za-z0-9_-]{15,63}$/;
+
+function isLikelyWeChatOpenId(value: unknown): boolean {
+  const id = String(value || "").trim();
+  return WECHAT_OPENID_PATTERN.test(id);
+}
 
 function sanitizeNoteTags(tags: unknown): string[] {
   if (!Array.isArray(tags)) return [];
@@ -192,6 +207,7 @@ export class NoteService {
       userId: data.userId,
       isShare: false,
       shareId: nanoid(12),
+      shareVersion: 0,
       ...(key ? { appliedSystemTemplateKey: key.slice(0, 120) } : {}),
       isDeleted: false,
       deletedAt: null,
@@ -583,16 +599,28 @@ export class NoteService {
     shareId: string,
     viewerUserId?: string | null,
   ): Promise<SharedNoteView | null> {
-    const note = await Note.findOne({
-      shareId,
-      isShare: true,
-      isDeleted: { $ne: true },
-    }).lean();
-
-    if (!note) {
-      return null;
+    const raw = await Note.findOne({ shareId }).lean();
+    if (!raw) {
+      throw new ShareAccessError("SHARE_NOT_FOUND", "分享链接不存在或已失效");
     }
-    return toSharedNoteView(toLeanNote(note), viewerUserId);
+    const note = toLeanNote(raw);
+    if (note.isDeleted) {
+      throw new ShareAccessError("SHARE_NOTE_DELETED", "该手帐已删除，暂时无法查看");
+    }
+    if (!note.isShare) {
+      const risk = await ShareSecurityTaskService.getLatestRiskSummary(note.id);
+      if (risk.riskStatus === "reject_local") {
+        throw new ShareAccessError("SHARE_DISABLED_BY_LOCAL_RISK", "该手帐因内容风险已关闭分享");
+      }
+      if (risk.riskStatus === "reject_wechat") {
+        throw new ShareAccessError(
+          "SHARE_DISABLED_BY_WECHAT_RISK",
+          "该手帐因微信图文风控检测结果已关闭分享",
+        );
+      }
+      throw new ShareAccessError("SHARE_DISABLED_BY_AUTHOR", "该手帐已被作者关闭分享");
+    }
+    return toSharedNoteView(note, viewerUserId);
   }
 
   /**
@@ -618,26 +646,55 @@ export class NoteService {
     }
 
     if (share) {
-      // 开启分享
-      // 检查敏感词
       const checkResult = checkNoteContent(note.title, note.content);
-
-      // 如果有敏感词，使用处理后的内容
       if (checkResult.hasAnySensitive) {
-        note.title = checkResult.processedTitle;
-        note.content = checkResult.processedContent;
+        note.isShare = false;
+        await note.save({ timestamps: false });
+        await ShareSecurityTaskService.recordLocalReject({
+          noteId: String(note.id),
+          userId,
+          shareVersion: Number(note.shareVersion || 0),
+          reason: "LOCAL_SENSITIVE_WORD",
+          title: note.title,
+          content: note.content,
+          tags: note.tags || [],
+          images: (note.images || []).map((image) => ({
+            key: image.key,
+            url: image.url,
+            thumbUrl: image.thumbUrl,
+          })),
+        });
+        throw new ShareAccessError(
+          "SHARE_LOCAL_RISK_BLOCKED",
+          "内容包含违规敏感信息，当前手帐分享已关闭",
+        );
       }
       note.isShare = true;
-      if (!note.firstSharedAt) {
-        note.firstSharedAt = new Date();
+      note.shareVersion = Number(note.shareVersion || 0) + 1;
+      if (!note.firstSharedAt) note.firstSharedAt = new Date();
+      await note.save({ timestamps: false });
+      // 仅在 userId 是微信 openid 时提交微信风控队列，避免非微信端账号误判。
+      if (isLikelyWeChatOpenId(userId)) {
+        await ShareSecurityTaskService.enqueueWeChatChecks({
+          noteId: String(note.id),
+          userId,
+          shareVersion: note.shareVersion,
+          title: note.title,
+          content: note.content,
+          tags: note.tags || [],
+          images: (note.images || []).map((image) => ({
+            key: image.key,
+            url: image.url,
+            thumbUrl: image.thumbUrl,
+          })),
+        });
       }
     } else {
       // 关闭分享
       note.isShare = false;
       // 注意：不删除shareId，以便重新开启时使用同一个分享链接
+      await note.save({ timestamps: false }); // 不更新updatedAt
     }
-
-    await note.save({ timestamps: false }); // 不更新updatedAt
 
     // 记录活动
     void ActivityLogger.record(

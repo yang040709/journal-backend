@@ -1,6 +1,7 @@
 import axios from "axios";
 import User from "../model/User";
 import NoteBook from "../model/NoteBook";
+import Note from "../model/Note";
 import { signToken } from "../utils/jwt";
 import { ActivityLogger } from "../utils/ActivityLogger";
 import { CoverService } from "./cover.service";
@@ -11,7 +12,39 @@ export interface LoginResult {
   userId: string;
 }
 
+export interface MePageProfile {
+  userId: string;
+  nickname: string;
+  avatarUrl: string;
+  bio: string;
+  membershipText: string;
+}
+
+export interface MePageStats {
+  notebookCount: number;
+  noteCount: number;
+  streakDays: number;
+}
+
+export interface MePageResult {
+  profile: MePageProfile;
+  stats: MePageStats;
+}
+
+export interface UpdateMeProfileInput {
+  nickname?: string;
+  avatarUrl?: string;
+  bio?: string;
+}
+
 export class UserService {
+  private static buildDefaultNickname(userId: string): string {
+    const normalized = String(userId || "").trim();
+    if (!normalized) return "手帐用户";
+    const suffix = normalized.slice(-4);
+    return `手帐用户${suffix}`;
+  }
+
   /**
    * 用户登录 - 优化版本
    */
@@ -167,11 +200,126 @@ export class UserService {
     };
   }
 
+  static async getMePage(userId: string): Promise<MePageResult> {
+    const user = await User.findOne({ userId }).lean();
+    if (!user) {
+      throw new Error("用户不存在");
+    }
+
+    const [notebookCount, noteCount, noteDates] = await Promise.all([
+      NoteBook.countDocuments({ userId, isDeleted: { $ne: true } }),
+      Note.countDocuments({ userId, isDeleted: { $ne: true } }),
+      Note.find({ userId, isDeleted: { $ne: true } })
+        .select("createdAt")
+        .sort({ createdAt: -1 })
+        .lean(),
+    ]);
+
+    const streakDays = UserService.calculateStreakDays(
+      noteDates.map((item) => new Date(item.createdAt)),
+    );
+
+    return {
+      profile: {
+        userId: user.userId,
+        nickname:
+          String((user as any).nickname || "").trim() ||
+          UserService.buildDefaultNickname(user.userId),
+        avatarUrl: String((user as any).avatarUrl || "").trim(),
+        bio: String((user as any).bio || "").trim() || "手帐记录生活点滴",
+        membershipText: String((user as any).membershipText || "").trim(),
+      },
+      stats: {
+        notebookCount,
+        noteCount,
+        streakDays,
+      },
+    };
+  }
+
+  static async updateMeProfile(
+    userId: string,
+    input: UpdateMeProfileInput,
+  ): Promise<MePageProfile> {
+    const updatePayload: Partial<UpdateMeProfileInput> = {};
+    if (input.nickname !== undefined) {
+      updatePayload.nickname = String(input.nickname).trim();
+    }
+    if (input.avatarUrl !== undefined) {
+      updatePayload.avatarUrl = String(input.avatarUrl).trim();
+    }
+    if (input.bio !== undefined) {
+      updatePayload.bio = String(input.bio).trim();
+    }
+
+    if (Object.keys(updatePayload).length === 0) {
+      const current = await this.getUserInfo(userId);
+      const user = await User.findOne({ userId }).lean();
+      return {
+        userId: current.userId,
+        nickname:
+          String((user as any)?.nickname || "").trim() ||
+          UserService.buildDefaultNickname(current.userId),
+        avatarUrl: String((user as any)?.avatarUrl || "").trim(),
+        bio: String((user as any)?.bio || "").trim() || "手帐记录生活点滴",
+        membershipText: String((user as any)?.membershipText || "").trim(),
+      };
+    }
+
+    const user = await User.findOneAndUpdate(
+      { userId },
+      { $set: updatePayload },
+      { new: true },
+    ).lean();
+
+    if (!user) {
+      throw new Error("用户不存在");
+    }
+
+    return {
+      userId: user.userId,
+      nickname:
+        String((user as any).nickname || "").trim() ||
+        UserService.buildDefaultNickname(user.userId),
+      avatarUrl: String((user as any).avatarUrl || "").trim(),
+      bio: String((user as any).bio || "").trim() || "手帐记录生活点滴",
+      membershipText: String((user as any).membershipText || "").trim(),
+    };
+  }
+
   /**
    * 验证用户是否存在
    */
   static async validateUser(userId: string): Promise<boolean> {
     const user = await User.findOne({ userId });
     return !!user;
+  }
+
+  private static calculateStreakDays(dates: Date[]): number {
+    if (!Array.isArray(dates) || dates.length === 0) return 0;
+    const dateSet = new Set<string>();
+    for (const date of dates) {
+      const d = new Date(date.getTime());
+      const day = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(
+        d.getDate(),
+      ).padStart(2, "0")}`;
+      dateSet.add(day);
+    }
+
+    const now = new Date();
+    let streak = 0;
+    for (let i = 0; i < 3650; i += 1) {
+      const cursor = new Date(now);
+      cursor.setDate(now.getDate() - i);
+      const day = `${cursor.getFullYear()}-${String(cursor.getMonth() + 1).padStart(2, "0")}-${String(
+        cursor.getDate(),
+      ).padStart(2, "0")}`;
+      if (dateSet.has(day)) {
+        streak += 1;
+      } else {
+        break;
+      }
+    }
+    return streak;
   }
 }

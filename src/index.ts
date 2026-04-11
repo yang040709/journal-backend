@@ -7,6 +7,7 @@ import { initSensitiveFilter } from "./utils/sensitive-encrypted";
 import { ensureAdminBootstrap } from "./service/adminBootstrap.service";
 import { ensureSystemTemplates } from "./service/systemTemplateSeed.service";
 import { AiStyleService } from "./service/aiStyle.service";
+import { ShareSecurityTaskService } from "./service/shareSecurityTask.service";
 
 dotenv.config();
 
@@ -55,6 +56,7 @@ const init = async () => {
 
     // 数据库连接成功后启动调度器
     startSchedulersAfterDBConnection();
+    ShareSecurityTaskService.startWorker();
 
     const server = app.listen(PORT, () => {
       console.log(`🚀 Server is running on port ${PORT}`);

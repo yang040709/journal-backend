@@ -3,6 +3,10 @@ import { coverPreviewList } from "../constant/img";
 
 export interface IUser extends Document {
   userId: string;
+  nickname?: string;
+  avatarUrl?: string;
+  bio?: string;
+  membershipText?: string;
   /** 积分余额（看广告、兑换额度、后台调整） */
   points: number;
   /** 覆盖全局的每日激励视频次数上限；未设置则使用后台配置的默认值 */
@@ -33,6 +37,30 @@ const userSchema = new Schema(
       index: true,
       unique: true,
       required: true,
+    },
+    nickname: {
+      type: String,
+      trim: true,
+      default: "",
+      maxlength: 32,
+    },
+    avatarUrl: {
+      type: String,
+      trim: true,
+      default: "",
+      maxlength: 1000,
+    },
+    bio: {
+      type: String,
+      trim: true,
+      default: "手帐记录生活点滴",
+      maxlength: 100,
+    },
+    membershipText: {
+      type: String,
+      trim: true,
+      default: "",
+      maxlength: 60,
     },
     points: {
       type: Number,

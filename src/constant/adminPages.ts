@@ -6,6 +6,7 @@ export const ADMIN_PAGE_TEMPLATES = "templates";
 export const ADMIN_PAGE_REMINDERS = "reminders";
 export const ADMIN_PAGE_NOTE_TAGS = "note_tags";
 export const ADMIN_PAGE_AI_STYLES = "ai_styles";
+export const ADMIN_PAGE_GALLERY = "gallery";
 /** 仅超级管理员，不通过 allowedPages 分配 */
 export const ADMIN_PAGE_ADMINS = "admins";
 
@@ -17,6 +18,7 @@ export const ASSIGNABLE_ADMIN_PAGES = [
   ADMIN_PAGE_USERS,
   ADMIN_PAGE_TEMPLATES,
   ADMIN_PAGE_REMINDERS,
+  ADMIN_PAGE_GALLERY,
 ] as const;
 
 export type AssignableAdminPage = (typeof ASSIGNABLE_ADMIN_PAGES)[number];

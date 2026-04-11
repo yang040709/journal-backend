@@ -1,6 +1,7 @@
 import Router from "@koa/router";
-import { NoteService } from "../service/note.service";
-import { success, error } from "../utils/response";
+import { NoteService, ShareAccessError } from "../service/note.service";
+import { ShareSecurityTaskService } from "../service/shareSecurityTask.service";
+import { success, error, ErrorCodes } from "../utils/response";
 import {
   authMiddleware,
   optionalAuthMiddleware,
@@ -27,15 +28,22 @@ router.get("/:shareId", optionalAuthMiddleware, async (ctx: AuthContext) => {
 
     const viewerId = ctx.user?.userId;
     const note = await NoteService.getSharedNoteForPublic(shareId, viewerId);
-
-    if (!note) {
-      error(ctx, "手帐不存在或未分享或被关闭分享", 1004, 404);
-      return;
-    }
-
     success(ctx, note, "获取成功");
   } catch (err: any) {
-    error(ctx, err.message || "服务器错误", 9999, 500);
+    if (err instanceof ShareAccessError) {
+      const codeMap: Record<string, number> = {
+        SHARE_NOT_FOUND: ErrorCodes.SHARE_NOT_FOUND,
+        SHARE_DISABLED_BY_AUTHOR: ErrorCodes.SHARE_DISABLED_BY_AUTHOR,
+        SHARE_DISABLED_BY_LOCAL_RISK: ErrorCodes.SHARE_DISABLED_BY_LOCAL_RISK,
+        SHARE_DISABLED_BY_WECHAT_RISK: ErrorCodes.SHARE_DISABLED_BY_WECHAT_RISK,
+        SHARE_NOTE_DELETED: ErrorCodes.SHARE_NOTE_DELETED,
+      };
+      error(ctx, err.message, codeMap[err.code] || ErrorCodes.NOT_FOUND, 404, {
+        reason: err.code,
+      });
+      return;
+    }
+    error(ctx, err.message || "服务器错误", ErrorCodes.INTERNAL_ERROR, 500);
   }
 });
 
@@ -67,6 +75,7 @@ router.post("/notes/:id/share", authMiddleware, async (ctx) => {
       return;
     }
 
+    const risk = await ShareSecurityTaskService.getLatestRiskSummary(String(note.id));
     success(
       ctx,
       {
@@ -74,11 +83,23 @@ router.post("/notes/:id/share", authMiddleware, async (ctx) => {
         isShare: note.isShare,
         shareId: note.shareId,
         title: note.title,
+        riskStatus: risk.riskStatus,
+        riskMessage: share ? "分享已开启" : "手帐分享已关闭",
       },
       share ? "手帐分享已开启" : "手帐分享已关闭",
     );
   } catch (err: any) {
-    error(ctx, err.message || "服务器错误", 9999, 500);
+    if (err instanceof ShareAccessError && err.code === "SHARE_LOCAL_RISK_BLOCKED") {
+      error(
+        ctx,
+        err.message,
+        ErrorCodes.SHARE_LOCAL_RISK_BLOCKED,
+        400,
+        { isShare: false, riskStatus: "reject_local" },
+      );
+      return;
+    }
+    error(ctx, err.message || "服务器错误", ErrorCodes.INTERNAL_ERROR, 500);
   }
 });
 

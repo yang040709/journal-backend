@@ -6,6 +6,7 @@ import { LeanNote } from "../types/mongoose";
 import { PaginationParams } from "./note.service";
 import { checkNoteContent } from "../utils/sensitive-encrypted";
 import { ActivityLogger } from "../utils/ActivityLogger";
+import ShareSecurityTask from "../model/ShareSecurityTask";
 
 export const ADMIN_SHARE_NOTE_PATH_PREFIX =
   "/share/pages/share-note/share-note?share_id=";
@@ -36,6 +37,39 @@ export interface AdminNoteListParams extends PaginationParams {
   isShare?: boolean;
   /** 标题/正文 $text 检索；与 tags 同时存在时忽略 tags */
   q?: string;
+}
+
+export interface AdminRiskNoteListParams {
+  page?: number;
+  limit?: number;
+  userId?: string;
+  riskStatus?: "reject_local" | "reject_wechat" | "risky_wechat" | "error";
+  keyword?: string;
+  startTime?: number;
+  endTime?: number;
+}
+
+export interface RiskSnapshotPayload {
+  taskId: string;
+  noteId: string;
+  shareVersion: number;
+  status: string;
+  resultCode: string;
+  resultDetail: string;
+  riskUpdatedAt: Date | null;
+  snapshotAt: Date | null;
+  snapshot: {
+    title: string;
+    content: string;
+    tags: string[];
+    images: Array<{ key?: string; url: string; thumbUrl?: string }>;
+    riskMeta: {
+      source: "local" | "wechat_text" | "wechat_image";
+      code?: string;
+      detail?: string;
+      traceId?: string;
+    };
+  } | null;
 }
 
 /** 构建手帐管理列表查询条件（手帐列表与分享列表共用） */
@@ -117,6 +151,139 @@ export class AdminNoteService {
     return {
       items: lean.map(enrichNoteWithSharePath),
       total,
+    };
+  }
+
+  static async listRiskNotes(
+    params: AdminRiskNoteListParams = {},
+  ): Promise<{ items: Array<AdminNoteListItem & Record<string, unknown>>; total: number }> {
+    const page = Math.max(1, params.page || 1);
+    const limit = Math.min(100, Math.max(1, params.limit || 20));
+    const skip = (page - 1) * limit;
+
+    const taskQuery: Record<string, unknown> = {
+      status: params.riskStatus
+        ? params.riskStatus
+        : { $in: ["reject_local", "reject_wechat", "risky_wechat", "error"] },
+    };
+    if (params.startTime || params.endTime) {
+      const updatedAt: Record<string, Date> = {};
+      if (params.startTime) updatedAt.$gte = new Date(params.startTime);
+      if (params.endTime) updatedAt.$lte = new Date(params.endTime);
+      taskQuery.updatedAt = updatedAt;
+    }
+
+    const latest = await ShareSecurityTask.aggregate([
+      { $match: taskQuery },
+      { $sort: { updatedAt: -1 } },
+      {
+        $group: {
+          _id: "$noteId",
+          taskId: { $first: "$taskId" },
+          noteId: { $first: "$noteId" },
+          status: { $first: "$status" },
+          resultCode: { $first: "$resultCode" },
+          resultDetail: { $first: "$resultDetail" },
+          riskUpdatedAt: { $first: "$updatedAt" },
+          createdAt: { $first: "$createdAt" },
+          snapshot: { $first: "$snapshot" },
+        },
+      },
+      {
+        $addFields: {
+          noteObjectId: { $toObjectId: "$noteId" },
+        },
+      },
+      {
+        $lookup: {
+          from: "notes",
+          localField: "noteObjectId",
+          foreignField: "_id",
+          as: "noteDoc",
+        },
+      },
+      { $unwind: "$noteDoc" },
+      ...(params.userId
+        ? [{ $match: { "noteDoc.userId": params.userId } }]
+        : []),
+      ...(params.keyword
+        ? [{
+            $match: {
+              $or: [
+                { "noteDoc.title": { $regex: params.keyword, $options: "i" } },
+                { "noteDoc.content": { $regex: params.keyword, $options: "i" } },
+              ],
+            },
+          }]
+        : []),
+      {
+        $facet: {
+          total: [{ $count: "count" }],
+          items: [{ $sort: { riskUpdatedAt: -1 } }, { $skip: skip }, { $limit: limit }],
+        },
+      },
+    ]);
+
+    const payload = latest[0] || { total: [], items: [] };
+    const total = payload.total?.[0]?.count || 0;
+    const items = (payload.items || []).map((row: any) => {
+      const note = toLeanNote(row.noteDoc);
+      const base = enrichNoteWithSharePath(note);
+      return {
+        ...base,
+        riskTaskId: row.taskId,
+        riskStatus: row.status,
+        riskCode: row.resultCode || "",
+        riskDetail: row.resultDetail || "",
+        riskUpdatedAt: row.riskUpdatedAt || null,
+        snapshotAvailable: Boolean(row.snapshot?.title || row.snapshot?.content || row.snapshot?.images?.length),
+        snapshotTitle: String(row.snapshot?.title || "").slice(0, 120),
+        snapshotAt: row.createdAt || null,
+      };
+    });
+    return { items, total };
+  }
+
+  static async getRiskTaskSnapshot(taskId: string): Promise<RiskSnapshotPayload | null> {
+    const task = await ShareSecurityTask.findOne({ taskId }).lean();
+    if (!task) return null;
+    const snapshot = task.snapshot
+      ? {
+          title: String(task.snapshot.title || ""),
+          content: String(task.snapshot.content || ""),
+          tags: Array.isArray(task.snapshot.tags)
+            ? task.snapshot.tags.map((tag) => String(tag))
+            : [],
+          images: Array.isArray(task.snapshot.images)
+            ? task.snapshot.images
+                .map((img) => ({
+                  key: img?.key ? String(img.key) : undefined,
+                  url: String(img?.url || ""),
+                  thumbUrl: img?.thumbUrl ? String(img.thumbUrl) : undefined,
+                }))
+                .filter((img) => Boolean(img.url))
+            : [],
+          riskMeta: {
+            source: (task.snapshot.riskMeta?.source || task.source) as
+              | "local"
+              | "wechat_text"
+              | "wechat_image",
+            code: task.snapshot.riskMeta?.code || task.resultCode || undefined,
+            detail: task.snapshot.riskMeta?.detail || task.resultDetail || undefined,
+            traceId: task.snapshot.riskMeta?.traceId || task.wechatTraceId || undefined,
+          },
+        }
+      : null;
+    return {
+      taskId: task.taskId,
+      noteId: task.noteId,
+      shareVersion: Number(task.shareVersion || 0),
+      status: task.status,
+      resultCode: task.resultCode || "",
+      resultDetail: task.resultDetail || "",
+      riskUpdatedAt: task.updatedAt || null,
+      snapshotAt: task.createdAt || null,
+      snapshot,
     };
   }
 

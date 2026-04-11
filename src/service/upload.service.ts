@@ -45,7 +45,7 @@ export interface UploadQuotaSummary {
 }
 
 const allowedImageTypes = new Set(["image/jpeg", "image/png", "image/webp"] as const);
-const allowedBizTypes = new Set<UploadBiz>(["note", "cover"]);
+const allowedBizTypes = new Set<UploadBiz>(["note", "cover", "avatar"]);
 
 export class UploadDailyLimitExceededError extends Error {
   public readonly code = "UPLOAD_DAILY_LIMIT_EXCEEDED";
@@ -108,6 +108,7 @@ export const ensureDailyQuotaRecord = async (
         bizBreakdown: {
           note: 0,
           cover: 0,
+          avatar: 0,
         },
       },
       $set: {
