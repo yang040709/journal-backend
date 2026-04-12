@@ -504,6 +504,47 @@ router.get("/trash", async (ctx: AuthContext) => {
   }
 });
 
+const calendarDailyCountsSchema = z
+  .object({
+    startTime: z.coerce.number().int(),
+    endTime: z.coerce.number().int(),
+    tz: z.string().trim().max(64).optional().default("Asia/Shanghai"),
+  })
+  .refine((v) => v.endTime >= v.startTime, {
+    message: "endTime 不能早于 startTime",
+    path: ["endTime"],
+  })
+  .refine((v) => v.endTime - v.startTime <= 45 * 24 * 60 * 60 * 1000, {
+    message: "时间跨度不能超过 45 天",
+    path: ["endTime"],
+  });
+
+/** GET /notes/calendar/daily-counts — 热力图按日汇总（createdAt，未删除） */
+router.get("/calendar/daily-counts", async (ctx: AuthContext) => {
+  try {
+    const userId = ctx.user!.userId;
+    const q = calendarDailyCountsSchema.parse(ctx.query);
+    const data = await NoteService.getCalendarDailyCounts(
+      userId,
+      q.startTime,
+      q.endTime,
+      q.tz,
+    );
+    success(ctx, data, "获取日历统计成功");
+  } catch (err) {
+    if (err instanceof z.ZodError) {
+      error(ctx, "参数验证失败", ErrorCodes.PARAM_ERROR, 400);
+      return;
+    }
+    if (err instanceof Error && err.message) {
+      error(ctx, err.message, ErrorCodes.PARAM_ERROR, 400);
+      return;
+    }
+    console.error("获取日历统计失败:", err);
+    error(ctx, "获取日历统计失败", ErrorCodes.INTERNAL_ERROR, 500);
+  }
+});
+
 /**
  * @swagger
  * /notes/search/page:

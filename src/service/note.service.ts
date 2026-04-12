@@ -919,4 +919,72 @@ export class NoteService {
     const result = await Note.deleteOne({ _id: id, userId, isDeleted: true });
     return Boolean(result.deletedCount);
   }
+
+  private static sanitizeIanaTimeZone(raw: string): string {
+    const t = String(raw || "").trim();
+    if (t.length < 3 || t.length > 64) return "Asia/Shanghai";
+    if (!/^[A-Za-z_+/.0-9-]+$/.test(t)) return "Asia/Shanghai";
+    return t;
+  }
+
+  /**
+   * 按用户时区的日历日统计「创建」手帐篇数（未删除），供客户端月度热力图。
+   * 依赖 MongoDB $dateToString 的 timezone；非法时区会回退为 UTC 重试。
+   */
+  static async getCalendarDailyCounts(
+    userId: string,
+    startTime: number,
+    endTime: number,
+    timeZone: string,
+  ): Promise<{
+    days: { date: string; count: number }[];
+    maxCount: number;
+    tz: string;
+  }> {
+    const tz = NoteService.sanitizeIanaTimeZone(timeZone);
+    const start = new Date(startTime);
+    const end = new Date(endTime);
+    if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) {
+      throw new Error("时间参数无效");
+    }
+    if (end.getTime() < start.getTime()) {
+      throw new Error("结束时间不能早于开始时间");
+    }
+    const maxSpanMs = 45 * 24 * 60 * 60 * 1000;
+    if (end.getTime() - start.getTime() > maxSpanMs) {
+      throw new Error("时间范围过大");
+    }
+
+    const baseMatch = {
+      userId,
+      isDeleted: { $ne: true },
+      createdAt: { $gte: start, $lte: end },
+    };
+
+    const pipelineForTz = (zone: string) => [
+      { $match: baseMatch },
+      {
+        $group: {
+          _id: {
+            $dateToString: { format: "%Y-%m-%d", date: "$createdAt", timezone: zone },
+          },
+          count: { $sum: 1 },
+        },
+      },
+      { $sort: { _id: 1 as const } },
+    ];
+
+    let appliedTz = tz;
+    let rows: { _id: string; count: number }[];
+    try {
+      rows = await Note.aggregate(pipelineForTz(tz));
+    } catch {
+      appliedTz = "UTC";
+      rows = await Note.aggregate(pipelineForTz("UTC"));
+    }
+
+    const days = rows.map((r) => ({ date: r._id, count: r.count }));
+    const maxCount = days.reduce((m, d) => Math.max(m, d.count), 0);
+    return { days, maxCount, tz: appliedTz };
+  }
 }
