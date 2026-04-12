@@ -10,6 +10,12 @@ import {
   remainingAfterUse,
 } from "./aiUsageQuota";
 import { AiStyleService } from "./aiStyle.service";
+import {
+  AI_NOTE_OUTPUT_MAX_CHARS,
+  aiNoteMaxCompletionTokensForChars,
+  appendPlatformSystemSuffix,
+  truncateAiNoteOutput,
+} from "../constant/aiNoteOutputPolicy";
 
 export type AiNoteMode = "generate" | "rewrite" | "continue";
 
@@ -42,6 +48,7 @@ export class AiNoteService {
   private static async invokeModel(
     systemPrompt: string,
     userPrompt: string,
+    maxTokens: number,
   ): Promise<string> {
     const apiKey = process.env.DEEPSEEK_API_KEY;
     if (!apiKey) {
@@ -62,8 +69,14 @@ export class AiNoteService {
         { role: "user", content: userPrompt },
       ],
       temperature: 0.8,
+      max_tokens: maxTokens,
     });
     return completion.choices[0]?.message?.content?.trim() || "";
+  }
+
+  private static finalizeAiNoteText(raw: string): string {
+    const cleaned = sanitizeModelText(raw);
+    return truncateAiNoteOutput(cleaned);
   }
 
   /**
@@ -114,11 +127,10 @@ export class AiNoteService {
     });
 
     try {
-      const raw = await AiNoteService.invokeModel(
-        prompts.systemPrompt,
-        prompts.userPrompt,
-      );
-      const text = sanitizeModelText(raw);
+      const systemPrompt = appendPlatformSystemSuffix(prompts.systemPrompt);
+      const maxTokens = aiNoteMaxCompletionTokensForChars(AI_NOTE_OUTPUT_MAX_CHARS);
+      const raw = await AiNoteService.invokeModel(systemPrompt, prompts.userPrompt, maxTokens);
+      const text = AiNoteService.finalizeAiNoteText(raw);
       if (!text) {
         throw new Error("AI 未返回有效内容，请稍后重试");
       }
@@ -136,7 +148,6 @@ export class AiNoteService {
     styleKey: string;
     elapsedMs: number;
     charCount: number;
-    usedPrompt: { systemPrompt: string; userPrompt: string };
   }> {
     if (input.mode === "generate" && !input.title?.trim()) {
       throw new Error("请先填写手帐标题");
@@ -155,11 +166,10 @@ export class AiNoteService {
       hint: input.hint,
       today: dateKey,
     });
-    const raw = await AiNoteService.invokeModel(
-      prompts.systemPrompt,
-      prompts.userPrompt,
-    );
-    const text = sanitizeModelText(raw);
+    const systemPrompt = appendPlatformSystemSuffix(prompts.systemPrompt);
+    const maxTokens = aiNoteMaxCompletionTokensForChars(AI_NOTE_OUTPUT_MAX_CHARS);
+    const raw = await AiNoteService.invokeModel(systemPrompt, prompts.userPrompt, maxTokens);
+    const text = AiNoteService.finalizeAiNoteText(raw);
     if (!text) {
       throw new Error("AI 未返回有效内容，请稍后重试");
     }
@@ -168,7 +178,6 @@ export class AiNoteService {
       styleKey: style.styleKey,
       elapsedMs: Date.now() - startedAt,
       charCount: text.length,
-      usedPrompt: prompts,
     };
   }
 }

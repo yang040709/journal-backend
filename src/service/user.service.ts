@@ -3,6 +3,11 @@ import User from "../model/User";
 import NoteBook from "../model/NoteBook";
 import Note from "../model/Note";
 import { signToken } from "../utils/jwt";
+import {
+  formatInstantAsDateKey,
+  getQuotaDateContext,
+  previousDateKey,
+} from "../utils/dateKey";
 import { ActivityLogger } from "../utils/ActivityLogger";
 import { CoverService } from "./cover.service";
 import { InitialUserNotebookConfigService } from "./initialUserNotebookConfig.service";
@@ -295,30 +300,35 @@ export class UserService {
     return !!user;
   }
 
+  /**
+   * 连续记录天数：按业务时区（与额度自然日一致）分桶；
+   * 从「不超过今天的、最近一条有记录的自然日」起向前数连续有记录的自然日。
+   * 例：今日 12 号且 10、11 有记、12 未记 → 2；12 号也记了 → 3。
+   */
   private static calculateStreakDays(dates: Date[]): number {
     if (!Array.isArray(dates) || dates.length === 0) return 0;
+    const { timezone } = getQuotaDateContext();
     const dateSet = new Set<string>();
     for (const date of dates) {
-      const d = new Date(date.getTime());
-      const day = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(
-        d.getDate(),
-      ).padStart(2, "0")}`;
-      dateSet.add(day);
+      dateSet.add(formatInstantAsDateKey(new Date(date.getTime()), timezone));
     }
 
-    const now = new Date();
+    const todayKey = formatInstantAsDateKey(new Date(), timezone);
+    let anchorKey = "";
+    for (const key of dateSet) {
+      if (key > todayKey) continue;
+      if (key > anchorKey) anchorKey = key;
+    }
+    if (!anchorKey) return 0;
+
     let streak = 0;
-    for (let i = 0; i < 3650; i += 1) {
-      const cursor = new Date(now);
-      cursor.setDate(now.getDate() - i);
-      const day = `${cursor.getFullYear()}-${String(cursor.getMonth() + 1).padStart(2, "0")}-${String(
-        cursor.getDate(),
-      ).padStart(2, "0")}`;
-      if (dateSet.has(day)) {
-        streak += 1;
-      } else {
-        break;
-      }
+    let cursorKey = anchorKey;
+    for (let i = 0; i < 3660; i += 1) {
+      if (!dateSet.has(cursorKey)) break;
+      streak += 1;
+      const prevKey = previousDateKey(cursorKey, timezone);
+      if (prevKey === cursorKey) break;
+      cursorKey = prevKey;
     }
     return streak;
   }

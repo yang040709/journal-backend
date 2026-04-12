@@ -461,7 +461,18 @@ export class NoteService {
       }
     }
 
-    await note.save();
+    const shouldBumpUpdatedAt =
+      data.title !== undefined ||
+      data.content !== undefined ||
+      data.tags !== undefined ||
+      data.images !== undefined ||
+      data.noteBookId !== undefined;
+
+    if (shouldBumpUpdatedAt) {
+      await note.save();
+    } else {
+      await note.save({ timestamps: false });
+    }
 
     // 记录活动
     void ActivityLogger.record(
