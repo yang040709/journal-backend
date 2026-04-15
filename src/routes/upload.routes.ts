@@ -13,7 +13,7 @@ router.use(authMiddleware);
 
 const createCosStsSchema = z
   .object({
-    biz: z.enum(["note", "cover", "avatar"]),
+    biz: z.enum(["note", "cover", "avatar", "feedback"]),
     fileName: z.string().min(1, "文件名不能为空").max(255, "文件名过长"),
     fileType: z.enum(["image/jpeg", "image/png", "image/webp"]),
     fileSize: z.number().int().positive("文件大小必须大于0"),
@@ -48,7 +48,7 @@ const createCosStsSchema = z
  *             properties:
  *               biz:
  *                 type: string
- *                 enum: [note, cover, avatar]
+ *                 enum: [note, cover, avatar, feedback]
  *               fileName:
  *                 type: string
  *               fileType:

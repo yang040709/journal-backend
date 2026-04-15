@@ -14,6 +14,7 @@ import {
   ADMIN_PAGE_NOTE_TAGS,
   ADMIN_PAGE_AI_STYLES,
   ADMIN_PAGE_GALLERY,
+  ADMIN_PAGE_FEEDBACKS,
 } from "../constant/adminPages";
 import {
   success,
@@ -50,6 +51,7 @@ import {
   MAX_INITIAL_NOTEBOOK_TEMPLATES,
 } from "../service/initialUserNotebookConfig.service";
 import { AdminGalleryService } from "../service/adminGallery.service";
+import { FeedbackService } from "../service/feedback.service";
 
 const MAX_PAGE_DEPTH = 10_000;
 const MIN_SEARCH_LENGTH = 2;
@@ -295,6 +297,38 @@ const adminPointsRulesPutSchema = z.object({
       quotaGain: z.number().int().min(1).max(1_000_000).optional(),
     })
     .optional(),
+  feedbackRewards: z
+    .object({
+      weeklyFirstSubmit: z.number().int().min(0).max(1_000_000).optional(),
+      important: z.number().int().min(0).max(1_000_000).optional(),
+      critical: z.number().int().min(0).max(1_000_000).optional(),
+    })
+    .optional(),
+});
+
+const feedbackListQuerySchema = z
+  .object({
+    page: z.coerce.number().int().positive().optional().default(1),
+    limit: z.coerce.number().int().min(1).max(100).optional().default(20),
+    status: z.enum(["pending", "reviewed"]).optional(),
+    reviewLevel: z.enum(["trash", "normal", "important", "critical"]).optional(),
+    type: z.enum(["bug", "rant", "demand", "praise"]).optional(),
+    keyword: optionalKeywordSchema(200),
+    userId: z.string().trim().min(1).max(128).optional(),
+  })
+  .refine((val) => val.page * val.limit <= MAX_PAGE_DEPTH, {
+    message: `分页深度超过限制（page*limit <= ${MAX_PAGE_DEPTH}）`,
+    path: ["page"],
+  });
+
+const feedbackReviewBodySchema = z.object({
+  reviewLevel: z.enum(["trash", "normal", "important", "critical"]),
+  reviewRemark: z.string().trim().max(1000).optional(),
+});
+
+const feedbackNextQuerySchema = z.object({
+  currentId: z.string().trim().optional(),
+  direction: z.enum(["next", "prev"]).optional().default("next"),
 });
 
 const adminQuotaBaseLimitsPutSchema = z
@@ -2142,6 +2176,124 @@ authed.get(
         e instanceof Error ? e.message : "参数错误",
         ErrorCodes.PARAM_ERROR,
       );
+    }
+  },
+);
+
+authed.get(
+  "/feedbacks",
+  requireAdminPage(ADMIN_PAGE_FEEDBACKS),
+  async (ctx) => {
+    try {
+      const q = feedbackListQuerySchema.parse(ctx.query);
+      const { items, total, page, limit } = await FeedbackService.adminListFeedbacks(q);
+      paginatedSuccess(ctx, items, total, page, limit);
+    } catch (e) {
+      if (e instanceof z.ZodError) {
+        error(ctx, "参数验证失败", ErrorCodes.PARAM_ERROR, 400);
+        return;
+      }
+      error(ctx, e instanceof Error ? e.message : "加载失败", ErrorCodes.INTERNAL_ERROR, 500);
+    }
+  },
+);
+
+authed.get(
+  "/feedbacks/review/next",
+  requireAdminPage(ADMIN_PAGE_FEEDBACKS),
+  async (ctx) => {
+    try {
+      const q = feedbackNextQuerySchema.parse(ctx.query);
+      const nextId = await FeedbackService.adminNextPendingFeedbackId(
+        q.currentId || undefined,
+        q.direction,
+      );
+      success(ctx, { id: nextId || null });
+    } catch (e) {
+      error(ctx, e instanceof Error ? e.message : "加载失败", ErrorCodes.INTERNAL_ERROR, 500);
+    }
+  },
+);
+
+authed.get(
+  "/feedbacks/:id",
+  requireAdminPage(ADMIN_PAGE_FEEDBACKS),
+  async (ctx) => {
+    const row = await FeedbackService.adminGetFeedback(String(ctx.params.id || ""));
+    if (!row) {
+      error(ctx, "反馈不存在", ErrorCodes.NOT_FOUND, 404);
+      return;
+    }
+    success(ctx, row);
+  },
+);
+
+authed.post(
+  "/feedbacks/:id/review",
+  requireAdminPage(ADMIN_PAGE_FEEDBACKS),
+  async (ctx) => {
+    try {
+      const body = feedbackReviewBodySchema.parse(ctx.request.body);
+      const data = await FeedbackService.adminReviewFeedback(
+        String(ctx.params.id || ""),
+        {
+          reviewLevel: body.reviewLevel,
+          reviewRemark: body.reviewRemark,
+        },
+        ctx.state.admin!,
+      );
+      success(ctx, data, "处理成功");
+    } catch (e) {
+      if (e instanceof z.ZodError) {
+        error(ctx, "参数验证失败", ErrorCodes.PARAM_ERROR, 400);
+        return;
+      }
+      if (e instanceof Error && e.message === "反馈不存在") {
+        error(ctx, "反馈不存在", ErrorCodes.NOT_FOUND, 404);
+        return;
+      }
+      error(ctx, e instanceof Error ? e.message : "处理失败", ErrorCodes.INTERNAL_ERROR, 500);
+    }
+  },
+);
+
+authed.get(
+  "/feedback-config",
+  requireSuperAdmin(),
+  async (ctx) => {
+    try {
+      const rules = await PointsService.getRules();
+      success(ctx, rules.feedbackRewards);
+    } catch (e) {
+      error(ctx, e instanceof Error ? e.message : "加载失败", ErrorCodes.INTERNAL_ERROR, 500);
+    }
+  },
+);
+
+authed.put(
+  "/feedback-config",
+  requireSuperAdmin(),
+  async (ctx) => {
+    try {
+      const body = z
+        .object({
+          weeklyFirstSubmit: z.number().int().min(0).max(1_000_000).optional(),
+          important: z.number().int().min(0).max(1_000_000).optional(),
+          critical: z.number().int().min(0).max(1_000_000).optional(),
+        })
+        .parse(ctx.request.body);
+      const admin = ctx.state.admin!;
+      const rules = await PointsService.setRulesFromAdmin(
+        { feedbackRewards: body },
+        { id: admin.id, username: admin.username },
+      );
+      success(ctx, rules.feedbackRewards);
+    } catch (e) {
+      if (e instanceof z.ZodError) {
+        error(ctx, "参数验证失败", ErrorCodes.PARAM_ERROR, 400);
+        return;
+      }
+      error(ctx, e instanceof Error ? e.message : "保存失败", ErrorCodes.PARAM_ERROR);
     }
   },
 );

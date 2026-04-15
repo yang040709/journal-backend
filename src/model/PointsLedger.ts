@@ -4,7 +4,8 @@ export type PointsLedgerKind =
   | "ad_reward"
   | "exchange_upload"
   | "exchange_ai"
-  | "admin_adjust";
+  | "admin_adjust"
+  | "feedback_reward";
 export type PointsFlowType = "income" | "expense";
 export type PointsOperatorType = "system" | "admin" | "user";
 
@@ -45,7 +46,7 @@ const pointsLedgerSchema = new Schema(
     kind: {
       type: String,
       required: true,
-      enum: ["ad_reward", "exchange_upload", "exchange_ai", "admin_adjust"],
+      enum: ["ad_reward", "exchange_upload", "exchange_ai", "admin_adjust", "feedback_reward"],
       index: true,
     },
     pointsDelta: {

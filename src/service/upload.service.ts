@@ -1,12 +1,14 @@
 import { randomUUID } from "crypto";
 import STS from "qcloud-cos-sts";
 import UserUploadQuotaDaily, { UploadBiz } from "../model/UserUploadQuotaDaily";
+import UserFeedbackImageQuotaDaily from "../model/UserFeedbackImageQuotaDaily";
 import User from "../model/User";
 import { getQuotaDateContext } from "../utils/dateKey";
 import { QuotaBaseLimitsService } from "./quotaBaseLimits.service";
+export type UploadCredentialBiz = UploadBiz | "feedback";
 export interface CreateCosStsInput {
   userId: string;
-  biz: UploadBiz;
+  biz: UploadCredentialBiz;
   fileName: string;
   fileType: "image/jpeg" | "image/png" | "image/webp";
   fileSize: number;
@@ -45,7 +47,8 @@ export interface UploadQuotaSummary {
 }
 
 const allowedImageTypes = new Set(["image/jpeg", "image/png", "image/webp"] as const);
-const allowedBizTypes = new Set<UploadBiz>(["note", "cover", "avatar"]);
+const allowedBizTypes = new Set<UploadCredentialBiz>(["note", "cover", "avatar", "feedback"]);
+const FEEDBACK_DAILY_LIMIT = 5;
 
 export class UploadDailyLimitExceededError extends Error {
   public readonly code = "UPLOAD_DAILY_LIMIT_EXCEEDED";
@@ -168,6 +171,51 @@ const consumeDailyQuota = async (userId: string, biz: UploadBiz) => {
   };
 };
 
+const consumeFeedbackDailyQuota = async (userId: string) => {
+  const { dateKey } = getQuotaDateContext();
+
+  const updated = await UserFeedbackImageQuotaDaily.findOneAndUpdate(
+    {
+      userId,
+      dateKey,
+      usedCount: { $lt: FEEDBACK_DAILY_LIMIT },
+    },
+    {
+      $setOnInsert: {
+        userId,
+        dateKey,
+        usedCount: 0,
+      },
+      $inc: {
+        usedCount: 1,
+      },
+    },
+    {
+      upsert: true,
+      new: true,
+    },
+  ).lean();
+
+  if (!updated) {
+    const current = await UserFeedbackImageQuotaDaily.findOne({ userId, dateKey }).lean();
+    const usedCount = Math.max(0, Number(current?.usedCount || 0));
+    throw new UploadDailyLimitExceededError({
+      dateKey,
+      totalLimit: FEEDBACK_DAILY_LIMIT,
+      usedCount,
+      remaining: Math.max(0, FEEDBACK_DAILY_LIMIT - usedCount),
+    });
+  }
+
+  const usedCount = Math.max(0, Number(updated.usedCount || 0));
+  return {
+    dateKey,
+    totalLimit: FEEDBACK_DAILY_LIMIT,
+    usedCount,
+    remaining: Math.max(0, FEEDBACK_DAILY_LIMIT - usedCount),
+  };
+};
+
 const getFileExt = (fileName: string, fileType: string): string => {
   const normalized = fileName.trim().toLowerCase();
   const dotIndex = normalized.lastIndexOf(".");
@@ -227,7 +275,10 @@ export class UploadService {
       throw new Error("仅手帐配图或封面支持缩略图上传凭证");
     }
 
-    const quota = await consumeDailyQuota(input.userId, input.biz);
+    const quota =
+      input.biz === "feedback"
+        ? await consumeFeedbackDailyQuota(input.userId)
+        : await consumeDailyQuota(input.userId, input.biz);
 
     const secretId = getRequiredEnv("COS_SECRET_ID");
     const secretKey = getRequiredEnv("COS_SECRET_KEY");

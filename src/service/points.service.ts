@@ -13,6 +13,11 @@ export const DEFAULT_POINTS_RULES = {
   globalAdDailyLimit: 0,
   uploadExchange: { enabled: true, pointsCost: 100, quotaGain: 3 },
   aiExchange: { enabled: true, pointsCost: 100, quotaGain: 10 },
+  feedbackRewards: {
+    weeklyFirstSubmit: 200,
+    important: 500,
+    critical: 2000,
+  },
 } as const;
 
 export type PointsRulesPayload = {
@@ -20,6 +25,11 @@ export type PointsRulesPayload = {
   globalAdDailyLimit: number;
   uploadExchange: { enabled: boolean; pointsCost: number; quotaGain: number };
   aiExchange: { enabled: boolean; pointsCost: number; quotaGain: number };
+  feedbackRewards: {
+    weeklyFirstSubmit: number;
+    important: number;
+    critical: number;
+  };
 };
 
 function clampInt(n: unknown, fallback: number, min: number, max?: number): number {
@@ -35,6 +45,10 @@ function normalizeRules(raw: unknown): PointsRulesPayload {
   const r = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
   const up = r.uploadExchange && typeof r.uploadExchange === "object" ? (r.uploadExchange as Record<string, unknown>) : {};
   const ai = r.aiExchange && typeof r.aiExchange === "object" ? (r.aiExchange as Record<string, unknown>) : {};
+  const feedbackRewards =
+    r.feedbackRewards && typeof r.feedbackRewards === "object"
+      ? (r.feedbackRewards as Record<string, unknown>)
+      : {};
   return {
     pointsPerAd: clampInt(r.pointsPerAd, DEFAULT_POINTS_RULES.pointsPerAd, 1, 1_000_000),
     globalAdDailyLimit: clampInt(
@@ -52,6 +66,26 @@ function normalizeRules(raw: unknown): PointsRulesPayload {
       enabled: ai.enabled !== false,
       pointsCost: clampInt(ai.pointsCost, DEFAULT_POINTS_RULES.aiExchange.pointsCost, 1, 1_000_000),
       quotaGain: clampInt(ai.quotaGain, DEFAULT_POINTS_RULES.aiExchange.quotaGain, 1, 1_000_000),
+    },
+    feedbackRewards: {
+      weeklyFirstSubmit: clampInt(
+        feedbackRewards.weeklyFirstSubmit,
+        DEFAULT_POINTS_RULES.feedbackRewards.weeklyFirstSubmit,
+        0,
+        1_000_000,
+      ),
+      important: clampInt(
+        feedbackRewards.important,
+        DEFAULT_POINTS_RULES.feedbackRewards.important,
+        0,
+        1_000_000,
+      ),
+      critical: clampInt(
+        feedbackRewards.critical,
+        DEFAULT_POINTS_RULES.feedbackRewards.critical,
+        0,
+        1_000_000,
+      ),
     },
   };
 }
@@ -124,6 +158,11 @@ export interface PointsSummary {
       pointsCost: number;
       quotaGain: number;
     };
+    feedbackRewards: {
+      weeklyFirstSubmit: number;
+      important: number;
+      critical: number;
+    };
   };
 }
 
@@ -141,6 +180,19 @@ interface AdminTransactionQuery extends UserTransactionQuery {
   bizType?: string;
   startTime?: Date;
   endTime?: Date;
+}
+
+export interface GrantPointsByBizInput {
+  userId: string;
+  points: number;
+  kind?: "feedback_reward" | "ad_reward";
+  bizType: string;
+  bizId: string;
+  title: string;
+  operatorType?: "system" | "admin" | "user";
+  operatorId?: string;
+  operatorName?: string;
+  remark?: string;
 }
 
 const MAX_PAGE_DEPTH = 10_000;
@@ -187,6 +239,11 @@ export class PointsService {
       globalAdDailyLimit: number;
       uploadExchange: { enabled?: boolean; pointsCost?: number; quotaGain?: number };
       aiExchange: { enabled?: boolean; pointsCost?: number; quotaGain?: number };
+      feedbackRewards: {
+        weeklyFirstSubmit?: number;
+        important?: number;
+        critical?: number;
+      };
     }>,
     admin: { id: string; username: string },
   ): Promise<PointsRulesPayload> {
@@ -204,6 +261,12 @@ export class PointsService {
         enabled: payload.aiExchange?.enabled ?? prev.aiExchange.enabled,
         pointsCost: payload.aiExchange?.pointsCost ?? prev.aiExchange.pointsCost,
         quotaGain: payload.aiExchange?.quotaGain ?? prev.aiExchange.quotaGain,
+      },
+      feedbackRewards: {
+        weeklyFirstSubmit:
+          payload.feedbackRewards?.weeklyFirstSubmit ?? prev.feedbackRewards.weeklyFirstSubmit,
+        important: payload.feedbackRewards?.important ?? prev.feedbackRewards.important,
+        critical: payload.feedbackRewards?.critical ?? prev.feedbackRewards.critical,
       },
     };
     const next = normalizeRules(merged);
@@ -282,6 +345,7 @@ export class PointsService {
         globalAdDailyLimit: rules.globalAdDailyLimit,
         uploadExchange: { ...rules.uploadExchange },
         aiExchange: { ...rules.aiExchange },
+        feedbackRewards: { ...rules.feedbackRewards },
       },
     };
   }
@@ -513,6 +577,7 @@ export class PointsService {
       exchange_upload: "兑换图片上传额度",
       exchange_ai: "兑换 AI 次数",
       admin_adjust: "后台积分调整",
+      feedback_reward: "反馈奖励",
     };
     const occurredAt = row.createdAt instanceof Date ? row.createdAt.toISOString() : row.createdAt;
     return {
@@ -650,5 +715,71 @@ export class PointsService {
       });
     }
     return { points: next };
+  }
+
+  static async grantPointsByBiz(input: GrantPointsByBizInput): Promise<{
+    points: number;
+    duplicated: boolean;
+  }> {
+    const pointsToAdd = Math.max(0, Math.floor(Number(input.points || 0)));
+    if (pointsToAdd <= 0) {
+      const user = await User.findOne({ userId: input.userId }).select("points").lean();
+      return {
+        points: Math.max(0, Math.floor(Number((user as { points?: number })?.points ?? 0))),
+        duplicated: true,
+      };
+    }
+
+    const existed = await PointsLedger.findOne({
+      bizType: input.bizType,
+      bizId: input.bizId,
+    })
+      .select("_id")
+      .lean();
+    if (existed) {
+      const user = await User.findOne({ userId: input.userId }).select("points").lean();
+      return {
+        points: Math.max(0, Math.floor(Number((user as { points?: number })?.points ?? 0))),
+        duplicated: true,
+      };
+    }
+
+    const updatedUser = await User.findOneAndUpdate(
+      { userId: input.userId },
+      { $setOnInsert: { userId: input.userId }, $inc: { points: pointsToAdd } },
+      { upsert: true, new: true },
+    ).lean();
+    const balanceAfter = Math.max(0, Math.floor(Number((updatedUser as { points?: number })?.points ?? 0)));
+    const balanceBefore = Math.max(0, balanceAfter - pointsToAdd);
+
+    try {
+      await PointsLedger.create({
+        userId: input.userId,
+        kind: input.kind || "feedback_reward",
+        bizType: input.bizType,
+        bizId: input.bizId,
+        title: input.title,
+        flowType: "income",
+        pointsDelta: pointsToAdd,
+        balanceBefore,
+        balanceAfter,
+        operatorType: input.operatorType || "system",
+        operatorId: input.operatorId || "system.feedback",
+        operatorName: input.operatorName || "system",
+        remark: input.remark || "",
+      });
+    } catch (err: unknown) {
+      const e = err as { code?: number };
+      if (e?.code !== 11000) {
+        throw err;
+      }
+      const latest = await User.findOne({ userId: input.userId }).select("points").lean();
+      return {
+        points: Math.max(0, Math.floor(Number((latest as { points?: number })?.points ?? 0))),
+        duplicated: true,
+      };
+    }
+
+    return { points: balanceAfter, duplicated: false };
   }
 }
