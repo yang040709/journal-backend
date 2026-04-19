@@ -16,6 +16,13 @@ export interface AdminTemplateListParams {
   search?: string;
 }
 
+export type BatchActionResult = {
+  total: number;
+  successCount: number;
+  failedCount: number;
+  failedItems: Array<{ id: string; reason: string }>;
+};
+
 export class AdminTemplateService {
   /** 系统内置模板（数据库；空库时与 TemplateService 一致回退常量） */
   static async listSystemTemplates(): Promise<LeanTemplate[]> {
@@ -92,6 +99,7 @@ export class AdminTemplateService {
     description?: string;
     fields: { title: string; content: string; tags: string[] };
     systemKey?: string;
+    enabled?: boolean;
   }): Promise<ITemplate> {
     const t = new Template({
       userId: "system",
@@ -104,6 +112,7 @@ export class AdminTemplateService {
       },
       isSystem: true,
       systemKey: data.systemKey?.trim() || undefined,
+      enabled: data.enabled ?? true,
     });
     await t.save();
     return t;
@@ -148,6 +157,7 @@ export class AdminTemplateService {
       name?: string;
       description?: string;
       systemKey?: string;
+      enabled?: boolean;
       fields?: { title?: string; content?: string; tags?: string[] };
     },
   ): Promise<ITemplate | null> {
@@ -164,6 +174,9 @@ export class AdminTemplateService {
     if (data.systemKey !== undefined) {
       const k = data.systemKey.trim();
       template.systemKey = k || undefined;
+    }
+    if (data.enabled !== undefined) {
+      template.enabled = Boolean(data.enabled);
     }
     if (data.fields) {
       if (data.fields.title !== undefined) {
@@ -188,5 +201,40 @@ export class AdminTemplateService {
   static async deleteSystemTemplate(id: string): Promise<boolean> {
     const r = await Template.deleteOne({ _id: id, isSystem: true });
     return r.deletedCount === 1;
+  }
+
+  static async batchSetSystemTemplateEnabled(
+    ids: string[],
+    enabled: boolean,
+  ): Promise<BatchActionResult> {
+    const uniqueIds = Array.from(
+      new Set(ids.map((id) => String(id || "").trim()).filter(Boolean)),
+    );
+    const failedItems: Array<{ id: string; reason: string }> = [];
+    let successCount = 0;
+    for (const id of uniqueIds) {
+      if (!mongoose.Types.ObjectId.isValid(id)) {
+        failedItems.push({ id, reason: "ID 格式无效" });
+        continue;
+      }
+      const doc = await Template.findOne({ _id: id, isSystem: true });
+      if (!doc) {
+        failedItems.push({ id, reason: "系统模板不存在" });
+        continue;
+      }
+      if (Boolean(doc.enabled ?? true) === enabled) {
+        failedItems.push({ id, reason: `已是${enabled ? "启用" : "停用"}状态` });
+        continue;
+      }
+      doc.enabled = enabled;
+      await doc.save();
+      successCount += 1;
+    }
+    return {
+      total: uniqueIds.length,
+      successCount,
+      failedCount: failedItems.length,
+      failedItems,
+    };
   }
 }

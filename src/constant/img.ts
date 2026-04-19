@@ -52,21 +52,13 @@ export const coverPreviewList = Object.freeze(
 
 export const defaultNoteBook = [
   {
-    title: "日常碎片",
-    coverImg: coverPreviewList[10],
-  },
-  {
-    title: "心情日记",
-    coverImg: coverPreviewList[1],
-  },
-  {
-    title: "目标打卡",
-    coverImg: coverPreviewList[7],
-  },
-  {
-    title: "旅行足迹",
-    coverImg: coverPreviewList[11],
-  },
+    "title": "生活碎碎念",
+    "coverImg": "https://img.leyang.asia/cover-693db757.jpeg",
+},
+{
+    "title": "备忘录",
+    "coverImg": "https://img.leyang.asia/cover-cda998f3.jpeg",
+}
 ];
 
 // [

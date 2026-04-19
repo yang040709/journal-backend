@@ -1,6 +1,7 @@
 import User from "../model/User";
 import UserAdRewardLog from "../model/UserAdRewardLog";
 import SystemConfig, { SYSTEM_CONFIG_POINTS_RULES_KEY } from "../model/SystemConfig";
+import { NoteExportSettingsService } from "./noteExportSettings.service";
 import PointsLedger from "../model/PointsLedger";
 import PointsRuleChangeLog from "../model/PointsRuleChangeLog";
 import { getQuotaDateContext } from "../utils/dateKey";
@@ -568,6 +569,81 @@ export class PointsService {
     return { points, quotaGain: gain, aiBonusQuota: aiBonus };
   }
 
+  /** 积分兑换手帐 xlsx 额外导出次数（每次 +1 次额度，消耗 exportPointsPerExtra 积分） */
+  static async exchangeNoteExport(
+    userId: string,
+    times: number = 1,
+    opts?: { requestId?: string },
+  ): Promise<{ points: number; exportExtraCredits: number }> {
+    await PointsService.ensureRulesDocumentExists();
+    await PointsService.bootstrapLegacyUserPoints(userId);
+    const rules = await NoteExportSettingsService.get();
+    const per = rules.exportPointsPerExtra;
+    const t = Math.max(1, Math.min(20, Math.floor(times)));
+    const cost = per * t;
+    if (cost < 1) {
+      throw new PointsExchangeInvalidError("导出兑换配置无效");
+    }
+
+    const updated = await User.findOneAndUpdate(
+      { userId, points: { $gte: cost } },
+      {
+        $inc: {
+          points: -cost,
+          exportExtraCredits: t,
+        },
+      },
+      { new: true },
+    ).lean();
+
+    if (!updated) {
+      const u = await User.findOne({ userId }).select("points").lean();
+      const p = Math.max(0, Math.floor(Number((u as { points?: number })?.points ?? 0)));
+      if (!u) throw new PointsExchangeInvalidError("用户不存在");
+      if (p < cost) throw new PointsInsufficientError();
+      throw new PointsExchangeInvalidError("兑换失败，请重试");
+    }
+
+    const balanceAfter = Math.max(0, Math.floor(Number((updated as { points?: number }).points ?? 0)));
+    const balanceBefore = balanceAfter + cost;
+    const bizId =
+      opts?.requestId && String(opts.requestId).trim()
+        ? String(opts.requestId).trim()
+        : `note_export_exchange_${userId}_${Date.now().toString(36)}`;
+    const ruleSnapshot = { times: t, pointsPerExtra: per, pointsCost: cost } as Record<string, unknown>;
+    await PointsLedger.create({
+      userId,
+      kind: "exchange_note_export",
+      bizType: "exchange_note_export",
+      bizId,
+      title: `兑换手帐导出次数 +${t}`,
+      flowType: buildFlowTypeFromDelta(-cost),
+      pointsDelta: -cost,
+      balanceBefore,
+      balanceAfter,
+      ruleSnapshot,
+      operatorType: "user",
+      operatorId: userId,
+      operatorName: userId,
+    });
+
+    const exportExtraCredits = Math.max(
+      0,
+      Math.floor(Number((updated as { exportExtraCredits?: number }).exportExtraCredits ?? 0)),
+    );
+    void ActivityLogger.record(
+      {
+        type: "update",
+        target: "user",
+        targetId: userId,
+        title: `积分兑换：手帐导出次数 +${t}（消耗 ${cost} 积分）`,
+        userId,
+      },
+      { blocking: false },
+    );
+    return { points: balanceAfter, exportExtraCredits };
+  }
+
   private static serializeLedgerRow(row: Record<string, unknown>) {
     const pointsDelta = Number(row.pointsDelta ?? 0);
     const type = pointsDelta >= 0 ? "income" : "expense";
@@ -576,6 +652,7 @@ export class PointsService {
       ad_reward: "观看广告奖励",
       exchange_upload: "兑换图片上传额度",
       exchange_ai: "兑换 AI 次数",
+      exchange_note_export: "兑换手帐导出次数",
       admin_adjust: "后台积分调整",
       feedback_reward: "反馈奖励",
     };

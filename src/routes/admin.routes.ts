@@ -43,18 +43,21 @@ import { listByUser } from "../service/userImageAsset.service";
 import { NotePresetTagService } from "../service/notePresetTag.service";
 import { UserNoteCustomTagService } from "../service/userNoteCustomTag.service";
 import { QuotaBaseLimitsService } from "../service/quotaBaseLimits.service";
+import { NoteExportSettingsService } from "../service/noteExportSettings.service";
+import NoteExportLog from "../model/NoteExportLog";
 import { AiStyleService } from "../service/aiStyle.service";
 import { AiNoteService } from "../service/aiNote.service";
 import {
   InitialUserNotebookConfigService,
-  MAX_INITIAL_NOTEBOOK_COUNT,
   MAX_INITIAL_NOTEBOOK_TEMPLATES,
 } from "../service/initialUserNotebookConfig.service";
+import { InitialUserNoteSeedConfigService } from "../service/initialUserNoteSeedConfig.service";
 import { AdminGalleryService } from "../service/adminGallery.service";
 import { FeedbackService } from "../service/feedback.service";
 
 const MAX_PAGE_DEPTH = 10_000;
 const MIN_SEARCH_LENGTH = 2;
+const ADMIN_EXPORT_LIMIT = 2000;
 
 function optionalKeywordSchema(max = 128) {
   return z.preprocess((v) => {
@@ -326,6 +329,27 @@ const feedbackReviewBodySchema = z.object({
   reviewRemark: z.string().trim().max(1000).optional(),
 });
 
+const batchIdsSchema = z
+  .array(z.string().trim().min(1))
+  .min(1, "至少选择一条数据")
+  .max(500, "单次最多处理 500 条");
+
+const feedbackBatchReviewBodySchema = z.object({
+  ids: batchIdsSchema,
+  reviewLevel: z.enum(["trash", "normal", "important", "critical"]),
+  reviewRemark: z.string().trim().max(1000).optional(),
+});
+
+const feedbackExportQuerySchema = z.object({
+  mode: z.enum(["selected", "filtered"]).default("filtered"),
+  ids: z.string().trim().optional(),
+  status: z.enum(["pending", "reviewed"]).optional(),
+  reviewLevel: z.enum(["trash", "normal", "important", "critical"]).optional(),
+  type: z.enum(["bug", "rant", "demand", "praise"]).optional(),
+  keyword: optionalKeywordSchema(200),
+  userId: z.string().trim().min(1).max(128).optional(),
+});
+
 const feedbackNextQuerySchema = z.object({
   currentId: z.string().trim().optional(),
   direction: z.enum(["next", "prev"]).optional().default("next"),
@@ -338,6 +362,35 @@ const adminQuotaBaseLimitsPutSchema = z
   })
   .refine((v) => v.uploadDailyBaseLimit !== undefined || v.aiDailyBaseLimit !== undefined, {
     message: "至少提供一个要更新的字段",
+  });
+
+const adminExportSettingsPutSchema = z
+  .object({
+    exportPointsPerExtra: z.number().int().min(1).max(1_000_000).optional(),
+    exportWeeklyFreeCount: z.number().int().min(0).max(999).optional(),
+    exportMaxNotesPerFile: z.number().int().min(1).max(2000).optional(),
+    exportDefaultWindowDays: z.number().int().min(1).max(3660).optional(),
+    exportMaxRangeDays: z.number().int().min(1).max(10000).optional(),
+  })
+  .refine(
+    (v) =>
+      v.exportPointsPerExtra !== undefined ||
+      v.exportWeeklyFreeCount !== undefined ||
+      v.exportMaxNotesPerFile !== undefined ||
+      v.exportDefaultWindowDays !== undefined ||
+      v.exportMaxRangeDays !== undefined,
+    { message: "至少提供一个要更新的字段" },
+  );
+
+const noteExportLogQuerySchema = z
+  .object({
+    page: z.coerce.number().int().positive().optional().default(1),
+    limit: z.coerce.number().int().min(1).max(100).optional().default(20),
+    userId: z.string().trim().min(1).max(128).optional(),
+  })
+  .refine((val) => val.page * val.limit <= MAX_PAGE_DEPTH, {
+    message: `分页深度超过限制（page*limit <= ${MAX_PAGE_DEPTH}）`,
+    path: ["page"],
   });
 
 const createAdminSchema = z.object({
@@ -375,6 +428,7 @@ const adminSystemTemplateBodySchema = z.object({
   name: z.string().min(1).max(100),
   description: z.string().max(500).optional().default(""),
   systemKey: z.string().min(1).max(64).optional(),
+  enabled: z.boolean().optional().default(true),
   fields: templateFieldsSchema,
 });
 
@@ -382,7 +436,23 @@ const adminUpdateSystemTemplateSchema = z.object({
   name: z.string().min(1).max(100).optional(),
   description: z.string().max(500).optional(),
   systemKey: z.string().min(1).max(64).optional(),
+  enabled: z.boolean().optional(),
   fields: templateFieldsSchema.partial().optional(),
+});
+
+const systemTemplateBatchStatusBodySchema = z.object({
+  ids: batchIdsSchema,
+  enabled: z.boolean(),
+});
+
+const systemTemplateExportQuerySchema = z.object({
+  mode: z.enum(["selected", "filtered"]).default("filtered"),
+  ids: z.string().trim().optional(),
+  enabled: z
+    .enum(["true", "false"])
+    .optional()
+    .transform((v) => (v == null ? undefined : v === "true")),
+  keyword: optionalKeywordSchema(100),
 });
 
 const templateListQuerySchema = z.object({
@@ -440,16 +510,31 @@ const adminNotePresetTagsPutSchema = z.object({
 });
 
 const adminInitialNotebooksPutSchema = z.object({
-  count: z.coerce.number().int().min(1).max(MAX_INITIAL_NOTEBOOK_COUNT),
   templates: z
     .array(
       z.object({
         title: z.string().min(1).max(100),
         coverImg: z.string().min(1),
+        enabled: z.coerce.boolean().optional(),
       }),
     )
     .min(1)
     .max(MAX_INITIAL_NOTEBOOK_TEMPLATES),
+});
+
+const adminInitialNotesPutSchema = z.object({
+  templates: z
+    .array(
+      z.object({
+        seedKey: z.string().trim().min(1).max(120),
+        targetIndex: z.coerce.number().int().min(0).max(19),
+        title: z.string().trim().min(1).max(200),
+        content: z.string().optional().default(""),
+        tags: z.array(z.string()).optional().default([]),
+        isPinned: z.coerce.boolean().optional().default(false),
+      }),
+    )
+    .max(40),
 });
 
 const adminCustomCoverBodySchema = z.object({
@@ -742,11 +827,41 @@ authed.put(
       const body = adminInitialNotebooksPutSchema.parse(ctx.request.body);
       const r = await InitialUserNotebookConfigService.setForAdmin({
         templates: body.templates,
-        count: body.count,
       });
       success(ctx, {
         templates: r.templates,
-        count: r.count,
+        updatedAt: r.updatedAt.toISOString(),
+      });
+    } catch (e) {
+      error(
+        ctx,
+        e instanceof Error ? e.message : "保存失败",
+        ErrorCodes.PARAM_ERROR,
+      );
+    }
+  },
+);
+
+authed.get(
+  "/system/initial-notes",
+  requireSuperAdmin(),
+  async (ctx) => {
+    const data = await InitialUserNoteSeedConfigService.getForAdmin();
+    success(ctx, data);
+  },
+);
+
+authed.put(
+  "/system/initial-notes",
+  requireSuperAdmin(),
+  async (ctx) => {
+    try {
+      const body = adminInitialNotesPutSchema.parse(ctx.request.body);
+      const r = await InitialUserNoteSeedConfigService.setForAdmin({
+        templates: body.templates,
+      });
+      success(ctx, {
+        templates: r.templates,
         updatedAt: r.updatedAt.toISOString(),
       });
     } catch (e) {
@@ -1274,6 +1389,119 @@ authed.post(
         e instanceof Error ? e.message : "创建失败",
         ErrorCodes.PARAM_ERROR,
       );
+    }
+  },
+);
+
+authed.post(
+  "/templates/system/batch-status",
+  requireAdminPage(ADMIN_PAGE_TEMPLATES),
+  async (ctx) => {
+    try {
+      const body = systemTemplateBatchStatusBodySchema.parse(ctx.request.body);
+      const result = await AdminTemplateService.batchSetSystemTemplateEnabled(
+        body.ids,
+        body.enabled,
+      );
+      console.info("[admin.templates.system.batch-status]", {
+        admin: ctx.state.admin?.username,
+        requestId: ctx.state.requestId,
+        enabled: body.enabled,
+        total: result.total,
+        successCount: result.successCount,
+        failedCount: result.failedCount,
+      });
+      success(ctx, result);
+    } catch (e) {
+      if (e instanceof z.ZodError) {
+        error(ctx, "参数验证失败", ErrorCodes.PARAM_ERROR, 400);
+        return;
+      }
+      error(ctx, e instanceof Error ? e.message : "批量更新失败", ErrorCodes.PARAM_ERROR);
+    }
+  },
+);
+
+authed.get(
+  "/templates/system/export",
+  requireAdminPage(ADMIN_PAGE_TEMPLATES),
+  async (ctx) => {
+    try {
+      const q = systemTemplateExportQuerySchema.parse(ctx.query);
+      const selectedIds = String(q.ids || "")
+        .split(",")
+        .map((id) => id.trim())
+        .filter(Boolean);
+      if (q.mode === "selected" && selectedIds.length === 0) {
+        error(ctx, "请选择要导出的数据", ErrorCodes.PARAM_ERROR, 400);
+        return;
+      }
+      const list = await AdminTemplateService.listSystemTemplates();
+      let filtered = list as Array<Record<string, unknown>>;
+      if (q.mode === "selected") {
+        const selectedSet = new Set(selectedIds);
+        filtered = filtered.filter((row) =>
+          selectedSet.has(String(row.mongoId || row.id || "")),
+        );
+      } else {
+        if (q.enabled !== undefined) {
+          filtered = filtered.filter((row) => Boolean(row.enabled ?? true) === q.enabled);
+        }
+        if (q.keyword?.trim()) {
+          const kw = q.keyword.trim().toLowerCase();
+          filtered = filtered.filter((row) =>
+            `${String(row.name || "")} ${String(row.description || "")}`
+              .toLowerCase()
+              .includes(kw),
+          );
+        }
+      }
+      if (filtered.length > ADMIN_EXPORT_LIMIT) {
+        error(
+          ctx,
+          `导出数量超过上限（${ADMIN_EXPORT_LIMIT}）`,
+          ErrorCodes.PARAM_ERROR,
+          400,
+        );
+        return;
+      }
+      const header = ["模板ID", "systemKey", "名称", "描述", "状态", "更新时间"];
+      const csvEscape = (value: unknown) =>
+        `"${String(value ?? "").replace(/"/g, '""')}"`;
+      const lines = [header.map(csvEscape).join(",")];
+      for (const row of filtered) {
+        lines.push(
+          [
+            String(row.mongoId || row.id || ""),
+            String(row.systemKey || ""),
+            String(row.name || ""),
+            String(row.description || ""),
+            Boolean(row.enabled ?? true) ? "enabled" : "disabled",
+            String(row.updatedAt || ""),
+          ]
+            .map(csvEscape)
+            .join(","),
+        );
+      }
+      console.info("[admin.templates.system.export]", {
+        admin: ctx.state.admin?.username,
+        requestId: ctx.state.requestId,
+        mode: q.mode,
+        exportedCount: filtered.length,
+      });
+      const now = new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-");
+      ctx.set("Content-Type", "text/csv; charset=utf-8");
+      ctx.set(
+        "Content-Disposition",
+        `attachment; filename="system-templates-${now}.csv"`,
+      );
+      ctx.body = `\uFEFF${lines.join("\n")}`;
+    } catch (e) {
+      if (e instanceof z.ZodError) {
+        error(ctx, "参数验证失败", ErrorCodes.PARAM_ERROR, 400);
+        return;
+      }
+      error(ctx, e instanceof Error ? e.message : "导出失败", ErrorCodes.INTERNAL_ERROR, 500);
     }
   },
 );
@@ -2067,6 +2295,81 @@ authed.put(
   },
 );
 
+authed.get(
+  "/export/settings",
+  requireSuperAdmin(),
+  async (ctx) => {
+    try {
+      const data = await NoteExportSettingsService.get();
+      success(ctx, data);
+    } catch (e) {
+      error(
+        ctx,
+        e instanceof Error ? e.message : "加载失败",
+        ErrorCodes.INTERNAL_ERROR,
+        500,
+      );
+    }
+  },
+);
+
+authed.put(
+  "/export/settings",
+  requireSuperAdmin(),
+  async (ctx) => {
+    try {
+      const body = adminExportSettingsPutSchema.parse(ctx.request.body);
+      const data = await NoteExportSettingsService.set(body);
+      success(ctx, data);
+    } catch (e) {
+      if (e instanceof z.ZodError) {
+        error(ctx, "参数验证失败", ErrorCodes.PARAM_ERROR, 400);
+        return;
+      }
+      error(
+        ctx,
+        e instanceof Error ? e.message : "保存失败",
+        ErrorCodes.PARAM_ERROR,
+      );
+    }
+  },
+);
+
+authed.get(
+  "/note-export-logs",
+  requireSuperAdmin(),
+  async (ctx) => {
+    try {
+      const q = noteExportLogQuerySchema.parse(ctx.query);
+      const filter: Record<string, unknown> = {};
+      if (q.userId?.trim()) {
+        filter.userId = q.userId.trim();
+      }
+      const skip = (q.page - 1) * q.limit;
+      const [rows, total] = await Promise.all([
+        NoteExportLog.find(filter)
+          .sort({ createdAt: -1 })
+          .skip(skip)
+          .limit(q.limit)
+          .lean(),
+        NoteExportLog.countDocuments(filter),
+      ]);
+      paginatedSuccess(ctx, rows, total, q.page, q.limit);
+    } catch (e) {
+      if (e instanceof z.ZodError) {
+        error(ctx, "参数验证失败", ErrorCodes.PARAM_ERROR, 400);
+        return;
+      }
+      error(
+        ctx,
+        e instanceof Error ? e.message : "加载失败",
+        ErrorCodes.INTERNAL_ERROR,
+        500,
+      );
+    }
+  },
+);
+
 authed.put(
   "/points/rules",
   requireSuperAdmin(),
@@ -2253,6 +2556,96 @@ authed.post(
         return;
       }
       error(ctx, e instanceof Error ? e.message : "处理失败", ErrorCodes.INTERNAL_ERROR, 500);
+    }
+  },
+);
+
+authed.post(
+  "/feedbacks/batch-review",
+  requireAdminPage(ADMIN_PAGE_FEEDBACKS),
+  async (ctx) => {
+    try {
+      const body = feedbackBatchReviewBodySchema.parse(ctx.request.body);
+      const result = await FeedbackService.adminBatchReviewFeedbacks(
+        body.ids,
+        {
+          reviewLevel: body.reviewLevel,
+          reviewRemark: body.reviewRemark,
+        },
+        ctx.state.admin!,
+      );
+      console.info("[admin.feedbacks.batch-review]", {
+        admin: ctx.state.admin?.username,
+        requestId: ctx.state.requestId,
+        reviewLevel: body.reviewLevel,
+        total: result.total,
+        successCount: result.successCount,
+        failedCount: result.failedCount,
+      });
+      success(ctx, result);
+    } catch (e) {
+      if (e instanceof z.ZodError) {
+        error(ctx, "参数验证失败", ErrorCodes.PARAM_ERROR, 400);
+        return;
+      }
+      error(ctx, e instanceof Error ? e.message : "处理失败", ErrorCodes.INTERNAL_ERROR, 500);
+    }
+  },
+);
+
+authed.get(
+  "/feedbacks/export",
+  requireAdminPage(ADMIN_PAGE_FEEDBACKS),
+  async (ctx) => {
+    try {
+      const q = feedbackExportQuerySchema.parse(ctx.query);
+      const ids = String(q.ids || "")
+        .split(",")
+        .map((id) => id.trim())
+        .filter(Boolean);
+      if (q.mode === "selected" && ids.length === 0) {
+        error(ctx, "请选择要导出的数据", ErrorCodes.PARAM_ERROR, 400);
+        return;
+      }
+      const result = await FeedbackService.adminExportFeedbacksCsv({
+        ids: q.mode === "selected" ? ids : undefined,
+        query:
+          q.mode === "filtered"
+            ? {
+                status: q.status,
+                reviewLevel: q.reviewLevel,
+                type: q.type,
+                keyword: q.keyword,
+                userId: q.userId,
+              }
+            : undefined,
+        limit: ADMIN_EXPORT_LIMIT + 1,
+      });
+      if (result.exportedCount > ADMIN_EXPORT_LIMIT) {
+        error(
+          ctx,
+          `导出数量超过上限（${ADMIN_EXPORT_LIMIT}）`,
+          ErrorCodes.PARAM_ERROR,
+          400,
+        );
+        return;
+      }
+      console.info("[admin.feedbacks.export]", {
+        admin: ctx.state.admin?.username,
+        requestId: ctx.state.requestId,
+        mode: q.mode,
+        exportedCount: result.exportedCount,
+      });
+      const now = new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-");
+      ctx.set("Content-Type", "text/csv; charset=utf-8");
+      ctx.set("Content-Disposition", `attachment; filename="feedbacks-${now}.csv"`);
+      ctx.body = result.csv;
+    } catch (e) {
+      if (e instanceof z.ZodError) {
+        error(ctx, "参数验证失败", ErrorCodes.PARAM_ERROR, 400);
+        return;
+      }
+      error(ctx, e instanceof Error ? e.message : "导出失败", ErrorCodes.INTERNAL_ERROR, 500);
     }
   },
 );

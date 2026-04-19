@@ -9,6 +9,8 @@ export interface IUser extends Document {
   membershipText?: string;
   /** 积分余额（看广告、兑换额度、后台调整） */
   points: number;
+  /** 手帐 xlsx 导出：积分兑换得到的额外次数（核销时优先扣减） */
+  exportExtraCredits: number;
   /** 覆盖全局的每日激励视频次数上限；未设置则使用后台配置的默认值 */
   adRewardDailyLimit?: number | null;
   /** 广告等额外 AI 调用次数（预留，当前未接入） */
@@ -65,6 +67,11 @@ const userSchema = new Schema(
     points: {
       type: Number,
       default: 200,
+      min: 0,
+    },
+    exportExtraCredits: {
+      type: Number,
+      default: 0,
       min: 0,
     },
     adRewardDailyLimit: {

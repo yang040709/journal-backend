@@ -13,6 +13,8 @@ export interface ITemplate extends Document {
   isSystem: boolean;
   /** 系统模板稳定键（与种子常量 id 一致），用于 C 端列表 id */
   systemKey?: string;
+  /** 系统模板启用状态；用户模板固定视为启用 */
+  enabled?: boolean;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -62,6 +64,11 @@ const templateSchema = new Schema(
       trim: true,
       sparse: true,
       unique: true,
+    },
+    enabled: {
+      type: Boolean,
+      default: true,
+      index: true,
     },
   },
   {

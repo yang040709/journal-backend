@@ -7,24 +7,25 @@ import { defaultNoteBook } from "../constant/img";
 const MAX_TITLE_LEN = 100;
 /** 模板行数上限（与创建数量上限一致，便于运营配置） */
 export const MAX_INITIAL_NOTEBOOK_TEMPLATES = 20;
-export const MAX_INITIAL_NOTEBOOK_COUNT = 20;
 
 function seedTemplates(): InitialNotebookTemplate[] {
   return defaultNoteBook.map((x) => ({
     title: x.title,
     coverImg: x.coverImg,
+    enabled: true,
   }));
 }
 
 function normalizeTemplates(
-  raw: { title?: string; coverImg?: string }[],
+  raw: { title?: string; coverImg?: string; enabled?: boolean }[],
 ): InitialNotebookTemplate[] {
   const out: InitialNotebookTemplate[] = [];
   for (const row of raw) {
     const title = String(row?.title ?? "").trim();
     const coverImg = String(row?.coverImg ?? "").trim();
+    const enabled = row?.enabled !== false;
     if (!title && !coverImg) continue;
-    out.push({ title, coverImg });
+    out.push({ title, coverImg, enabled });
   }
   return out;
 }
@@ -45,7 +46,7 @@ export class InitialUserNotebookConfigService {
         coverUrls: [],
         tagNames: [],
         initialNotebookTemplates: seed,
-        initialNotebookCount: seed.length,
+        initialNotebookCount: 0,
       });
       doc = await SystemConfig.findOne({
         configKey: SYSTEM_CONFIG_INITIAL_NOTEBOOKS_KEY,
@@ -58,22 +59,22 @@ export class InitialUserNotebookConfigService {
 
     if (!doc.initialNotebookTemplates?.length) {
       doc.initialNotebookTemplates = seed;
-      doc.initialNotebookCount = seed.length;
+      doc.initialNotebookCount = 0;
       await doc.save();
     }
 
     return doc;
   }
 
-  static assertValidInput(templates: InitialNotebookTemplate[], count: number): void {
+  static assertValidInput(templates: InitialNotebookTemplate[]): void {
     if (templates.length < 1) {
       throw new Error("至少配置一条手帐本模板（标题 + 封面 URL）");
     }
     if (templates.length > MAX_INITIAL_NOTEBOOK_TEMPLATES) {
       throw new Error(`模板行数最多 ${MAX_INITIAL_NOTEBOOK_TEMPLATES} 条`);
     }
-    if (!Number.isInteger(count) || count < 1 || count > MAX_INITIAL_NOTEBOOK_COUNT) {
-      throw new Error(`创建数量须为 1～${MAX_INITIAL_NOTEBOOK_COUNT} 的整数`);
+    if (templates.every((r) => r.enabled === false)) {
+      throw new Error("至少启用一条手帐本模板");
     }
     for (const row of templates) {
       const title = row.title.trim();
@@ -90,37 +91,18 @@ export class InitialUserNotebookConfigService {
     }
   }
 
-  /**
-   * 展开为实际要插入的手帐本列表：对 i=0..count-1 取 templates[i % templates.length]。
-   */
-  static expandTemplates(
-    templates: InitialNotebookTemplate[],
-    count: number,
-  ): InitialNotebookTemplate[] {
-    const t = templates.map((r) => ({
-      title: r.title.trim(),
-      coverImg: r.coverImg.trim(),
-    }));
-    const out: InitialNotebookTemplate[] = [];
-    for (let i = 0; i < count; i++) {
-      out.push({ ...t[i % t.length] });
-    }
-    return out;
-  }
-
   /** 供新用户创建手帐本使用（含种子逻辑）。 */
   static async resolveTemplatesForNewUser(): Promise<InitialNotebookTemplate[]> {
     const doc = await InitialUserNotebookConfigService.ensureSeededDoc();
     const templates = (doc.initialNotebookTemplates || []).map((r) => ({
       title: String(r.title || "").trim(),
       coverImg: String(r.coverImg || "").trim(),
+      enabled: r.enabled !== false,
     }));
-    let count = doc.initialNotebookCount;
-    if (!Number.isInteger(count) || count < 1) {
-      count = templates.length;
-    }
-    count = Math.min(Math.max(count, 1), MAX_INITIAL_NOTEBOOK_COUNT);
-    return InitialUserNotebookConfigService.expandTemplates(templates, count);
+    return templates
+      .filter((t) => t.enabled !== false)
+      .slice(0, MAX_INITIAL_NOTEBOOK_TEMPLATES)
+      .map((t) => ({ title: t.title, coverImg: t.coverImg, enabled: true }));
   }
 
   /** 运营报表：排除「系统默认本」标题集合（取当前模板中的 title，去重）。 */
@@ -128,6 +110,7 @@ export class InitialUserNotebookConfigService {
     const doc = await InitialUserNotebookConfigService.ensureSeededDoc();
     const set = new Set<string>();
     for (const r of doc.initialNotebookTemplates || []) {
+      if (r.enabled === false) continue;
       const s = String(r.title || "").trim();
       if (s) set.add(s);
     }
@@ -136,42 +119,35 @@ export class InitialUserNotebookConfigService {
 
   static async getForAdmin(): Promise<{
     templates: InitialNotebookTemplate[];
-    count: number;
     updatedAt: string | null;
   }> {
     const doc = await InitialUserNotebookConfigService.ensureSeededDoc();
     const templates = (doc.initialNotebookTemplates || []).map((r) => ({
       title: String(r.title || ""),
       coverImg: String(r.coverImg || ""),
+      enabled: r.enabled !== false,
     }));
-    let count = doc.initialNotebookCount;
-    if (!Number.isInteger(count) || count < 1) {
-      count = templates.length;
-    }
     return {
       templates,
-      count,
       updatedAt: doc.updatedAt ? new Date(doc.updatedAt).toISOString() : null,
     };
   }
 
   static async setForAdmin(input: {
-    templates: { title?: string; coverImg?: string }[];
-    count: number;
+    templates: { title?: string; coverImg?: string; enabled?: boolean }[];
   }): Promise<{
     templates: InitialNotebookTemplate[];
-    count: number;
     updatedAt: Date;
   }> {
     const templates = normalizeTemplates(input.templates);
-    InitialUserNotebookConfigService.assertValidInput(templates, input.count);
+    InitialUserNotebookConfigService.assertValidInput(templates);
 
     const doc = await SystemConfig.findOneAndUpdate(
       { configKey: SYSTEM_CONFIG_INITIAL_NOTEBOOKS_KEY },
       {
         $set: {
           initialNotebookTemplates: templates,
-          initialNotebookCount: input.count,
+          initialNotebookCount: 0,
         },
       },
       { new: true, upsert: true, setDefaultsOnInsert: true },
@@ -185,8 +161,8 @@ export class InitialUserNotebookConfigService {
       templates: (doc.initialNotebookTemplates || []).map((r) => ({
         title: String(r.title || ""),
         coverImg: String(r.coverImg || ""),
+        enabled: r.enabled !== false,
       })),
-      count: doc.initialNotebookCount,
       updatedAt: doc.updatedAt!,
     };
   }

@@ -174,6 +174,20 @@ const consumeDailyQuota = async (userId: string, biz: UploadBiz) => {
 const consumeFeedbackDailyQuota = async (userId: string) => {
   const { dateKey } = getQuotaDateContext();
 
+  await UserFeedbackImageQuotaDaily.updateOne(
+    { userId, dateKey },
+    {
+      $setOnInsert: {
+        userId,
+        dateKey,
+        usedCount: 0,
+      },
+    },
+    {
+      upsert: true,
+    },
+  );
+
   const updated = await UserFeedbackImageQuotaDaily.findOneAndUpdate(
     {
       userId,
@@ -181,17 +195,11 @@ const consumeFeedbackDailyQuota = async (userId: string) => {
       usedCount: { $lt: FEEDBACK_DAILY_LIMIT },
     },
     {
-      $setOnInsert: {
-        userId,
-        dateKey,
-        usedCount: 0,
-      },
       $inc: {
         usedCount: 1,
       },
     },
     {
-      upsert: true,
       new: true,
     },
   ).lean();

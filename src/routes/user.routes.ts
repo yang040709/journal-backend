@@ -193,13 +193,59 @@ router.post("/session", authMiddleware, async (ctx: AuthContext) => {
   }
 });
 
+/** 兼容旧客户端：聚合资料 + 统计，结构与历史版本一致 */
 router.get("/me-page", authMiddleware, async (ctx: AuthContext) => {
   try {
-    const data = await UserService.getMePage(ctx.user!.userId);
-    success(ctx, data, "获取我的页面信息成功");
+    const userId = ctx.user!.userId;
+    const [profile, stats] = await Promise.all([
+      UserService.getMeProfile(userId),
+      UserService.getMeStats(userId),
+    ]);
+    success(ctx, { profile, stats }, "获取我的页面信息成功");
   } catch (err) {
     console.error("获取我的页面信息失败:", err);
-    error(ctx, err.message || "获取我的页面信息失败", ErrorCodes.INTERNAL_ERROR, 500);
+    const message = err instanceof Error ? err.message : "获取我的页面信息失败";
+    const isUserMissing = /用户不存在/.test(message);
+    error(
+      ctx,
+      message,
+      isUserMissing ? ErrorCodes.AUTH_ERROR : ErrorCodes.INTERNAL_ERROR,
+      isUserMissing ? 401 : 500,
+    );
+  }
+});
+
+router.get("/me-profile", authMiddleware, async (ctx: AuthContext) => {
+  try {
+    const data = await UserService.getMeProfile(ctx.user!.userId);
+    success(ctx, data, "获取我的资料成功");
+  } catch (err) {
+    console.error("获取我的资料失败:", err);
+    const message = err instanceof Error ? err.message : "获取我的资料失败";
+    const isUserMissing = /用户不存在/.test(message);
+    error(
+      ctx,
+      message,
+      isUserMissing ? ErrorCodes.AUTH_ERROR : ErrorCodes.INTERNAL_ERROR,
+      isUserMissing ? 401 : 500,
+    );
+  }
+});
+
+router.get("/me-stats", authMiddleware, async (ctx: AuthContext) => {
+  try {
+    const data = await UserService.getMeStats(ctx.user!.userId);
+    success(ctx, data, "获取我的统计成功");
+  } catch (err) {
+    console.error("获取我的统计失败:", err);
+    const message = err instanceof Error ? err.message : "获取我的统计失败";
+    const isUserMissing = /用户不存在/.test(message);
+    error(
+      ctx,
+      message,
+      isUserMissing ? ErrorCodes.AUTH_ERROR : ErrorCodes.INTERNAL_ERROR,
+      isUserMissing ? 401 : 500,
+    );
   }
 });
 

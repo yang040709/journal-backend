@@ -13,6 +13,10 @@ import { AiStyleService } from "../service/aiStyle.service";
 import { z } from "zod";
 import { NotePresetTagService } from "../service/notePresetTag.service";
 import { UserNoteCustomTagService } from "../service/userNoteCustomTag.service";
+import {
+  NoteExportService,
+  NoteExportQuotaError,
+} from "../service/noteExport.service";
 
 const MAX_PAGE_DEPTH = 10_000;
 const MIN_SEARCH_KEYWORD_LENGTH = 1;
@@ -97,6 +101,73 @@ router.get("/preset-tags", async (ctx: AuthContext) => {
   } catch (err) {
     console.error("获取预设标签失败:", err);
     error(ctx, "获取预设标签失败", ErrorCodes.INTERNAL_ERROR, 500);
+  }
+});
+
+const noteExportPreviewQuerySchema = z.object({
+  noteBookId: z.string().min(1, "手帐本ID不能为空"),
+  startTime: z.coerce.number().optional(),
+  endTime: z.coerce.number().optional(),
+  sort: z.enum(["updatedAt", "createdAt"]).optional().default("updatedAt"),
+});
+
+router.get("/export-preview", async (ctx: AuthContext) => {
+  try {
+    const userId = ctx.user!.userId;
+    const q = noteExportPreviewQuerySchema.parse(ctx.query);
+    const data = await NoteExportService.preview(
+      userId,
+      q.noteBookId,
+      q.startTime,
+      q.endTime,
+      q.sort,
+    );
+    success(ctx, data, "ok");
+  } catch (err) {
+    if (err instanceof z.ZodError) {
+      error(ctx, "参数验证失败", ErrorCodes.PARAM_ERROR, 400);
+      return;
+    }
+    if (err instanceof NoteExportQuotaError) {
+      error(ctx, err.message, ErrorCodes.PARAM_ERROR, 400);
+      return;
+    }
+    console.error("export-preview 失败:", err);
+    error(ctx, "预览失败", ErrorCodes.INTERNAL_ERROR, 500);
+  }
+});
+
+const noteExportRunBodySchema = z.object({
+  noteBookId: z.string().min(1, "手帐本ID不能为空"),
+  startTime: z.number().optional(),
+  endTime: z.number().optional(),
+  sort: z.enum(["updatedAt", "createdAt"]).optional().default("updatedAt"),
+  clientPlatform: z.string().trim().max(32).optional(),
+});
+
+router.post("/export-run", async (ctx: AuthContext) => {
+  try {
+    const userId = ctx.user!.userId;
+    const body = noteExportRunBodySchema.parse(ctx.request.body);
+    const data = await NoteExportService.run(userId, {
+      noteBookId: body.noteBookId,
+      startTime: body.startTime,
+      endTime: body.endTime,
+      sort: body.sort,
+      clientPlatform: body.clientPlatform,
+    });
+    success(ctx, data, "ok");
+  } catch (err) {
+    if (err instanceof z.ZodError) {
+      error(ctx, "参数验证失败", ErrorCodes.PARAM_ERROR, 400);
+      return;
+    }
+    if (err instanceof NoteExportQuotaError) {
+      error(ctx, err.message, ErrorCodes.PARAM_ERROR, 400);
+      return;
+    }
+    console.error("export-run 失败:", err);
+    error(ctx, "导出失败", ErrorCodes.INTERNAL_ERROR, 500);
   }
 });
 

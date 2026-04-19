@@ -67,6 +67,28 @@ export class FeedbackRateLimitError extends Error {
 }
 
 export class FeedbackService {
+  private static csvEscape(value: unknown): string {
+    const text = String(value ?? "");
+    return `"${text.replace(/"/g, '""')}"`;
+  }
+
+  private static buildAdminFeedbackWhere(query: {
+    status?: "pending" | "reviewed";
+    reviewLevel?: FeedbackReviewLevel;
+    type?: FeedbackType;
+    keyword?: string;
+    userId?: string;
+  }) {
+    const where: Record<string, unknown> = {};
+    if (query.status) where.status = query.status;
+    if (query.reviewLevel) where.reviewLevel = query.reviewLevel;
+    if (query.type) where.type = query.type;
+    if (query.userId) where.userId = query.userId;
+    if (query.keyword?.trim()) {
+      where.content = { $regex: query.keyword.trim(), $options: "i" };
+    }
+    return where;
+  }
   static async getWeeklyFirstRewardStatus(userId: string) {
     const rules = await PointsService.getRules();
     const { dateKey } = getQuotaDateContext();
@@ -200,14 +222,7 @@ export class FeedbackService {
       throw new Error(`分页深度超过限制（page*limit <= ${MAX_PAGE_DEPTH}）`);
     }
     const skip = (page - 1) * limit;
-    const where: Record<string, unknown> = {};
-    if (query.status) where.status = query.status;
-    if (query.reviewLevel) where.reviewLevel = query.reviewLevel;
-    if (query.type) where.type = query.type;
-    if (query.userId) where.userId = query.userId;
-    if (query.keyword?.trim()) {
-      where.content = { $regex: query.keyword.trim(), $options: "i" };
-    }
+    const where = this.buildAdminFeedbackWhere(query);
 
     const [items, total] = await Promise.all([
       UserFeedback.find(where).sort({ createdAt: -1 }).skip(skip).limit(limit).lean(),
@@ -302,5 +317,96 @@ export class FeedbackService {
       .select("_id")
       .lean();
     return first?._id ? String(first._id) : "";
+  }
+
+  static async adminBatchReviewFeedbacks(
+    ids: string[],
+    payload: { reviewLevel: FeedbackReviewLevel; reviewRemark?: string },
+    admin: { id: string; username: string },
+  ) {
+    const uniqueIds = Array.from(
+      new Set(ids.map((id) => String(id || "").trim()).filter(Boolean)),
+    );
+    const failedItems: Array<{ id: string; reason: string }> = [];
+    let successCount = 0;
+    for (const id of uniqueIds) {
+      try {
+        await this.adminReviewFeedback(id, payload, admin);
+        successCount += 1;
+      } catch (e) {
+        failedItems.push({
+          id,
+          reason: e instanceof Error ? e.message : "处理失败",
+        });
+      }
+    }
+    return {
+      total: uniqueIds.length,
+      successCount,
+      failedCount: failedItems.length,
+      failedItems,
+    };
+  }
+
+  static async adminExportFeedbacksCsv(input: {
+    ids?: string[];
+    query?: {
+      status?: "pending" | "reviewed";
+      reviewLevel?: FeedbackReviewLevel;
+      type?: FeedbackType;
+      keyword?: string;
+      userId?: string;
+    };
+    limit: number;
+  }) {
+    const where: Record<string, unknown> = {};
+    const ids = Array.isArray(input.ids)
+      ? Array.from(new Set(input.ids.map((id) => String(id || "").trim()).filter(Boolean)))
+      : [];
+    if (ids.length > 0) {
+      where._id = { $in: ids };
+    } else if (input.query) {
+      Object.assign(where, this.buildAdminFeedbackWhere(input.query));
+    }
+
+    const rows = await UserFeedback.find(where)
+      .sort({ createdAt: -1 })
+      .limit(input.limit)
+      .lean();
+    const header = [
+      "反馈ID",
+      "用户ID",
+      "类型",
+      "状态",
+      "处理等级",
+      "处理人",
+      "处理备注",
+      "提交时间",
+      "处理时间",
+      "奖励积分",
+    ];
+    const lines = [header.map((v) => this.csvEscape(v)).join(",")];
+    for (const row of rows) {
+      lines.push(
+        [
+          String(row._id || ""),
+          row.userId || "",
+          row.type || "",
+          row.status || "",
+          row.reviewLevel || "",
+          row.reviewedBy || "",
+          row.reviewRemark || "",
+          row.createdAt instanceof Date ? row.createdAt.toISOString() : "",
+          row.reviewedAt instanceof Date ? row.reviewedAt.toISOString() : "",
+          normalizeInt(row.totalGrantedPoints, 0),
+        ]
+          .map((v) => this.csvEscape(v))
+          .join(","),
+      );
+    }
+    return {
+      csv: `\uFEFF${lines.join("\n")}`,
+      exportedCount: rows.length,
+    };
   }
 }

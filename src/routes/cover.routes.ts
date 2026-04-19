@@ -53,7 +53,14 @@ router.get("/quick", async (ctx: AuthContext) => {
     success(ctx, covers, "获取用户快捷封面成功");
   } catch (err) {
     console.error("获取用户快捷封面失败:", err);
-    error(ctx, "获取用户快捷封面失败", ErrorCodes.INTERNAL_ERROR, 500);
+    const message = err instanceof Error ? err.message : "获取用户快捷封面失败";
+    const isUserMissing = /用户不存在/.test(message);
+    error(
+      ctx,
+      message,
+      isUserMissing ? ErrorCodes.AUTH_ERROR : ErrorCodes.INTERNAL_ERROR,
+      isUserMissing ? 401 : 500,
+    );
   }
 });
 

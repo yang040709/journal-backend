@@ -9,6 +9,8 @@ import UserAdRewardLog from "../model/UserAdRewardLog";
 import PointsLedger from "../model/PointsLedger";
 import UserUploadQuotaDaily from "../model/UserUploadQuotaDaily";
 import UserAiUsageDaily from "../model/UserAiUsageDaily";
+import UserFeedback from "../model/UserFeedback";
+import ShareSecurityTask from "../model/ShareSecurityTask";
 import { getAiDailyBaseLimit } from "./aiUsageQuota";
 import { getUploadDailyBaseLimit } from "./upload.service";
 import { getQuotaDateContext } from "../utils/dateKey";
@@ -40,6 +42,95 @@ export type AdminUserListItem = ReturnType<typeof AdminUserService.serializeUser
 };
 
 export class AdminUserService {
+  static buildHealthScoreSummary(input: {
+    activityCount7d: number;
+    noteCount30d: number;
+    feedbackPending: number;
+    feedbackImportantPending: number;
+    riskRejectCount30d: number;
+    riskSuspiciousCount30d: number;
+    pointsIncome30d: number;
+    pointsExpense30d: number;
+  }) {
+    const reasons: string[] = [];
+
+    const activity = Number(input.activityCount7d || 0);
+    const content = Number(input.noteCount30d || 0);
+    const pending = Number(input.feedbackPending || 0);
+    const importantPending = Number(input.feedbackImportantPending || 0);
+    const riskReject = Number(input.riskRejectCount30d || 0);
+    const riskSuspicious = Number(input.riskSuspiciousCount30d || 0);
+    const income30d = Number(input.pointsIncome30d || 0);
+    const expense30d = Number(input.pointsExpense30d || 0);
+
+    let activeScore = 6;
+    if (activity >= 20) {
+      activeScore = 30;
+    } else if (activity >= 10) {
+      activeScore = 22;
+    } else if (activity >= 3) {
+      activeScore = 14;
+    }
+    if (activeScore < 22) {
+      reasons.push(`近7天活跃偏低（${activity}次）`);
+    }
+
+    let contentScore = 4;
+    if (content >= 15) {
+      contentScore = 25;
+    } else if (content >= 8) {
+      contentScore = 18;
+    } else if (content >= 3) {
+      contentScore = 10;
+    }
+    if (contentScore < 18) {
+      reasons.push(`近30天内容产出偏少（${content}篇）`);
+    }
+
+    let feedbackScore = Math.max(0, 20 - pending * 4);
+    if (importantPending > 0) {
+      feedbackScore = Math.max(0, feedbackScore - 6);
+      reasons.push(`存在重要待处理反馈（${importantPending}条）`);
+    } else if (pending > 0) {
+      reasons.push(`待处理反馈较多（${pending}条）`);
+    }
+
+    let riskScore = 15;
+    if (riskReject > 0) {
+      riskScore = 2;
+      reasons.push(`近30天存在拦截风控记录（${riskReject}次）`);
+    } else if (riskSuspicious > 0) {
+      riskScore = 8;
+      reasons.push(`近30天存在可疑风控记录（${riskSuspicious}次）`);
+    }
+
+    let pointsScore = 3;
+    if (income30d > 0 && expense30d > 0) {
+      pointsScore = 10;
+    } else if (income30d > 0 || expense30d > 0) {
+      pointsScore = 6;
+    }
+    if (pointsScore < 10) {
+      reasons.push("近30天积分行为较少");
+    }
+
+    const total = Math.max(0, Math.min(100, activeScore + contentScore + feedbackScore + riskScore + pointsScore));
+    const level = total >= 80 ? "A" : total >= 60 ? "B" : total >= 40 ? "C" : "D";
+
+    return {
+      total,
+      level,
+      dimensions: {
+        active: { score: activeScore, max: 30 },
+        content: { score: contentScore, max: 25 },
+        feedback: { score: feedbackScore, max: 20 },
+        risk: { score: riskScore, max: 15 },
+        points: { score: pointsScore, max: 10 },
+      },
+      reasons: reasons.slice(0, 3),
+    };
+  }
+
   static async listUsers(
     page = 1,
     limit = 20,
@@ -263,12 +354,31 @@ export class AdminUserService {
     }
     const row = user as unknown as LeanUserRow;
     const bizUserId = row.userId;
+    const now = Date.now();
+    const sevenDaysAgo = new Date(now - 7 * 24 * 60 * 60 * 1000);
+    const thirtyDaysAgo = new Date(now - 30 * 24 * 60 * 60 * 1000);
     const [
       userWithQuota,
       recentNotes,
       recentNotebooks,
       reminderCount,
       templateCount,
+      totalNotes,
+      sharedNotes,
+      favoriteNotes,
+      totalNotebooks,
+      lastActivity,
+      activityCount7d,
+      feedbackTotal,
+      feedbackPending,
+      feedbackImportantOrCritical,
+      lastFeedback,
+      pointsIncome30dRows,
+      pointsExpense30dRows,
+      lastPointsChange,
+      noteCount30d,
+      riskRejectCount30d,
+      riskSuspiciousCount30d,
     ] = await Promise.all([
       AdminUserService.attachTodayQuota([row]).then((r) => r[0]),
       Note.find({ userId: bizUserId })
@@ -283,12 +393,120 @@ export class AdminUserService {
         .lean(),
       Reminder.countDocuments({ userId: bizUserId }),
       Template.countDocuments({ userId: bizUserId }),
+      Note.countDocuments({ userId: bizUserId, isDeleted: false }),
+      Note.countDocuments({ userId: bizUserId, isDeleted: false, isShare: true }),
+      Note.countDocuments({ userId: bizUserId, isDeleted: false, isFavorite: true }),
+      NoteBook.countDocuments({ userId: bizUserId }),
+      Activity.findOne({ userId: bizUserId }).sort({ createdAt: -1 }).select("type title createdAt").lean(),
+      Activity.countDocuments({ userId: bizUserId, createdAt: { $gte: sevenDaysAgo } }),
+      UserFeedback.countDocuments({ userId: bizUserId }),
+      UserFeedback.countDocuments({ userId: bizUserId, status: "pending" }),
+      UserFeedback.countDocuments({
+        userId: bizUserId,
+        reviewLevel: { $in: ["important", "critical"] },
+      }),
+      UserFeedback.findOne({ userId: bizUserId }).sort({ createdAt: -1 }).select("createdAt").lean(),
+      PointsLedger.aggregate<{ total: number }>([
+        {
+          $match: {
+            userId: bizUserId,
+            flowType: "income",
+            createdAt: { $gte: thirtyDaysAgo },
+          },
+        },
+        {
+          $group: { _id: null, total: { $sum: "$pointsDelta" } },
+        },
+      ]),
+      PointsLedger.aggregate<{ total: number }>([
+        {
+          $match: {
+            userId: bizUserId,
+            flowType: "expense",
+            createdAt: { $gte: thirtyDaysAgo },
+          },
+        },
+        {
+          $group: { _id: null, total: { $sum: { $abs: "$pointsDelta" } } },
+        },
+      ]),
+      PointsLedger.findOne({ userId: bizUserId })
+        .sort({ createdAt: -1 })
+        .select("createdAt")
+        .lean(),
+      Note.countDocuments({
+        userId: bizUserId,
+        isDeleted: false,
+        createdAt: { $gte: thirtyDaysAgo },
+      }),
+      ShareSecurityTask.countDocuments({
+        userId: bizUserId,
+        createdAt: { $gte: thirtyDaysAgo },
+        status: { $in: ["reject_local", "reject_wechat"] },
+      }),
+      ShareSecurityTask.countDocuments({
+        userId: bizUserId,
+        createdAt: { $gte: thirtyDaysAgo },
+        status: "risky_wechat",
+      }),
     ]);
     const quickCovers = Array.isArray((user as { quickCovers?: unknown }).quickCovers)
       ? ((user as { quickCovers: string[] }).quickCovers || []).slice(0, 8)
       : [];
+    const pointsIncome30d = Math.max(0, Math.floor(Number(pointsIncome30dRows[0]?.total ?? 0)));
+    const pointsExpense30d = Math.max(0, Math.floor(Number(pointsExpense30dRows[0]?.total ?? 0)));
+    const healthScore = AdminUserService.buildHealthScoreSummary({
+      activityCount7d,
+      noteCount30d,
+      feedbackPending,
+      feedbackImportantPending: feedbackImportantOrCritical,
+      riskRejectCount30d,
+      riskSuspiciousCount30d,
+      pointsIncome30d,
+      pointsExpense30d,
+    });
+
+    const reminderSafe = Math.max(0, Math.floor(Number(reminderCount || 0)));
+    const templateSafe = Math.max(0, Math.floor(Number(templateCount || 0)));
+
     return {
       user: userWithQuota,
+      healthScore,
+      profileSummary: {
+        nickname: String((user as { nickname?: string }).nickname || ""),
+        avatarUrl: String((user as { avatarUrl?: string }).avatarUrl || ""),
+        bio: String((user as { bio?: string }).bio || ""),
+        membershipText: String((user as { membershipText?: string }).membershipText || ""),
+        customTagCount: Array.isArray((user as { customNoteTags?: unknown[] }).customNoteTags)
+          ? (user as { customNoteTags: unknown[] }).customNoteTags.length
+          : 0,
+        customCoverCount: Array.isArray((user as { customCovers?: unknown[] }).customCovers)
+          ? (user as { customCovers: unknown[] }).customCovers.length
+          : 0,
+      },
+      activitySummary: {
+        lastActivityAt: lastActivity?.createdAt ?? null,
+        lastActivityType: lastActivity?.type ?? "",
+        lastActivityTitle: lastActivity?.title ?? "",
+        activityCount7d,
+      },
+      contentSummary: {
+        totalNotes,
+        sharedNotes,
+        favoriteNotes,
+        totalNotebooks,
+      },
+      feedbackSummary: {
+        feedbackTotal,
+        feedbackPending,
+        feedbackImportantOrCritical,
+        lastFeedbackAt: lastFeedback?.createdAt ?? null,
+      },
+      pointsSummary: {
+        pointsIncome30d,
+        pointsExpense30d,
+        lastPointsChangeAt: lastPointsChange?.createdAt ?? null,
+      },
       recentNotes: recentNotes.map((n) => ({
         id: n._id.toString(),
         title: n.title,
@@ -300,8 +518,8 @@ export class AdminUserService {
         count: nb.count,
         updatedAt: nb.updatedAt,
       })),
-      reminderCount,
-      templateCount,
+      reminderCount: reminderSafe,
+      templateCount: templateSafe,
       quickCoverPreviewUrls: quickCovers,
     };
   }

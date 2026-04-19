@@ -9,8 +9,8 @@ export type QuotaBaseLimitsPayload = {
 };
 
 const DEFAULT_LIMITS: QuotaBaseLimitsPayload = {
-  uploadDailyBaseLimit: 15,
-  aiDailyBaseLimit: 5,
+  uploadDailyBaseLimit: 9,
+  aiDailyBaseLimit: 10,
 };
 
 const LIMITS_MIN = 0;

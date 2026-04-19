@@ -11,6 +11,8 @@ import {
 import { ActivityLogger } from "../utils/ActivityLogger";
 import { CoverService } from "./cover.service";
 import { InitialUserNotebookConfigService } from "./initialUserNotebookConfig.service";
+import { InitialUserNoteSeedConfigService } from "./initialUserNoteSeedConfig.service";
+import { nanoid } from "nanoid";
 
 export interface LoginResult {
   token: string;
@@ -29,11 +31,6 @@ export interface MePageStats {
   notebookCount: number;
   noteCount: number;
   streakDays: number;
-}
-
-export interface MePageResult {
-  profile: MePageProfile;
-  stats: MePageStats;
 }
 
 export interface UpdateMeProfileInput {
@@ -163,10 +160,86 @@ export class UserService {
         userId,
       }));
 
-      await NoteBook.insertMany(noteBooks);
+      const insertedNoteBooks = await NoteBook.insertMany(noteBooks);
       console.log(
         `✅ 为用户 ${userId} 创建了 ${noteBooks.length} 个默认手帐本`,
       );
+
+      const noteSeedTemplates =
+        await InitialUserNoteSeedConfigService.resolveTemplatesForNewUser();
+      const usable = noteSeedTemplates.filter(
+        (t) =>
+          Number.isInteger(t.targetIndex) &&
+          t.targetIndex >= 0 &&
+          t.targetIndex < insertedNoteBooks.length,
+      );
+      if (usable.length === 0) {
+        return;
+      }
+
+      const seedKeys = usable
+        .map((t) => String(t.seedKey || "").trim())
+        .filter(Boolean);
+      if (seedKeys.length === 0) {
+        return;
+      }
+
+      const existing = await Note.find({
+        userId,
+        isDeleted: { $ne: true },
+        appliedSystemTemplateKey: { $in: seedKeys },
+      })
+        .select("appliedSystemTemplateKey")
+        .lean();
+      const existingKeys = new Set(
+        existing.map((r) => String((r as any).appliedSystemTemplateKey || "")),
+      );
+
+      const notesToInsert = usable
+        .filter((t) => !existingKeys.has(String(t.seedKey || "").trim()))
+        .map((t) => {
+          const nb = insertedNoteBooks[t.targetIndex];
+          const noteBookId = String((nb as any).id || (nb as any)._id || "");
+          const shouldPin = Boolean(t.isPinned);
+          return {
+            noteBookId,
+            title: t.title,
+            content: t.content || "",
+            tags: Array.isArray(t.tags) ? t.tags : [],
+            images: [],
+            userId,
+            isShare: false,
+            shareId: nanoid(12),
+            shareVersion: 0,
+            appliedSystemTemplateKey: String(t.seedKey || "").trim().slice(0, 120),
+            isDeleted: false,
+            deletedAt: null,
+            deleteExpireAt: null,
+            isPinned: shouldPin,
+            pinnedAt: shouldPin ? new Date() : null,
+          };
+        })
+        .filter((n) => n.noteBookId);
+
+      if (notesToInsert.length === 0) {
+        return;
+      }
+
+      await Note.insertMany(notesToInsert);
+
+      const incByNotebookId = new Map<string, number>();
+      for (const n of notesToInsert) {
+        incByNotebookId.set(n.noteBookId, (incByNotebookId.get(n.noteBookId) || 0) + 1);
+      }
+      await NoteBook.bulkWrite(
+        Array.from(incByNotebookId.entries()).map(([noteBookId, inc]) => ({
+          updateOne: {
+            filter: { _id: noteBookId },
+            update: { $inc: { count: inc } },
+          },
+        })),
+      );
+      console.log(`✅ 为用户 ${userId} 创建了 ${notesToInsert.length} 篇初始手帐`);
     } catch (error) {
       console.error("创建默认手帐本失败:", error);
       // 不抛出错误，避免影响用户登录
@@ -205,7 +278,24 @@ export class UserService {
     };
   }
 
-  static async getMePage(userId: string): Promise<MePageResult> {
+  static async getMeProfile(userId: string): Promise<MePageProfile> {
+    const user = await User.findOne({ userId }).lean();
+    if (!user) {
+      throw new Error("用户不存在");
+    }
+
+    return {
+      userId: user.userId,
+      nickname:
+        String((user as any).nickname || "").trim() ||
+        UserService.buildDefaultNickname(user.userId),
+      avatarUrl: String((user as any).avatarUrl || "").trim(),
+      bio: String((user as any).bio || "").trim() || "手帐记录生活点滴",
+      membershipText: String((user as any).membershipText || "").trim(),
+    };
+  }
+
+  static async getMeStats(userId: string): Promise<MePageStats> {
     const user = await User.findOne({ userId }).lean();
     if (!user) {
       throw new Error("用户不存在");
@@ -225,20 +315,9 @@ export class UserService {
     );
 
     return {
-      profile: {
-        userId: user.userId,
-        nickname:
-          String((user as any).nickname || "").trim() ||
-          UserService.buildDefaultNickname(user.userId),
-        avatarUrl: String((user as any).avatarUrl || "").trim(),
-        bio: String((user as any).bio || "").trim() || "手帐记录生活点滴",
-        membershipText: String((user as any).membershipText || "").trim(),
-      },
-      stats: {
-        notebookCount,
-        noteCount,
-        streakDays,
-      },
+      notebookCount,
+      noteCount,
+      streakDays,
     };
   }
 

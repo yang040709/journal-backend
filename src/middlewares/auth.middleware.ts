@@ -1,6 +1,7 @@
 import { Context, Next } from "koa";
 import jwt from "jsonwebtoken";
 import * as dotenv from "dotenv";
+import User from "../model/User";
 
 dotenv.config();
 
@@ -42,6 +43,19 @@ export const authMiddleware = async (ctx: AuthContext, next: Next) => {
   try {
     const decoded = jwt.verify(token, JWT_SECRET) as AuthUser;
     ctx.user = decoded;
+
+    // Token 有效但用户不存在：通常是清库/换环境/老 token 导致，按登录态失效处理
+    const userExists = await User.exists({ userId: decoded.userId });
+    if (!userExists) {
+      ctx.status = 401;
+      ctx.body = {
+        code: 1002,
+        message: "认证失败：用户不存在，请重新登录",
+        data: null,
+      };
+      return;
+    }
+
     await next();
   } catch (error) {
     console.error("JWT验证失败:", error);

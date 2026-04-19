@@ -36,7 +36,12 @@ async function getSystemTemplatesFallbackConstant(): Promise<LeanTemplate[]> {
 }
 
 export async function loadSystemTemplatesForClient(): Promise<LeanTemplate[]> {
-  const docs = await Template.find({ isSystem: true }).sort({ name: 1 }).lean();
+  const docs = await Template.find({
+    isSystem: true,
+    $or: [{ enabled: true }, { enabled: { $exists: false } }],
+  })
+    .sort({ name: 1 })
+    .lean();
   if (docs.length === 0) {
     return getSystemTemplatesFallbackConstant();
   }
