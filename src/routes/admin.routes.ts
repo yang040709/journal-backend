@@ -15,6 +15,7 @@ import {
   ADMIN_PAGE_AI_STYLES,
   ADMIN_PAGE_GALLERY,
   ADMIN_PAGE_FEEDBACKS,
+  ADMIN_PAGE_POINTS_CAMPAIGNS,
 } from "../constant/adminPages";
 import {
   success,
@@ -54,6 +55,10 @@ import {
 import { InitialUserNoteSeedConfigService } from "../service/initialUserNoteSeedConfig.service";
 import { AdminGalleryService } from "../service/adminGallery.service";
 import { FeedbackService } from "../service/feedback.service";
+import {
+  CampaignNotFoundError,
+  PointsCampaignService,
+} from "../service/pointsCampaign.service";
 
 const MAX_PAGE_DEPTH = 10_000;
 const MIN_SEARCH_LENGTH = 2;
@@ -2418,6 +2423,31 @@ const pointsTransactionsQuerySchema = z.object({
   path: ["page"],
 });
 
+const pointsCampaignCreateSchema = z
+  .object({
+    name: z.string().trim().min(1).max(100),
+    description: z.string().trim().max(1000).optional().default(""),
+    pointValue: z.number().int().min(1).max(1_000_000),
+    quota: z.number().int().min(1).max(10_000_000),
+    startAt: z.coerce.date(),
+    endAt: z.coerce.date(),
+    successCopy: z.string().trim().max(200).optional().default("领取成功，可前往积分页查看"),
+    channelRemark: z.string().trim().max(200).optional().default(""),
+  })
+  .refine((v) => v.startAt.getTime() < v.endAt.getTime(), {
+    message: "结束时间必须晚于开始时间",
+    path: ["endAt"],
+  });
+
+const pointsCampaignUpdateSchema = pointsCampaignCreateSchema.partial();
+
+const pointsCampaignListQuerySchema = z.object({
+  page: z.coerce.number().int().positive().optional().default(1),
+  limit: z.coerce.number().int().min(1).max(100).optional().default(20),
+  status: z.enum(["draft", "published", "offline"]).optional(),
+  keyword: optionalKeywordSchema(100),
+});
+
 authed.get(
   "/points/transactions",
   requireAdminPage(ADMIN_PAGE_USERS),
@@ -2453,6 +2483,179 @@ authed.get(
         ErrorCodes.INTERNAL_ERROR,
         500,
       );
+    }
+  },
+);
+
+authed.get(
+  "/points-campaigns",
+  requireAdminPage(ADMIN_PAGE_POINTS_CAMPAIGNS),
+  async (ctx) => {
+    try {
+      const q = pointsCampaignListQuerySchema.parse(ctx.query);
+      const { items, total, page, limit } = await PointsCampaignService.listCampaigns({
+        page: q.page,
+        limit: q.limit,
+        status: q.status,
+        keyword: q.keyword,
+      });
+      paginatedSuccess(ctx, items, total, page, limit);
+    } catch (e) {
+      if (e instanceof z.ZodError) {
+        error(ctx, "参数验证失败", ErrorCodes.PARAM_ERROR, 400);
+        return;
+      }
+      error(ctx, e instanceof Error ? e.message : "加载失败", ErrorCodes.INTERNAL_ERROR, 500);
+    }
+  },
+);
+
+authed.post(
+  "/points-campaigns",
+  requireAdminPage(ADMIN_PAGE_POINTS_CAMPAIGNS),
+  async (ctx) => {
+    try {
+      const body = pointsCampaignCreateSchema.parse(ctx.request.body);
+      const admin = ctx.state.admin!;
+      const data = await PointsCampaignService.createCampaign(
+        {
+          name: body.name,
+          description: body.description,
+          pointValue: body.pointValue,
+          quota: body.quota,
+          startAt: body.startAt,
+          endAt: body.endAt,
+          successCopy: body.successCopy,
+          channelRemark: body.channelRemark,
+        },
+        { id: admin.id, username: admin.username },
+        String(ctx.state.requestId || ""),
+      );
+      success(ctx, data, "创建成功");
+    } catch (e) {
+      if (e instanceof z.ZodError) {
+        error(ctx, "参数验证失败", ErrorCodes.PARAM_ERROR, 400);
+        return;
+      }
+      error(ctx, e instanceof Error ? e.message : "创建失败", ErrorCodes.PARAM_ERROR, 400);
+    }
+  },
+);
+
+authed.put(
+  "/points-campaigns/:id",
+  requireAdminPage(ADMIN_PAGE_POINTS_CAMPAIGNS),
+  async (ctx) => {
+    try {
+      const body = pointsCampaignUpdateSchema.parse(ctx.request.body);
+      const admin = ctx.state.admin!;
+      const data = await PointsCampaignService.updateCampaign(
+        String(ctx.params.id || ""),
+        body,
+        { id: admin.id, username: admin.username },
+        String(ctx.state.requestId || ""),
+      );
+      success(ctx, data, "更新成功");
+    } catch (e) {
+      if (e instanceof z.ZodError) {
+        error(ctx, "参数验证失败", ErrorCodes.PARAM_ERROR, 400);
+        return;
+      }
+      if (e instanceof CampaignNotFoundError) {
+        error(ctx, "活动不存在", ErrorCodes.CAMPAIGN_NOT_FOUND, 404);
+        return;
+      }
+      error(ctx, e instanceof Error ? e.message : "更新失败", ErrorCodes.PARAM_ERROR, 400);
+    }
+  },
+);
+
+authed.post(
+  "/points-campaigns/:id/publish",
+  requireAdminPage(ADMIN_PAGE_POINTS_CAMPAIGNS),
+  async (ctx) => {
+    try {
+      const admin = ctx.state.admin!;
+      const data = await PointsCampaignService.publishCampaign(
+        String(ctx.params.id || ""),
+        { id: admin.id, username: admin.username },
+        String(ctx.state.requestId || ""),
+      );
+      success(ctx, data, "发布成功");
+    } catch (e) {
+      if (e instanceof CampaignNotFoundError) {
+        error(ctx, "活动不存在", ErrorCodes.CAMPAIGN_NOT_FOUND, 404);
+        return;
+      }
+      console.error("[admin.points-campaigns.publish] failed", {
+        campaignId: String(ctx.params.id || ""),
+        admin: ctx.state.admin?.username,
+        requestId: String(ctx.state.requestId || ""),
+        error: e instanceof Error ? e.message : String(e),
+      });
+      error(ctx, e instanceof Error ? e.message : "发布失败", ErrorCodes.PARAM_ERROR, 400);
+    }
+  },
+);
+
+authed.post(
+  "/points-campaigns/:id/offline",
+  requireAdminPage(ADMIN_PAGE_POINTS_CAMPAIGNS),
+  async (ctx) => {
+    try {
+      const admin = ctx.state.admin!;
+      const data = await PointsCampaignService.offlineCampaign(
+        String(ctx.params.id || ""),
+        { id: admin.id, username: admin.username },
+        String(ctx.state.requestId || ""),
+      );
+      success(ctx, data, "下线成功");
+    } catch (e) {
+      if (e instanceof CampaignNotFoundError) {
+        error(ctx, "活动不存在", ErrorCodes.CAMPAIGN_NOT_FOUND, 404);
+        return;
+      }
+      error(ctx, e instanceof Error ? e.message : "下线失败", ErrorCodes.PARAM_ERROR, 400);
+    }
+  },
+);
+
+authed.get(
+  "/points-campaigns/:id",
+  requireAdminPage(ADMIN_PAGE_POINTS_CAMPAIGNS),
+  async (ctx) => {
+    try {
+      const data = await PointsCampaignService.getCampaignForAdmin(String(ctx.params.id || ""));
+      success(ctx, data);
+    } catch (e) {
+      if (e instanceof CampaignNotFoundError) {
+        error(ctx, "活动不存在", ErrorCodes.CAMPAIGN_NOT_FOUND, 404);
+        return;
+      }
+      error(ctx, e instanceof Error ? e.message : "加载失败", ErrorCodes.INTERNAL_ERROR, 500);
+    }
+  },
+);
+
+authed.get(
+  "/points-campaigns/:id/claims",
+  requireAdminPage(ADMIN_PAGE_POINTS_CAMPAIGNS),
+  async (ctx) => {
+    try {
+      const q = z
+        .object({
+          page: z.coerce.number().int().positive().optional().default(1),
+          limit: z.coerce.number().int().min(1).max(100).optional().default(20),
+        })
+        .parse(ctx.query);
+      const data = await PointsCampaignService.listCampaignClaims(String(ctx.params.id || ""), q.page, q.limit);
+      paginatedSuccess(ctx, data.items, data.total, data.page, data.limit);
+    } catch (e) {
+      if (e instanceof z.ZodError) {
+        error(ctx, "参数验证失败", ErrorCodes.PARAM_ERROR, 400);
+        return;
+      }
+      error(ctx, e instanceof Error ? e.message : "加载失败", ErrorCodes.INTERNAL_ERROR, 500);
     }
   },
 );

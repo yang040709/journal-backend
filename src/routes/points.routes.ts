@@ -11,6 +11,16 @@ import {
   PointsExchangeInvalidError,
   PointsInsufficientError,
 } from "../service/points.service";
+import {
+  CampaignAlreadyClaimedError,
+  CampaignEndedError,
+  CampaignNotFoundError,
+  CampaignNotPublishedError,
+  CampaignNotStartedError,
+  CampaignSoldOutError,
+  PointsCampaignService,
+} from "../service/pointsCampaign.service";
+import { pointsCampaignClaimRateLimit } from "../middlewares/pointsCampaignRateLimit.middleware";
 
 const router = new Router({
   prefix: "/points",
@@ -33,6 +43,10 @@ const transactionsQuerySchema = z.object({
   page: z.coerce.number().int().positive().optional().default(1),
   pageSize: z.coerce.number().int().min(1).max(50).optional().default(20),
   flowType: z.enum(["all", "income", "expense"]).optional().default("all"),
+});
+
+const campaignIdSchema = z.object({
+  id: z.string().trim().min(1),
 });
 
 router.get("/summary", async (ctx: AuthContext) => {
@@ -132,6 +146,76 @@ router.get("/transactions", async (ctx: AuthContext) => {
     const message = err instanceof Error ? err.message : "获取积分流水失败";
     logger.error("获取积分流水失败", { requestId, userId, error: message });
     error(ctx, "获取积分流水失败", ErrorCodes.INTERNAL_ERROR, 500);
+  }
+});
+
+router.get("/campaigns/:id", async (ctx: AuthContext) => {
+  try {
+    const p = campaignIdSchema.parse(ctx.params);
+    const data = await PointsCampaignService.getCampaignForUser(p.id, ctx.user!.userId);
+    success(ctx, data, "ok");
+  } catch (err) {
+    if (err instanceof z.ZodError) {
+      error(ctx, "参数验证失败", ErrorCodes.PARAM_ERROR, 400);
+      return;
+    }
+    if (err instanceof CampaignNotFoundError) {
+      error(ctx, "活动不存在", ErrorCodes.CAMPAIGN_NOT_FOUND, 404);
+      return;
+    }
+    logger.error("获取活动详情失败", {
+      requestId: ctx.state.requestId || "unknown",
+      userId: ctx.user!.userId,
+      error: err instanceof Error ? err.message : "unknown",
+    });
+    error(ctx, "获取活动详情失败", ErrorCodes.INTERNAL_ERROR, 500);
+  }
+});
+
+router.post("/campaigns/:id/claim", pointsCampaignClaimRateLimit, async (ctx: AuthContext) => {
+  try {
+    const p = campaignIdSchema.parse(ctx.params);
+    const data = await PointsCampaignService.claimCampaign(p.id, ctx.user!.userId, {
+      ip: String(ctx.ip || ctx.request.ip || ""),
+      ua: String(ctx.get("user-agent") || ""),
+      requestId: String(ctx.state.requestId || ""),
+    });
+    success(ctx, data, "领取成功");
+  } catch (err) {
+    if (err instanceof z.ZodError) {
+      error(ctx, "参数验证失败", ErrorCodes.PARAM_ERROR, 400);
+      return;
+    }
+    if (err instanceof CampaignNotFoundError) {
+      error(ctx, "活动不存在", ErrorCodes.CAMPAIGN_NOT_FOUND, 404);
+      return;
+    }
+    if (err instanceof CampaignNotPublishedError) {
+      error(ctx, "活动未发布", ErrorCodes.CAMPAIGN_NOT_PUBLISHED, 400);
+      return;
+    }
+    if (err instanceof CampaignNotStartedError) {
+      error(ctx, "活动未开始", ErrorCodes.CAMPAIGN_NOT_STARTED, 400);
+      return;
+    }
+    if (err instanceof CampaignEndedError) {
+      error(ctx, "活动已结束", ErrorCodes.CAMPAIGN_ENDED, 400);
+      return;
+    }
+    if (err instanceof CampaignSoldOutError) {
+      error(ctx, "活动已领完", ErrorCodes.CAMPAIGN_SOLD_OUT, 400);
+      return;
+    }
+    if (err instanceof CampaignAlreadyClaimedError) {
+      error(ctx, "您已领取过该活动", ErrorCodes.CAMPAIGN_ALREADY_CLAIMED, 400);
+      return;
+    }
+    logger.error("领取活动积分失败", {
+      requestId: ctx.state.requestId || "unknown",
+      userId: ctx.user!.userId,
+      error: err instanceof Error ? err.message : "unknown",
+    });
+    error(ctx, "领取失败，请稍后重试", ErrorCodes.INTERNAL_ERROR, 500);
   }
 });
 

@@ -655,6 +655,7 @@ export class PointsService {
       exchange_note_export: "兑换手帐导出次数",
       admin_adjust: "后台积分调整",
       feedback_reward: "反馈奖励",
+      campaign_claim: "活动领取积分",
     };
     const occurredAt = row.createdAt instanceof Date ? row.createdAt.toISOString() : row.createdAt;
     return {

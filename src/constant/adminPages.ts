@@ -8,6 +8,7 @@ export const ADMIN_PAGE_NOTE_TAGS = "note_tags";
 export const ADMIN_PAGE_AI_STYLES = "ai_styles";
 export const ADMIN_PAGE_GALLERY = "gallery";
 export const ADMIN_PAGE_FEEDBACKS = "feedbacks";
+export const ADMIN_PAGE_POINTS_CAMPAIGNS = "points_campaigns";
 /** 仅超级管理员，不通过 allowedPages 分配 */
 export const ADMIN_PAGE_ADMINS = "admins";
 
@@ -21,6 +22,7 @@ export const ASSIGNABLE_ADMIN_PAGES = [
   ADMIN_PAGE_REMINDERS,
   ADMIN_PAGE_GALLERY,
   ADMIN_PAGE_FEEDBACKS,
+  ADMIN_PAGE_POINTS_CAMPAIGNS,
 ] as const;
 
 export type AssignableAdminPage = (typeof ASSIGNABLE_ADMIN_PAGES)[number];

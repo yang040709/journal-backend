@@ -6,7 +6,8 @@ export type PointsLedgerKind =
   | "exchange_ai"
   | "exchange_note_export"
   | "admin_adjust"
-  | "feedback_reward";
+  | "feedback_reward"
+  | "campaign_claim";
 export type PointsFlowType = "income" | "expense";
 export type PointsOperatorType = "system" | "admin" | "user";
 
@@ -54,6 +55,7 @@ const pointsLedgerSchema = new Schema(
         "exchange_note_export",
         "admin_adjust",
         "feedback_reward",
+        "campaign_claim",
       ],
       index: true,
     },
