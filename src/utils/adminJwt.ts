@@ -1,7 +1,4 @@
 import jwt from "jsonwebtoken";
-import * as dotenv from "dotenv";
-
-dotenv.config();
 
 export interface AdminJwtPayload {
   adminId: string;

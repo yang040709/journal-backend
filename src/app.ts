@@ -44,7 +44,19 @@ app.use(
 // 中间件
 app.use(adminCorsMiddleware);
 app.use(staticFilesMiddleware);
-app.use(bodyParser());
+
+function envLimit(name: string, fallback: string): string {
+  const v = String(process.env[name] ?? "").trim();
+  return v || fallback;
+}
+
+app.use(
+  bodyParser({
+    jsonLimit: envLimit("BODY_JSON_LIMIT", "10mb"),
+    formLimit: envLimit("BODY_FORM_LIMIT", "2mb"),
+    textLimit: envLimit("BODY_TEXT_LIMIT", "2mb"),
+  }),
+);
 
 // 请求ID中间件（放在最前面）
 app.use(requestIdMiddleware);

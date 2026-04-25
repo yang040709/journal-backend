@@ -1,10 +1,6 @@
 import winston from "winston";
 import DailyRotateFile from "winston-daily-rotate-file";
 import path from "path";
-import dotenv from "dotenv";
-
-// 加载环境变量
-dotenv.config();
 
 // 日志级别定义
 export enum LogLevel {

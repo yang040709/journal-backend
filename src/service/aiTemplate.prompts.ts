@@ -55,6 +55,7 @@ export interface BuildAiTemplateUserMessageInput {
   /** 从零生成：名称（必填） */
   name?: string;
   description?: string;
+  supplementRequirement?: string;
   hint?: string;
   /** 改写：完整模板 */
   template?: {
@@ -69,7 +70,7 @@ export interface BuildAiTemplateUserMessageInput {
 }
 
 export const buildAiTemplateUserMessage = (input: BuildAiTemplateUserMessageInput): string => {
-  const hint = input.hint?.trim();
+  const supplementRequirement = input.supplementRequirement?.trim() || input.hint?.trim();
 
   if (input.mode === "template_generate") {
     const parts = [
@@ -77,7 +78,7 @@ export const buildAiTemplateUserMessage = (input: BuildAiTemplateUserMessageInpu
       `【模板名称】${input.name?.trim() || ""}`,
       `【模板描述】${(input.description || "").trim() || "（无）"}`,
     ];
-    if (hint) parts.push(`【用户补充】${hint}`);
+    if (supplementRequirement) parts.push(`【用户补充】${supplementRequirement}`);
     parts.push(
       "请根据名称与描述生成完整 JSON 模板对象；fields.content 仅为分节骨架与空行/序号填空，不要生成叙事范文或示例段落；不要使用 ____ 下划线填空；fields.tags 只能从预设 12 个标签里选（日常、心情、美食、旅行、学习、计划、成长、健康、理财、目标、习惯、工作），勿自创。",
     );
@@ -94,7 +95,7 @@ export const buildAiTemplateUserMessage = (input: BuildAiTemplateUserMessageInpu
     `【当前内容模板】\n${t.fields.content}`,
     `【当前标签】${tags || "（无）"}`,
   ];
-  if (hint) parts.push(`【用户改写方向】${hint}`);
+  if (supplementRequirement) parts.push(`【用户改写方向】${supplementRequirement}`);
   parts.push(
     "请在保留分节骨架与占位符的前提下优化：若当前正文像日记范文或叙事段落，应改为「仅分节标题与空行/序号填空」的模板形态，不要保留大段示例故事；若正文含连续下划线 ____ 填空，请改为冒号换行/空行或（ ）等形式，不要下划线；fields.tags 仅保留或调整为预设 12 标签（日常、心情、美食、旅行、学习、计划、成长、健康、理财、目标、习惯、工作），去掉不在白名单内的项；输出完整 JSON 模板对象。",
   );

@@ -48,6 +48,11 @@ import { NoteExportSettingsService } from "../service/noteExportSettings.service
 import NoteExportLog from "../model/NoteExportLog";
 import { AiStyleService } from "../service/aiStyle.service";
 import { AiNoteService } from "../service/aiNote.service";
+import { UserPurgeService } from "../service/userPurge.service";
+import {
+  MigrationBusinessError,
+  UserMigrationService,
+} from "../service/userMigration.service";
 import {
   InitialUserNotebookConfigService,
   MAX_INITIAL_NOTEBOOK_TEMPLATES,
@@ -59,8 +64,15 @@ import {
   CampaignNotFoundError,
   PointsCampaignService,
 } from "../service/pointsCampaign.service";
+import { AlertMetricService } from "../service/alertMetric.service";
+import { AlertRuleService } from "../service/alertRule.service";
+import AlertEvent from "../model/AlertEvent";
 
-const MAX_PAGE_DEPTH = 10_000;
+const MAX_PAGE_DEPTH = (() => {
+  const raw = String(process.env.ADMIN_MAX_PAGE_DEPTH ?? "").trim();
+  const n = raw ? Number(raw) : NaN;
+  return Number.isFinite(n) ? Math.floor(n) : 50_000;
+})();
 const MIN_SEARCH_LENGTH = 2;
 const ADMIN_EXPORT_LIMIT = 2000;
 
@@ -212,6 +224,42 @@ const operationsReportQuerySchema = z.object({
   path: ["endDate"],
 });
 
+const alertRuleUpdateSchema = z.object({
+  enabled: z.boolean().optional(),
+  severity: z.enum(["P1", "P2", "P3"]).optional(),
+  windowMinutes: z.number().int().min(1).max(1440).optional(),
+  minSampleCount: z.number().int().min(0).max(1_000_000).optional(),
+  thresholdType: z.enum(["count", "rate", "ratio_vs_baseline"]).optional(),
+  thresholdValue: z.number().min(0).optional(),
+  recoverValue: z.number().min(0).optional(),
+  consecutiveHits: z.number().int().min(1).max(60).optional(),
+  cooldownMinutes: z.number().int().min(0).max(1440).optional(),
+  params: z.record(z.string(), z.unknown()).optional(),
+  name: z.string().trim().min(1).max(120).optional(),
+  description: z.string().trim().max(1000).optional(),
+});
+
+const alertRuleToggleSchema = z.object({
+  enabled: z.boolean(),
+});
+
+const alertEventListQuerySchema = z
+  .object({
+    page: z.coerce.number().int().positive().optional().default(1),
+    limit: z.coerce.number().int().min(1).max(100).optional().default(20),
+    status: z.enum(["open", "acknowledged", "resolved", "muted"]).optional(),
+    severity: z.enum(["P1", "P2", "P3"]).optional(),
+    ruleKey: z.string().trim().max(100).optional(),
+  })
+  .refine((val) => val.page * val.limit <= MAX_PAGE_DEPTH, {
+    message: `分页深度超过限制（page*limit <= ${MAX_PAGE_DEPTH}）`,
+    path: ["page"],
+  });
+
+const alertEventAckSchema = z.object({
+  remark: z.string().trim().max(500).optional(),
+});
+
 const adRewardLogListQuerySchema = z.object({
   page: z.coerce.number().int().positive().optional().default(1),
   limit: z.coerce.number().int().min(1).max(100).optional().default(20),
@@ -287,6 +335,17 @@ const updateUserSchema = z
       });
     }
   });
+
+const userMigrationPrecheckSchema = z.object({
+  sourceOpenid: z.string().trim().min(1).max(128),
+  targetOpenid: z.string().trim().min(1).max(128),
+  remark: z.string().trim().min(1).max(500),
+  operator: z.string().trim().min(1).max(100),
+});
+
+const userMigrationExecuteSchema = userMigrationPrecheckSchema.extend({
+  idempotencyKey: z.string().trim().min(8).max(200),
+});
 
 const adminPointsRulesPutSchema = z.object({
   pointsPerAd: z.number().int().min(1).max(1_000_000).optional(),
@@ -656,8 +715,10 @@ router.post("/auth/login", async (ctx) => {
       body.password,
       clientKey,
     );
+    void AlertMetricService.recordOperation("login_admin", { success: true });
     success(ctx, result);
   } catch (e) {
+    void AlertMetricService.recordOperation("login_admin", { success: false });
     const msg = e instanceof Error ? e.message : "登录失败";
     error(ctx, msg, ErrorCodes.USER_CREDENTIALS_ERROR, 400);
   }
@@ -727,6 +788,153 @@ authed.get(
     }
   },
 );
+
+authed.get("/alerts/rules", requireSuperAdmin(), async (ctx) => {
+  try {
+    const rules = await AlertRuleService.listRules();
+    success(ctx, rules);
+  } catch (e) {
+    error(ctx, e instanceof Error ? e.message : "加载失败", ErrorCodes.INTERNAL_ERROR, 500);
+  }
+});
+
+authed.put("/alerts/rules/:ruleKey", requireSuperAdmin(), async (ctx) => {
+  try {
+    const body = alertRuleUpdateSchema.parse(ctx.request.body || {});
+    const rule = await AlertRuleService.updateRuleByKey(String(ctx.params.ruleKey || ""), body);
+    if (!rule) {
+      error(ctx, "规则不存在", ErrorCodes.NOT_FOUND, 404);
+      return;
+    }
+    success(ctx, rule);
+  } catch (e) {
+    if (e instanceof z.ZodError) {
+      error(ctx, "参数验证失败", ErrorCodes.PARAM_ERROR, 400);
+      return;
+    }
+    error(ctx, e instanceof Error ? e.message : "保存失败", ErrorCodes.PARAM_ERROR, 400);
+  }
+});
+
+authed.post("/alerts/rules/:ruleKey/toggle", requireSuperAdmin(), async (ctx) => {
+  try {
+    const body = alertRuleToggleSchema.parse(ctx.request.body || {});
+    const rule = await AlertRuleService.toggleRule(String(ctx.params.ruleKey || ""), body.enabled);
+    if (!rule) {
+      error(ctx, "规则不存在", ErrorCodes.NOT_FOUND, 404);
+      return;
+    }
+    success(ctx, rule);
+  } catch (e) {
+    if (e instanceof z.ZodError) {
+      error(ctx, "参数验证失败", ErrorCodes.PARAM_ERROR, 400);
+      return;
+    }
+    error(ctx, e instanceof Error ? e.message : "操作失败", ErrorCodes.PARAM_ERROR, 400);
+  }
+});
+
+authed.get("/alerts/events", requireSuperAdmin(), async (ctx) => {
+  try {
+    const q = alertEventListQuerySchema.parse(ctx.query || {});
+    const filter: Record<string, unknown> = {};
+    if (q.status) filter.status = q.status;
+    if (q.severity) filter.severity = q.severity;
+    if (q.ruleKey?.trim()) filter.ruleKey = q.ruleKey.trim();
+    const skip = (q.page - 1) * q.limit;
+    const [rows, total] = await Promise.all([
+      AlertEvent.find(filter).sort({ triggeredAt: -1 }).skip(skip).limit(q.limit).lean(),
+      AlertEvent.countDocuments(filter),
+    ]);
+    paginatedSuccess(ctx, rows as unknown as Record<string, unknown>[], total, q.page, q.limit);
+  } catch (e) {
+    if (e instanceof z.ZodError) {
+      error(ctx, "参数验证失败", ErrorCodes.PARAM_ERROR, 400);
+      return;
+    }
+    error(ctx, e instanceof Error ? e.message : "加载失败", ErrorCodes.INTERNAL_ERROR, 500);
+  }
+});
+
+authed.get("/alerts/events/:eventId", requireSuperAdmin(), async (ctx) => {
+  const eventId = String(ctx.params.eventId || "").trim();
+  if (!eventId) {
+    error(ctx, "eventId 不能为空", ErrorCodes.PARAM_ERROR, 400);
+    return;
+  }
+  const row = await AlertEvent.findOne({ eventId }).lean();
+  if (!row) {
+    error(ctx, "告警事件不存在", ErrorCodes.NOT_FOUND, 404);
+    return;
+  }
+  success(ctx, row);
+});
+
+authed.post("/alerts/events/:eventId/ack", requireSuperAdmin(), async (ctx) => {
+  try {
+    const body = alertEventAckSchema.parse(ctx.request.body || {});
+    const eventId = String(ctx.params.eventId || "").trim();
+    const row = await AlertEvent.findOneAndUpdate(
+      { eventId },
+      {
+        $set: {
+          status: "acknowledged",
+          ackBy: ctx.state.admin?.username || "",
+          ackAt: new Date(),
+          ackRemark: body.remark || "",
+        },
+      },
+      { new: true },
+    );
+    if (!row) {
+      error(ctx, "告警事件不存在", ErrorCodes.NOT_FOUND, 404);
+      return;
+    }
+    success(ctx, row);
+  } catch (e) {
+    if (e instanceof z.ZodError) {
+      error(ctx, "参数验证失败", ErrorCodes.PARAM_ERROR, 400);
+      return;
+    }
+    error(ctx, e instanceof Error ? e.message : "处理失败", ErrorCodes.PARAM_ERROR, 400);
+  }
+});
+
+authed.post("/alerts/events/:eventId/resolve", requireSuperAdmin(), async (ctx) => {
+  const eventId = String(ctx.params.eventId || "").trim();
+  const row = await AlertEvent.findOneAndUpdate(
+    { eventId },
+    {
+      $set: {
+        status: "resolved",
+        resolvedAt: new Date(),
+      },
+    },
+    { new: true },
+  );
+  if (!row) {
+    error(ctx, "告警事件不存在", ErrorCodes.NOT_FOUND, 404);
+    return;
+  }
+  success(ctx, row);
+});
+
+authed.get("/alerts/metrics/overview", requireSuperAdmin(), async (ctx) => {
+  const startOfDay = new Date();
+  startOfDay.setHours(0, 0, 0, 0);
+  const [todayTriggered, unresolvedCount, p1OpenCount, acknowledgedCount] = await Promise.all([
+    AlertEvent.countDocuments({ triggeredAt: { $gte: startOfDay } }),
+    AlertEvent.countDocuments({ status: { $in: ["open", "acknowledged"] } }),
+    AlertEvent.countDocuments({ status: "open", severity: "P1" }),
+    AlertEvent.countDocuments({ status: "acknowledged" }),
+  ]);
+  success(ctx, {
+    todayTriggered,
+    unresolvedCount,
+    p1OpenCount,
+    acknowledgedCount,
+  });
+});
 
 authed.get(
   "/quota/ai-daily",
@@ -1897,6 +2105,20 @@ authed.get(
   },
 );
 
+/** POST /admin/users/:id/jwt — 仅超级管理员可为指定业务 userId 生成 C 端 JWT */
+authed.post(
+  "/users/:id/jwt",
+  requireSuperAdmin(),
+  async (ctx) => {
+    const data = await AdminUserService.generateUserJwtByBizUserId(ctx.params.id);
+    if (!data) {
+      error(ctx, "用户不存在", ErrorCodes.USER_NOT_FOUND, 404);
+      return;
+    }
+    success(ctx, data, "生成用户 JWT 成功");
+  },
+);
+
 authed.get(
   "/users/:id/covers",
   requireAdminPage(ADMIN_PAGE_USERS),
@@ -2238,6 +2460,94 @@ authed.put(
         ErrorCodes.PARAM_ERROR,
       );
     }
+  },
+);
+
+authed.post(
+  "/users/migration/precheck",
+  requireSuperAdmin(),
+  async (ctx) => {
+    try {
+      const body = userMigrationPrecheckSchema.parse(ctx.request.body);
+      const data = await UserMigrationService.precheck(body);
+      success(ctx, data);
+    } catch (e) {
+      if (e instanceof z.ZodError) {
+        error(ctx, "参数验证失败", ErrorCodes.USER_MIGRATION_PARAM_INVALID, 400);
+        return;
+      }
+      if (e instanceof MigrationBusinessError) {
+        if (e.code === "PARAM") {
+          error(ctx, e.message, ErrorCodes.USER_MIGRATION_PARAM_INVALID, 400);
+          return;
+        }
+        if (e.code === "NOT_FOUND") {
+          error(ctx, e.message, ErrorCodes.USER_MIGRATION_NOT_FOUND, 404);
+          return;
+        }
+      }
+      error(
+        ctx,
+        e instanceof Error ? e.message : "预检查失败",
+        ErrorCodes.INTERNAL_ERROR,
+        500,
+      );
+    }
+  },
+);
+
+authed.post(
+  "/users/migration/execute",
+  requireSuperAdmin(),
+  async (ctx) => {
+    try {
+      const body = userMigrationExecuteSchema.parse(ctx.request.body);
+      const data = await UserMigrationService.execute(body);
+      success(ctx, data);
+    } catch (e) {
+      if (e instanceof z.ZodError) {
+        error(ctx, "参数验证失败", ErrorCodes.USER_MIGRATION_PARAM_INVALID, 400);
+        return;
+      }
+      if (e instanceof MigrationBusinessError) {
+        if (e.code === "PARAM") {
+          error(ctx, e.message, ErrorCodes.USER_MIGRATION_PARAM_INVALID, 400);
+          return;
+        }
+        if (e.code === "NOT_FOUND") {
+          error(ctx, e.message, ErrorCodes.USER_MIGRATION_NOT_FOUND, 404);
+          return;
+        }
+        if (e.code === "CONFLICT") {
+          error(ctx, e.message, ErrorCodes.USER_MIGRATION_CONFLICT, 409);
+          return;
+        }
+      }
+      error(
+        ctx,
+        e instanceof Error ? e.message : "迁徙执行失败",
+        ErrorCodes.INTERNAL_ERROR,
+        500,
+      );
+    }
+  },
+);
+
+authed.get(
+  "/users/migration/tasks/:taskId",
+  requireSuperAdmin(),
+  async (ctx) => {
+    const taskId = String(ctx.params.taskId || "").trim();
+    if (!taskId) {
+      error(ctx, "taskId 不能为空", ErrorCodes.USER_MIGRATION_PARAM_INVALID, 400);
+      return;
+    }
+    const data = await UserMigrationService.getTaskDetail(taskId);
+    if (!data) {
+      error(ctx, "迁徙任务不存在", ErrorCodes.USER_MIGRATION_NOT_FOUND, 404);
+      return;
+    }
+    success(ctx, data);
   },
 );
 
@@ -2898,19 +3208,28 @@ authed.delete(
   "/users/:id",
   requireAdminPage(ADMIN_PAGE_USERS),
   async (ctx) => {
-    const mongoId = await AdminUserService.resolveMongoIdFromBizUserRouteParam(
-      ctx.params.id,
-    );
-    if (!mongoId) {
+    const bizUserId = AdminUserService.decodeBizUserIdParam(ctx.params.id);
+    if (!bizUserId) {
       error(ctx, "用户不存在", ErrorCodes.USER_NOT_FOUND, 404);
       return;
     }
-    const ok = await AdminUserService.deleteUserById(mongoId);
-    if (!ok) {
+
+    const dryRun = UserPurgeService.parseDryRunQuery((ctx.query as any)?.dryRun);
+    const withCos = UserPurgeService.parseWithCosQuery((ctx.query as any)?.withCos);
+    const verifyRaw = (ctx.query as any)?.verify;
+    const verify = verifyRaw === undefined ? true : UserPurgeService.parseDryRunQuery(verifyRaw);
+
+    const r = await UserPurgeService.purgeByBizUserId(bizUserId, {
+      dryRun,
+      withCos,
+      verify,
+      useTransactionIfPossible: true,
+    });
+    if (!r) {
       error(ctx, "用户不存在", ErrorCodes.USER_NOT_FOUND, 404);
       return;
     }
-    success(ctx, { deleted: true });
+    success(ctx, { ...(r as any), deleted: true });
   },
 );
 

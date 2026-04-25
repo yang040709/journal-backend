@@ -7,6 +7,12 @@ import PointsCampaignAdminLog from "../model/PointsCampaignAdminLog";
 import User from "../model/User";
 import PointsLedger from "../model/PointsLedger";
 import { ActivityLogger } from "../utils/ActivityLogger";
+import logger from "../utils/logger";
+import {
+  ensurePageDepth,
+  normalizeKeyword,
+  toSafeRegex,
+} from "../utils/querySafety";
 
 type AdminActor = {
   id: string;
@@ -393,10 +399,12 @@ export class PointsCampaignService {
   }) {
     const page = Math.max(1, query.page);
     const limit = Math.min(100, Math.max(1, query.limit));
+    ensurePageDepth({ page, limit });
     const skip = (page - 1) * limit;
     const where: Record<string, unknown> = {};
     if (query.status) where.status = query.status;
-    if (query.keyword?.trim()) where.name = { $regex: query.keyword.trim(), $options: "i" };
+    const keyword = normalizeKeyword(query.keyword, { max: 100 });
+    if (keyword) where.name = toSafeRegex(keyword);
     const [items, total] = await Promise.all([
       PointsCampaign.find(where).sort({ createdAt: -1 }).skip(skip).limit(limit).lean(),
       PointsCampaign.countDocuments(where),
@@ -551,7 +559,7 @@ export class PointsCampaignService {
     } catch (err: unknown) {
       const e = err as { code?: number };
       if (e?.code !== 11000) {
-        console.error("[pointsCampaign.claimCampaign] create ledger failed", {
+            logger.error("[pointsCampaign.claimCampaign] create ledger failed", {
           campaignId,
           userId,
           requestId: ctxMeta.requestId,
@@ -669,7 +677,7 @@ export class PointsCampaignService {
         } catch (err: unknown) {
           const e = err as { code?: number };
           if (e?.code !== 11000) {
-            console.error("[pointsCampaign.claimCampaign] create ledger failed (tx)", {
+            logger.error("[pointsCampaign.claimCampaign] create ledger failed (tx)", {
               campaignId,
               userId,
               requestId: ctxMeta.requestId,

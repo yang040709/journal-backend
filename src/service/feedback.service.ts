@@ -1,6 +1,7 @@
 import UserFeedback, { FeedbackReviewLevel, FeedbackType } from "../model/UserFeedback";
 import { getQuotaDateContext, previousDateKey } from "../utils/dateKey";
 import { PointsService } from "./points.service";
+import { normalizeKeyword, toSafeRegex } from "../utils/querySafety";
 
 const RATE_LIMIT_MS = 60 * 1000;
 const MAX_PAGE_DEPTH = 10_000;
@@ -84,8 +85,9 @@ export class FeedbackService {
     if (query.reviewLevel) where.reviewLevel = query.reviewLevel;
     if (query.type) where.type = query.type;
     if (query.userId) where.userId = query.userId;
-    if (query.keyword?.trim()) {
-      where.content = { $regex: query.keyword.trim(), $options: "i" };
+    const keyword = normalizeKeyword(query.keyword, { max: 200 });
+    if (keyword) {
+      where.content = toSafeRegex(keyword);
     }
     return where;
   }

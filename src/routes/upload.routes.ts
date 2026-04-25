@@ -4,6 +4,7 @@ import { authMiddleware, AuthContext } from "../middlewares/auth.middleware";
 import { UploadDailyLimitExceededError, UploadService } from "../service/upload.service";
 import { success, error, ErrorCodes } from "../utils/response";
 import { logger } from "../utils/logger";
+import { AlertMetricService } from "../service/alertMetric.service";
 
 const router = new Router({
   prefix: "/api/upload",
@@ -93,14 +94,23 @@ router.post("/cos/sts", async (ctx: AuthContext) => {
       fileType: body.fileType,
       fileSize: body.fileSize,
     });
+    void AlertMetricService.recordOperation("cos_sts", { success: true });
 
     success(ctx, data, "获取上传凭证成功");
   } catch (err) {
     if (err instanceof z.ZodError) {
+      void AlertMetricService.recordOperation("cos_sts", {
+        success: false,
+        tags: { errorType: "param" },
+      });
       error(ctx, "参数验证失败", ErrorCodes.PARAM_ERROR, 400);
       return;
     }
     if (err instanceof UploadDailyLimitExceededError) {
+      void AlertMetricService.recordOperation("cos_sts", {
+        success: false,
+        tags: { errorType: "quota" },
+      });
       logger.warn("签发COS临时凭证触发上传额度限制", {
         requestId,
         userId,
@@ -117,6 +127,10 @@ router.post("/cos/sts", async (ctx: AuthContext) => {
 
     const message = err instanceof Error ? err.message : "获取上传凭证失败";
     const isBizError = /不支持|超过限制|环境变量缺失|额度已用完/.test(message);
+    void AlertMetricService.recordOperation("cos_sts", {
+      success: false,
+      tags: { errorType: isBizError ? "biz" : "internal" },
+    });
 
     logger.error("签发COS临时凭证失败", {
       requestId,

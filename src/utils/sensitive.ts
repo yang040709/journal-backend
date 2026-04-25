@@ -1,5 +1,6 @@
 /**
  * 敏感词检查工具
+ * @deprecated 仅保留给历史代码兼容；生产请统一使用 sensitive-encrypted 模块。
  */
 
 const SENSITIVE_WORDS = ["炸弹", "test敏感词"];

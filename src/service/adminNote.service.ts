@@ -7,6 +7,12 @@ import { PaginationParams } from "./note.service";
 import { checkNoteContent } from "../utils/sensitive-encrypted";
 import { ActivityLogger } from "../utils/ActivityLogger";
 import ShareSecurityTask from "../model/ShareSecurityTask";
+import {
+  ensurePageDepth,
+  normalizeKeyword,
+  pickSortField,
+  toSafeRegex,
+} from "../utils/querySafety";
 
 export const ADMIN_SHARE_NOTE_PATH_PREFIX =
   "/share/pages/share-note/share-note?share_id=";
@@ -123,8 +129,13 @@ export class AdminNoteService {
   ): Promise<{ items: AdminNoteListItem[]; total: number }> {
     const page = Math.max(1, params.page || 1);
     const limit = Math.min(100, Math.max(1, params.limit || 20));
+    ensurePageDepth({ page, limit });
     const skip = (page - 1) * limit;
-    const sortField = params.sortBy || "updatedAt";
+    const sortField = pickSortField(
+      ["createdAt", "updatedAt", "title", "firstSharedAt"] as const,
+      params.sortBy,
+      "updatedAt",
+    );
     const sortOrder = params.order === "asc" ? 1 : -1;
 
     const textQ = params.q?.trim();
@@ -159,7 +170,10 @@ export class AdminNoteService {
   ): Promise<{ items: Array<AdminNoteListItem & Record<string, unknown>>; total: number }> {
     const page = Math.max(1, params.page || 1);
     const limit = Math.min(100, Math.max(1, params.limit || 20));
+    ensurePageDepth({ page, limit });
     const skip = (page - 1) * limit;
+    const keyword = normalizeKeyword(params.keyword, { max: 100 });
+    const keywordRegex = keyword ? toSafeRegex(keyword) : null;
 
     const taskQuery: Record<string, unknown> = {
       status: params.riskStatus
@@ -206,12 +220,12 @@ export class AdminNoteService {
       ...(params.userId
         ? [{ $match: { "noteDoc.userId": params.userId } }]
         : []),
-      ...(params.keyword
+      ...(keywordRegex
         ? [{
             $match: {
               $or: [
-                { "noteDoc.title": { $regex: params.keyword, $options: "i" } },
-                { "noteDoc.content": { $regex: params.keyword, $options: "i" } },
+                { "noteDoc.title": keywordRegex },
+                { "noteDoc.content": keywordRegex },
               ],
             },
           }]

@@ -11,6 +11,7 @@ export interface AiTemplateGenerateInput {
   mode: AiTemplateMode;
   name?: string;
   description?: string;
+  supplementRequirement?: string;
   hint?: string;
   template?: {
     name: string;
@@ -115,6 +116,7 @@ export class AiTemplateService {
       mode: input.mode,
       name: input.name,
       description: input.description,
+      supplementRequirement: input.supplementRequirement,
       hint: input.hint,
       template: input.template,
     });

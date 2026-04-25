@@ -1,4 +1,5 @@
 import { ReminderScheduler } from "./reminder.scheduler";
+import { AlertScheduler } from "./alert.scheduler";
 import { logger } from "../utils/logger";
 
 /**
@@ -10,6 +11,7 @@ export function startAllSchedulers(): void {
   try {
     // 启动提醒调度器
     ReminderScheduler.start();
+    AlertScheduler.start();
     logger.info("所有调度器已启动");
   } catch (error: any) {
     logger.error("调度器启动失败，但不会终止后端进程", {
@@ -32,6 +34,7 @@ export function stopAllSchedulers(): void {
 
   // 停止提醒调度器
   ReminderScheduler.stop();
+  AlertScheduler.stop();
 
   logger.info("所有调度器已停止");
 }
@@ -44,10 +47,16 @@ export function getSchedulerStatus(): {
     isRunning: boolean;
     nextInvocation?: Date;
   };
+  alertScheduler: {
+    isRunning: boolean;
+    nextInvocation?: Date;
+  };
 } {
   return {
     reminderScheduler: ReminderScheduler.getStatus(),
+    alertScheduler: AlertScheduler.getStatus(),
   };
 }
 
 export { ReminderScheduler } from "./reminder.scheduler";
+export { AlertScheduler } from "./alert.scheduler";

@@ -4,6 +4,7 @@ import { UserService } from "../service/user.service";
 import { refreshToken, verifyToken } from "../utils/jwt";
 import { authMiddleware, AuthContext } from "../middlewares/auth.middleware";
 import { z } from "zod";
+import { AlertMetricService } from "../service/alertMetric.service";
 
 const router = new Router({
   prefix: "/auth",
@@ -73,11 +74,14 @@ router.post("/login", async (ctx) => {
   try {
     const body = loginSchema.parse(ctx.request.body);
     const result = await UserService.login(body.code);
+    void AlertMetricService.recordOperation("login_auth", { success: true });
     success(ctx, result, "登录成功");
   } catch (err) {
     if (err instanceof z.ZodError) {
+      void AlertMetricService.recordOperation("login_auth", { success: false });
       error(ctx, "参数验证失败", ErrorCodes.PARAM_ERROR, 400);
     } else {
+      void AlertMetricService.recordOperation("login_auth", { success: false });
       console.error("登录失败:", err);
       error(ctx, err.message || "登录失败", ErrorCodes.INTERNAL_ERROR, 500);
     }

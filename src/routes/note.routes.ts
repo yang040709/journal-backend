@@ -17,6 +17,8 @@ import {
   NoteExportService,
   NoteExportQuotaError,
 } from "../service/noteExport.service";
+import logger from "../utils/logger";
+import { AlertMetricService } from "../service/alertMetric.service";
 
 const MAX_PAGE_DEPTH = 10_000;
 const MIN_SEARCH_KEYWORD_LENGTH = 1;
@@ -99,7 +101,7 @@ router.get("/preset-tags", async (ctx: AuthContext) => {
       "获取预设标签成功",
     );
   } catch (err) {
-    console.error("获取预设标签失败:", err);
+    logger.error("获取预设标签失败:", err);
     error(ctx, "获取预设标签失败", ErrorCodes.INTERNAL_ERROR, 500);
   }
 });
@@ -132,7 +134,7 @@ router.get("/export-preview", async (ctx: AuthContext) => {
       error(ctx, err.message, ErrorCodes.PARAM_ERROR, 400);
       return;
     }
-    console.error("export-preview 失败:", err);
+    logger.error("export-preview 失败:", err);
     error(ctx, "预览失败", ErrorCodes.INTERNAL_ERROR, 500);
   }
 });
@@ -156,17 +158,21 @@ router.post("/export-run", async (ctx: AuthContext) => {
       sort: body.sort,
       clientPlatform: body.clientPlatform,
     });
+    void AlertMetricService.recordOperation("export_run", { success: true });
     success(ctx, data, "ok");
   } catch (err) {
     if (err instanceof z.ZodError) {
+      void AlertMetricService.recordOperation("export_run", { success: false });
       error(ctx, "参数验证失败", ErrorCodes.PARAM_ERROR, 400);
       return;
     }
     if (err instanceof NoteExportQuotaError) {
+      void AlertMetricService.recordOperation("export_run", { success: false });
       error(ctx, err.message, ErrorCodes.PARAM_ERROR, 400);
       return;
     }
-    console.error("export-run 失败:", err);
+    void AlertMetricService.recordOperation("export_run", { success: false });
+    logger.error("export-run 失败:", err);
     error(ctx, "导出失败", ErrorCodes.INTERNAL_ERROR, 500);
   }
 });
@@ -235,7 +241,7 @@ router.post("/custom-tags", async (ctx: AuthContext) => {
       return;
     }
     const msg = err instanceof Error ? err.message : "添加失败";
-    console.error("添加自定义标签失败:", err);
+    logger.error("添加自定义标签失败:", err);
     error(ctx, msg, ErrorCodes.PARAM_ERROR, 400);
   }
 });
@@ -267,7 +273,7 @@ router.delete("/custom-tags", async (ctx: AuthContext) => {
       return;
     }
     const msg = err instanceof Error ? err.message : "删除失败";
-    console.error("删除自定义标签失败:", err);
+    logger.error("删除自定义标签失败:", err);
     error(ctx, msg, ErrorCodes.PARAM_ERROR, 400);
   }
 });
@@ -430,7 +436,7 @@ router.get("/ai/styles", async (ctx: AuthContext) => {
     const data = await AiStyleService.listEnabledForClient();
     success(ctx, data, "ok");
   } catch (err) {
-    console.error("获取 AI 风格列表失败:", err);
+    logger.error("获取 AI 风格列表失败:", err);
     error(ctx, "获取 AI 风格列表失败", ErrorCodes.INTERNAL_ERROR, 500);
   }
 });
@@ -542,7 +548,7 @@ router.get("/", async (ctx: AuthContext) => {
     } else if (isGuardrailError(err)) {
       error(ctx, err.message, ErrorCodes.PARAM_ERROR, 400);
     } else {
-      console.error("获取手帐列表失败:", err);
+      logger.error("获取手帐列表失败:", err);
       error(ctx, "获取手帐列表失败", ErrorCodes.INTERNAL_ERROR, 500);
     }
   }
@@ -570,7 +576,7 @@ router.get("/trash", async (ctx: AuthContext) => {
       error(ctx, err.message, ErrorCodes.PARAM_ERROR, 400);
       return;
     }
-    console.error("获取废纸篓手帐失败:", err);
+    logger.error("获取废纸篓手帐失败:", err);
     error(ctx, "获取废纸篓手帐失败", ErrorCodes.INTERNAL_ERROR, 500);
   }
 });
@@ -611,7 +617,7 @@ router.get("/calendar/daily-counts", async (ctx: AuthContext) => {
       error(ctx, err.message, ErrorCodes.PARAM_ERROR, 400);
       return;
     }
-    console.error("获取日历统计失败:", err);
+    logger.error("获取日历统计失败:", err);
     error(ctx, "获取日历统计失败", ErrorCodes.INTERNAL_ERROR, 500);
   }
 });
@@ -718,7 +724,7 @@ router.get("/search/page", async (ctx: AuthContext) => {
     } else if (isGuardrailError(err)) {
       error(ctx, err.message, ErrorCodes.PARAM_ERROR, 400);
     } else {
-      console.error("搜索手帐失败:", err);
+      logger.error("搜索手帐失败:", err);
       error(ctx, "搜索手帐失败", ErrorCodes.INTERNAL_ERROR, 500);
     }
   }
@@ -810,7 +816,7 @@ router.get("/search", async (ctx: AuthContext) => {
     } else if (isGuardrailError(err)) {
       error(ctx, err.message, ErrorCodes.PARAM_ERROR, 400);
     } else {
-      console.error("搜索手帐失败:", err);
+      logger.error("搜索手帐失败:", err);
       error(ctx, "搜索手帐失败", ErrorCodes.INTERNAL_ERROR, 500);
     }
   }
@@ -827,7 +833,7 @@ router.get("/:id/trash-detail", async (ctx: AuthContext) => {
     }
     success(ctx, note, "获取废纸篓手帐成功");
   } catch (err) {
-    console.error("获取废纸篓手帐失败:", err);
+    logger.error("获取废纸篓手帐失败:", err);
     error(ctx, "获取废纸篓手帐失败", ErrorCodes.INTERNAL_ERROR, 500);
   }
 });
@@ -931,7 +937,7 @@ router.post("/ai/generate", async (ctx: AuthContext) => {
       error(ctx, message, ErrorCodes.PARAM_ERROR, 400);
       return;
     }
-    console.error("AI 写手帐失败:", err);
+    logger.error("AI 写手帐失败:", err);
     error(ctx, message || "AI 生成失败", ErrorCodes.INTERNAL_ERROR, 500);
   }
 });
@@ -970,7 +976,7 @@ router.get("/ai/quota", async (ctx: AuthContext) => {
     const result = await AiNoteService.getQuotaSummary(userId);
     success(ctx, result, "ok");
   } catch (err) {
-    console.error("查询 AI 额度失败:", err);
+    logger.error("查询 AI 额度失败:", err);
     error(ctx, "查询 AI 额度失败", ErrorCodes.INTERNAL_ERROR, 500);
   }
 });
@@ -1019,7 +1025,7 @@ router.get("/:id", async (ctx: AuthContext) => {
 
     success(ctx, note, "获取手帐成功");
   } catch (err) {
-    console.error("获取手帐失败:", err);
+    logger.error("获取手帐失败:", err);
     error(ctx, "获取手帐失败", ErrorCodes.INTERNAL_ERROR, 500);
   }
 });
@@ -1098,7 +1104,7 @@ router.post("/", async (ctx: AuthContext) => {
     } else if (err.message === "手帐本不存在或无权访问") {
       error(ctx, err.message, ErrorCodes.NOTEBOOK_NOT_FOUND, 404);
     } else {
-      console.error("创建手帐失败:", err);
+      logger.error("创建手帐失败:", err);
       error(ctx, "创建手帐失败", ErrorCodes.INTERNAL_ERROR, 500);
     }
   }
@@ -1185,7 +1191,7 @@ router.put("/:id", async (ctx: AuthContext) => {
     } else if (err instanceof Error && err.message === "目标手帐本不存在或无权访问") {
       error(ctx, err.message, ErrorCodes.NOTEBOOK_NOT_FOUND, 404);
     } else {
-      console.error("更新手帐失败:", err);
+      logger.error("更新手帐失败:", err);
       error(ctx, "更新手帐失败", ErrorCodes.INTERNAL_ERROR, 500);
     }
   }
@@ -1239,7 +1245,7 @@ router.delete("/:id", async (ctx: AuthContext) => {
 
     success(ctx, { deleted: true }, "已移入废纸篓");
   } catch (err) {
-    console.error("删除手帐失败:", err);
+    logger.error("删除手帐失败:", err);
     error(ctx, "删除手帐失败", ErrorCodes.INTERNAL_ERROR, 500);
   }
 });
@@ -1272,7 +1278,7 @@ router.post("/:id/restore", async (ctx: AuthContext) => {
       error(ctx, err.message, ErrorCodes.NOTEBOOK_NOT_FOUND, 404);
       return;
     }
-    console.error("恢复手帐失败:", err);
+    logger.error("恢复手帐失败:", err);
     error(ctx, "恢复手帐失败", ErrorCodes.INTERNAL_ERROR, 500);
   }
 });
@@ -1288,7 +1294,7 @@ router.delete("/:id/purge", async (ctx: AuthContext) => {
     }
     success(ctx, { deleted: true }, "彻底删除成功");
   } catch (err) {
-    console.error("彻底删除手帐失败:", err);
+    logger.error("彻底删除手帐失败:", err);
     error(ctx, "彻底删除手帐失败", ErrorCodes.INTERNAL_ERROR, 500);
   }
 });
@@ -1352,7 +1358,7 @@ router.post("/batch-delete", async (ctx: AuthContext) => {
     if (err instanceof z.ZodError) {
       error(ctx, "参数验证失败", ErrorCodes.PARAM_ERROR, 400);
     } else {
-      console.error("批量删除手帐失败:", err);
+      logger.error("批量删除手帐失败:", err);
       error(ctx, "批量删除手帐失败", ErrorCodes.INTERNAL_ERROR, 500);
     }
   }
@@ -1410,7 +1416,7 @@ router.get("/recent", async (ctx: AuthContext) => {
     if (err instanceof z.ZodError) {
       error(ctx, "参数验证失败", ErrorCodes.PARAM_ERROR, 400);
     } else {
-      console.error("获取最近手帐失败:", err);
+      logger.error("获取最近手帐失败:", err);
       error(ctx, "获取最近手帐失败", ErrorCodes.INTERNAL_ERROR, 500);
     }
   }
@@ -1490,7 +1496,7 @@ router.get("/:id/share-info", async (ctx: AuthContext) => {
       "获取分享信息成功",
     );
   } catch (err) {
-    console.error("获取分享信息失败:", err);
+    logger.error("获取分享信息失败:", err);
     error(ctx, "获取分享信息失败", ErrorCodes.INTERNAL_ERROR, 500);
   }
 });

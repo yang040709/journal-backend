@@ -1,6 +1,7 @@
 import NoteBook from "../model/NoteBook";
 import Note from "../model/Note";
 import { ActivityLogger } from "../utils/ActivityLogger";
+import logger from "../utils/logger";
 
 export interface ExportData {
   version: string;
@@ -78,7 +79,10 @@ export class ExportService {
 
       return exportData;
     } catch (error) {
-      console.error("导出用户数据失败:", error);
+      logger.error("导出用户数据失败", {
+        userId,
+        error: error instanceof Error ? error.message : String(error),
+      });
       throw new Error("导出数据失败");
     }
   }

@@ -6,6 +6,7 @@ import PointsLedger from "../model/PointsLedger";
 import PointsRuleChangeLog from "../model/PointsRuleChangeLog";
 import { getQuotaDateContext } from "../utils/dateKey";
 import { ActivityLogger } from "../utils/ActivityLogger";
+import { normalizeKeyword, toSafeRegex } from "../utils/querySafety";
 
 /** 默认新用户积分、广告与兑换（与产品规格一致，可被 DB 配置覆盖） */
 export const DEFAULT_POINTS_RULES = {
@@ -694,8 +695,12 @@ export class PointsService {
     if (adminQuery.bizType?.trim()) {
       q.bizType = adminQuery.bizType.trim();
     }
-    if (adminQuery.keyword?.trim()) {
-      q.userId = { $regex: adminQuery.keyword.trim(), $options: "i" };
+    const keyword = normalizeKeyword(adminQuery.keyword, {
+      min: MIN_KEYWORD_LENGTH,
+      max: 128,
+    });
+    if (keyword) {
+      q.userId = toSafeRegex(keyword);
     }
     if (adminQuery.startTime || adminQuery.endTime) {
       const createdAt: Record<string, Date> = {};
@@ -737,9 +742,6 @@ export class PointsService {
     const pageSize = Math.min(100, Math.max(1, Math.floor(Number(query.pageSize || 20))));
     if (page * pageSize > MAX_PAGE_DEPTH) {
       throw new Error(`分页深度超过限制（page*pageSize <= ${MAX_PAGE_DEPTH}）`);
-    }
-    if (query.keyword?.trim() && query.keyword.trim().length < MIN_KEYWORD_LENGTH) {
-      throw new Error(`搜索关键词至少 ${MIN_KEYWORD_LENGTH} 个字符`);
     }
     const skip = (page - 1) * pageSize;
     const q = PointsService.buildLedgerQuery(query);

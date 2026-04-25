@@ -9,6 +9,7 @@ import {
 import { TemplateService } from "../service/template.service";
 import { AiTemplateService } from "../service/aiTemplate.service";
 import { z } from "zod";
+import logger from "../utils/logger";
 
 const MAX_PAGE_DEPTH = 10_000;
 const MIN_SEARCH_LENGTH = 1;
@@ -83,10 +84,12 @@ const aiTemplateGenerateSchema = z.discriminatedUnion("mode", [
     mode: z.literal("template_generate"),
     name: z.string().min(1, "模板名称不能为空").max(100),
     description: z.string().max(500).optional().default(""),
+    supplementRequirement: z.string().max(500).optional(),
     hint: z.string().max(500).optional(),
   }),
   z.object({
     mode: z.literal("template_rewrite"),
+    supplementRequirement: z.string().max(500).optional(),
     hint: z.string().max(500).optional(),
     template: z.object({
       name: z.string().min(1).max(100),
@@ -126,7 +129,7 @@ router.get("/", async (ctx: AuthContext) => {
     ) {
       error(ctx, err.message, ErrorCodes.PARAM_ERROR, 400);
     } else {
-      console.error("获取模板列表失败:", err);
+      logger.error("获取模板列表失败:", err);
       error(ctx, "获取模板列表失败", ErrorCodes.INTERNAL_ERROR, 500);
     }
   }
@@ -142,7 +145,7 @@ router.get("/all", async (ctx: AuthContext) => {
     const templates = await TemplateService.getAllTemplates(userId);
     success(ctx, templates, "获取所有模板成功");
   } catch (err) {
-    console.error("获取所有模板失败:", err);
+    logger.error("获取所有模板失败:", err);
     error(ctx, "获取所有模板失败", ErrorCodes.INTERNAL_ERROR, 500);
   }
 });
@@ -155,6 +158,7 @@ router.post("/ai/generate", async (ctx: AuthContext) => {
   try {
     const userId = ctx.user!.userId;
     const body = aiTemplateGenerateSchema.parse(ctx.request.body);
+    const supplementRequirement = body.supplementRequirement ?? body.hint;
     const result = await AiTemplateService.generate({
       userId,
       mode: body.mode,
@@ -162,9 +166,11 @@ router.post("/ai/generate", async (ctx: AuthContext) => {
         ? {
             name: body.name,
             description: body.description,
+            supplementRequirement,
             hint: body.hint,
           }
         : {
+            supplementRequirement,
             hint: body.hint,
             template: {
               name: body.template.name,
@@ -200,7 +206,7 @@ router.post("/ai/generate", async (ctx: AuthContext) => {
       error(ctx, message, ErrorCodes.PARAM_ERROR, 400);
       return;
     }
-    console.error("AI 模板生成失败:", err);
+    logger.error("AI 模板生成失败:", err);
     error(ctx, message, ErrorCodes.INTERNAL_ERROR, 500);
   }
 });
@@ -222,7 +228,7 @@ router.get("/:id", async (ctx: AuthContext) => {
 
     success(ctx, template, "获取模板成功");
   } catch (err) {
-    console.error("获取模板失败:", err);
+    logger.error("获取模板失败:", err);
     error(ctx, "获取模板失败", ErrorCodes.INTERNAL_ERROR, 500);
   }
 });
@@ -240,7 +246,7 @@ router.post("/", async (ctx: AuthContext) => {
     success(ctx, template, "创建模板成功");
   } catch (err) {
     if (err instanceof z.ZodError) {
-      console.error("参数验证失败详情:", err.issues);
+      logger.error("参数验证失败详情:", err.issues);
       error(
         ctx,
         `参数验证失败: ${err.issues.map((e) => `${e.path.join(".")}: ${e.message}`).join(", ")}`,
@@ -248,7 +254,7 @@ router.post("/", async (ctx: AuthContext) => {
         400,
       );
     } else {
-      console.error("创建模板失败:", err);
+      logger.error("创建模板失败:", err);
       error(ctx, "创建模板失败", ErrorCodes.INTERNAL_ERROR, 500);
     }
   }
@@ -275,7 +281,7 @@ router.put("/:id", async (ctx: AuthContext) => {
     if (err instanceof z.ZodError) {
       error(ctx, "参数验证失败", ErrorCodes.PARAM_ERROR, 400);
     } else {
-      console.error("更新模板失败:", err);
+      logger.error("更新模板失败:", err);
       error(ctx, "更新模板失败", ErrorCodes.INTERNAL_ERROR, 500);
     }
   }
@@ -298,7 +304,7 @@ router.delete("/:id", async (ctx: AuthContext) => {
 
     success(ctx, { deleted: true }, "删除模板成功");
   } catch (err) {
-    console.error("删除模板失败:", err);
+    logger.error("删除模板失败:", err);
     error(ctx, "删除模板失败", ErrorCodes.INTERNAL_ERROR, 500);
   }
 });
@@ -322,7 +328,7 @@ router.post("/batch-delete", async (ctx: AuthContext) => {
     if (err instanceof z.ZodError) {
       error(ctx, "参数验证失败", ErrorCodes.PARAM_ERROR, 400);
     } else {
-      console.error("批量删除模板失败:", err);
+      logger.error("批量删除模板失败:", err);
       error(ctx, "批量删除模板失败", ErrorCodes.INTERNAL_ERROR, 500);
     }
   }

@@ -4,6 +4,40 @@ import { ExportService } from "../service/export.service";
 import { ImportService, ImportOptions } from "../service/import.service";
 import { z } from "zod";
 import { authMiddleware } from "../middlewares/auth.middleware";
+import logger from "../utils/logger";
+
+function envInt(name: string, fallback: number): number {
+  const raw = String(process.env[name] ?? "").trim();
+  const n = raw ? Number(raw) : NaN;
+  return Number.isFinite(n) ? Math.floor(n) : fallback;
+}
+
+// Defaults aim to be backward-compatible; tighten via env if needed.
+const IMPORT_MAX_NOTEBOOKS = envInt("IMPORT_MAX_NOTEBOOKS", 500);
+const IMPORT_MAX_NOTES = envInt("IMPORT_MAX_NOTES", 20_000);
+const IMPORT_MAX_TEXT_LENGTH = envInt("IMPORT_MAX_TEXT_LENGTH", 50_000);
+
+const importNotebookSchema = z
+  .object({
+    id: z.string().trim().max(128).optional(),
+    title: z.string().trim().min(1).max(120),
+    coverImg: z.string().max(2048).optional().default(""),
+    createdAt: z.string().optional(),
+    updatedAt: z.string().optional(),
+  })
+  .passthrough();
+
+const importNoteSchema = z
+  .object({
+    id: z.string().trim().max(128).optional(),
+    noteBookId: z.string().trim().min(1).max(128),
+    title: z.string().trim().min(1).max(120),
+    content: z.string().max(IMPORT_MAX_TEXT_LENGTH),
+    tags: z.array(z.string().trim().max(30)).max(100).optional().default([]),
+    createdAt: z.string().optional(),
+    updatedAt: z.string().optional(),
+  })
+  .passthrough();
 
 const router = new Router({
   prefix: "/export",
@@ -12,8 +46,8 @@ const router = new Router({
 // 导入请求验证
 const importSchema = z.object({
   data: z.object({
-    noteBooks: z.array(z.any()),
-    notes: z.array(z.any()),
+    noteBooks: z.array(importNotebookSchema).max(IMPORT_MAX_NOTEBOOKS),
+    notes: z.array(importNoteSchema).max(IMPORT_MAX_NOTES),
   }),
   version: z.string().optional(),
   exportTime: z.string().optional(),
@@ -39,7 +73,6 @@ router.use(authMiddleware);
 router.get("/data", async (ctx) => {
   try {
     const userId = ctx.user!.userId;
-    console.log(ctx.user, "<==ctx.user");
 
     if (!userId) {
       error(ctx, "用户未认证", ErrorCodes.UNAUTHORIZED, 401);
@@ -61,7 +94,11 @@ router.get("/data", async (ctx) => {
 
     success(ctx, exportData, "导出成功");
   } catch (err) {
-    console.error("导出数据失败:", err);
+    logger.error("导出数据失败", {
+      requestId: ctx.state.requestId,
+      userId: ctx.user?.userId,
+      error: err instanceof Error ? err.message : String(err),
+    });
     error(ctx, err.message || "导出失败", ErrorCodes.INTERNAL_ERROR, 500);
   }
 });
@@ -73,7 +110,6 @@ router.get("/data", async (ctx) => {
 router.post("/import", async (ctx) => {
   try {
     const userId = ctx.user!.userId;
-    console.log(ctx.user, "<==ctx.user");
 
     if (!userId) {
       error(ctx, "用户未认证", ErrorCodes.UNAUTHORIZED, 401);
@@ -122,7 +158,11 @@ router.post("/import", async (ctx) => {
         timestamp: Date.now(),
       };
     } else {
-      console.error("导入数据失败:", err);
+      logger.error("导入数据失败", {
+        requestId: ctx.state.requestId,
+        userId: ctx.user?.userId,
+        error: err instanceof Error ? err.message : String(err),
+      });
       error(ctx, err.message || "导入失败", ErrorCodes.INTERNAL_ERROR, 500);
     }
   }

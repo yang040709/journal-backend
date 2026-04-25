@@ -2,6 +2,7 @@ import NoteBook from "../model/NoteBook";
 import Note from "../model/Note";
 import { ActivityLogger } from "../utils/ActivityLogger";
 import { ExportData } from "./export.service";
+import logger from "../utils/logger";
 
 export interface ImportOptions {
   mode: "replace" | "merge"; // replace: 清空现有数据, merge: 合并数据
@@ -21,6 +22,22 @@ export interface ImportResult {
   };
   errors?: string[];
 }
+
+interface ImportedNoteBook {
+  id?: string;
+  title: string;
+  coverImg?: string;
+}
+
+interface ImportedNote {
+  noteBookId: string;
+  title: string;
+  content: string;
+  tags?: string[];
+}
+
+const IMPORT_MAX_NOTEBOOKS = 200;
+const IMPORT_MAX_NOTES = 5000;
 
 export class ImportService {
   /**
@@ -74,7 +91,10 @@ export class ImportService {
 
       return result;
     } catch (error) {
-      console.error("导入用户数据失败:", error);
+      logger.error("导入用户数据失败", {
+        userId,
+        error: error instanceof Error ? error.message : String(error),
+      });
       return {
         success: false,
         message: error instanceof Error ? error.message : "导入失败",
@@ -107,8 +127,16 @@ export class ImportService {
       throw new Error("导入数据格式错误：notes 必须是数组");
     }
 
+    if (data.data.noteBooks.length > IMPORT_MAX_NOTEBOOKS) {
+      throw new Error(`导入手帐本数量不能超过 ${IMPORT_MAX_NOTEBOOKS}`);
+    }
+
+    if (data.data.notes.length > IMPORT_MAX_NOTES) {
+      throw new Error(`导入手帐数量不能超过 ${IMPORT_MAX_NOTES}`);
+    }
+
     // 验证手帐本数据格式
-    data.data.noteBooks.forEach((noteBook, index) => {
+    data.data.noteBooks.forEach((noteBook: ImportedNoteBook, index) => {
       if (!noteBook.title || typeof noteBook.title !== "string") {
         throw new Error(
           `手帐本数据格式错误：第 ${index + 1} 个手帐本缺少 title 字段`,
@@ -117,7 +145,7 @@ export class ImportService {
     });
 
     // 验证手帐数据格式
-    data.data.notes.forEach((note, index) => {
+    data.data.notes.forEach((note: ImportedNote, index) => {
       if (!note.title || typeof note.title !== "string") {
         throw new Error(
           `手帐数据格式错误：第 ${index + 1} 条手帐缺少 title 字段`,
@@ -157,7 +185,7 @@ export class ImportService {
     // 导入手帐本
     const noteBookMap = new Map<string, string>(); // 旧ID -> 新ID 映射
 
-    for (const noteBookData of importData.data.noteBooks) {
+    for (const noteBookData of importData.data.noteBooks as ImportedNoteBook[]) {
       try {
         const noteBook = new NoteBook({
           title: noteBookData.title,
@@ -178,7 +206,7 @@ export class ImportService {
     }
 
     // 导入手帐
-    for (const noteData of importData.data.notes) {
+    for (const noteData of importData.data.notes as ImportedNote[]) {
       try {
         // 获取映射后的手帐本ID
         const newNoteBookId =
@@ -225,7 +253,7 @@ export class ImportService {
     );
 
     // 合并手帐本
-    for (const noteBookData of importData.data.noteBooks) {
+    for (const noteBookData of importData.data.noteBooks as ImportedNoteBook[]) {
       try {
         const existingNoteBook = existingNoteBookMap.get(noteBookData.title);
 
@@ -260,7 +288,7 @@ export class ImportService {
     }
 
     // 合并手帐
-    for (const noteData of importData.data.notes) {
+    for (const noteData of importData.data.notes as ImportedNote[]) {
       try {
         // 查找对应的手帐本
         const targetNoteBook = existingNoteBookMap.get(
@@ -320,7 +348,7 @@ export class ImportService {
    * 根据ID查找手帐本标题
    */
   private static findNoteBookTitle(
-    noteBooks: any[],
+    noteBooks: ImportedNoteBook[],
     noteBookId: string,
   ): string | undefined {
     const noteBook = noteBooks.find((book) => book.id === noteBookId);

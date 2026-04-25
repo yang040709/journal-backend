@@ -5,6 +5,12 @@ import { ActivityLogger } from "../utils/ActivityLogger";
 import { toLeanTemplateArray, toLeanTemplate } from "../utils/typeUtils";
 import { noteTemplates } from "@/constant/templates.js";
 import type { FlattenMaps } from "mongoose";
+import {
+  ensurePageDepth,
+  normalizeKeyword,
+  pickSortField,
+  toSafeRegex,
+} from "../utils/querySafety";
 
 /** C 端列表：系统模板 id 使用 systemKey，与历史常量 id 一致 */
 export function templateDocToClientLean(
@@ -121,25 +127,26 @@ export class TemplateService {
   ): Promise<{ items: LeanTemplate[]; total: number }> {
     const page = Math.max(1, params.page || 1);
     const limit = Math.min(100, Math.max(1, params.limit || 20));
-    if (page * limit > MAX_PAGE_DEPTH) {
-      throw new Error(`分页深度超过限制（page*limit <= ${MAX_PAGE_DEPTH}）`);
-    }
+    ensurePageDepth({ page, limit, maxDepth: MAX_PAGE_DEPTH });
     const skip = (page - 1) * limit;
 
-    const sortField = params.sortBy || "updatedAt";
+    const sortField = pickSortField(
+      ["createdAt", "updatedAt", "name"] as const,
+      params.sortBy,
+      "updatedAt",
+    );
     const sortOrder = params.order === "asc" ? 1 : -1;
 
     // 构建查询条件
     const query: any = { userId, isSystem: false };
 
     // 搜索筛选
-    if (params.search) {
-      const keyword = params.search.trim();
-      if (keyword.length < MIN_SEARCH_KEYWORD_LENGTH) {
-        throw new Error(`搜索关键词至少 ${MIN_SEARCH_KEYWORD_LENGTH} 个字符`);
-      }
-      const safeKeyword = keyword.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-      const searchRegex = new RegExp(safeKeyword, "i");
+    const keyword = normalizeKeyword(params.search, {
+      min: MIN_SEARCH_KEYWORD_LENGTH,
+      max: 100,
+    });
+    if (keyword) {
+      const searchRegex = toSafeRegex(keyword);
       query.$or = [{ name: searchRegex }, { description: searchRegex }];
     }
 

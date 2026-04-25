@@ -6,6 +6,12 @@ import {
   loadSystemTemplatesForClient,
   templateDocToClientLean,
 } from "./template.service";
+import {
+  ensurePageDepth,
+  normalizeKeyword,
+  pickSortField,
+  toSafeRegex,
+} from "../utils/querySafety";
 
 export interface AdminTemplateListParams {
   page?: number;
@@ -32,16 +38,22 @@ export class AdminTemplateService {
   static async listTemplates(params: AdminTemplateListParams = {}) {
     const page = Math.max(1, params.page || 1);
     const limit = Math.min(100, Math.max(1, params.limit || 20));
+    ensurePageDepth({ page, limit });
     const skip = (page - 1) * limit;
-    const sortField = params.sortBy || "updatedAt";
+    const sortField = pickSortField(
+      ["createdAt", "updatedAt", "name"] as const,
+      params.sortBy,
+      "updatedAt",
+    );
     const sortOrder = params.order === "asc" ? 1 : -1;
 
     const query: Record<string, unknown> = { isSystem: false };
     if (params.userId?.trim()) {
       query.userId = params.userId.trim();
     }
-    if (params.search?.trim()) {
-      const rx = new RegExp(params.search.trim(), "i");
+    const keyword = normalizeKeyword(params.search, { min: 1, max: 100 });
+    if (keyword) {
+      const rx = toSafeRegex(keyword);
       query.$or = [{ name: rx }, { description: rx }];
     }
 

@@ -19,6 +19,8 @@ import { UserService } from "./user.service";
 import { PointsService } from "./points.service";
 import { LeanActivity } from "../types/mongoose";
 import { toLeanActivityArray } from "../utils/typeUtils";
+import { UserPurgeService } from "./userPurge.service";
+import { signToken } from "../utils/jwt";
 
 type LeanUserRow = {
   _id: { toString: () => string };
@@ -42,6 +44,29 @@ export type AdminUserListItem = ReturnType<typeof AdminUserService.serializeUser
 };
 
 export class AdminUserService {
+  static async generateUserJwtByBizUserId(rawBizUserId: string): Promise<{
+    userId: string;
+    token: string;
+    bearerToken: string;
+    expiresIn: string;
+  } | null> {
+    const bizUserId = AdminUserService.decodeBizUserIdParam(rawBizUserId);
+    if (!bizUserId) {
+      return null;
+    }
+    const user = await User.findOne({ userId: bizUserId }).select("userId").lean();
+    if (!user?.userId) {
+      return null;
+    }
+    const token = signToken({ userId: user.userId });
+    return {
+      userId: user.userId,
+      token,
+      bearerToken: `Bearer ${token}`,
+      expiresIn: "7d",
+    };
+  }
+
   static buildHealthScoreSummary(input: {
     activityCount7d: number;
     noteCount30d: number;
@@ -588,23 +613,12 @@ export class AdminUserService {
   }
 
   static async deleteUserById(id: string): Promise<boolean> {
-    const user = await User.findById(id).lean();
-    if (!user) {
-      return false;
-    }
-    const userId = user.userId;
-    await Promise.all([
-      Note.deleteMany({ userId }),
-      NoteBook.deleteMany({ userId }),
-      Reminder.deleteMany({ userId }),
-      Template.deleteMany({ userId }),
-      Activity.deleteMany({ userId }),
-      UserAdRewardLog.deleteMany({ userId }),
-      PointsLedger.deleteMany({ userId }),
-      UserUploadQuotaDaily.deleteMany({ userId }),
-      UserAiUsageDaily.deleteMany({ userId }),
-    ]);
-    await User.deleteOne({ _id: id });
-    return true;
+    const r = await UserPurgeService.purgeByMongoUserId(id, {
+      dryRun: false,
+      verify: false,
+      withCos: false,
+      useTransactionIfPossible: true,
+    });
+    return Boolean(r);
   }
 }

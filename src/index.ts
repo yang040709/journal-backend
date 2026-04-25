@@ -8,6 +8,8 @@ import { ensureAdminBootstrap } from "./service/adminBootstrap.service";
 import { ensureSystemTemplates } from "./service/systemTemplateSeed.service";
 import { AiStyleService } from "./service/aiStyle.service";
 import { ShareSecurityTaskService } from "./service/shareSecurityTask.service";
+import { AlertRuleService } from "./service/alertRule.service";
+import logger from "./utils/logger";
 
 dotenv.config();
 
@@ -15,7 +17,7 @@ const PORT = process.env.PORT || 3000;
 
 // 进程级错误处理 - 防止未捕获的错误导致程序崩溃
 process.on("uncaughtException", (error) => {
-  console.error("⚠️ 未捕获的异常:", {
+  logger.error("未捕获的异常", {
     name: error.name,
     message: error.message,
     stack: error.stack,
@@ -27,7 +29,7 @@ process.on("uncaughtException", (error) => {
 });
 
 process.on("unhandledRejection", (reason, promise) => {
-  console.error("⚠️ 未处理的 Promise 拒绝:", {
+  logger.error("未处理的 Promise 拒绝", {
     reason,
     promise,
     timestamp: new Date().toISOString(),
@@ -38,6 +40,9 @@ process.on("unhandledRejection", (reason, promise) => {
 
 const init = async () => {
   try {
+    if (!process.env.JWT_SECRET) {
+      logger.warn("JWT_SECRET environment variable is not set; auth-related APIs may fail");
+    }
     await connectDB();
 
     // 执行数据库迁移
@@ -48,32 +53,33 @@ const init = async () => {
     await ensureAdminBootstrap();
     await ensureSystemTemplates();
     await AiStyleService.ensureSeed();
+    await AlertRuleService.ensureDefaultRules();
 
     // 初始化敏感词过滤器
-    console.log("🔐 正在初始化敏感词过滤器...");
+    logger.info("正在初始化敏感词过滤器");
     await initSensitiveFilter();
-    console.log("✅ 敏感词过滤器初始化完成");
+    logger.info("敏感词过滤器初始化完成");
 
     // 数据库连接成功后启动调度器
     startSchedulersAfterDBConnection();
     ShareSecurityTaskService.startWorker();
 
     const server = app.listen(PORT, () => {
-      console.log(`🚀 Server is running on port ${PORT}`);
+      logger.info(`Server is running on port ${PORT}`);
     });
 
     // 优雅关闭处理
     const gracefulShutdown = () => {
-      console.log("🛑 收到关闭信号，正在优雅关闭服务器...");
+      logger.warn("收到关闭信号，正在优雅关闭服务器");
 
       server.close(() => {
-        console.log("✅ 服务器已关闭");
+        logger.info("服务器已关闭");
         process.exit(0);
       });
 
       // 如果10秒后仍未关闭，强制退出
       setTimeout(() => {
-        console.error("❌ 强制关闭服务器");
+        logger.error("强制关闭服务器");
         process.exit(1);
       }, 10000);
     };
@@ -82,7 +88,9 @@ const init = async () => {
     process.on("SIGTERM", gracefulShutdown);
     process.on("SIGINT", gracefulShutdown);
   } catch (error) {
-    console.error("❌ 服务器启动失败:", error);
+    logger.error("服务器启动失败", {
+      error: error instanceof Error ? error.message : String(error),
+    });
     process.exit(1);
   }
 };

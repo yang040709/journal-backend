@@ -1,4 +1,5 @@
 import Reminder, { IReminder } from "../model/Reminder";
+import { ensurePageDepth, pickSortField } from "../utils/querySafety";
 
 function serializeReminder(doc: {
   _id: { toString: () => string };
@@ -51,8 +52,13 @@ export class AdminReminderService {
   static async listReminders(params: AdminReminderListParams = {}) {
     const page = Math.max(1, params.page || 1);
     const limit = Math.min(100, Math.max(1, params.limit || 20));
+    ensurePageDepth({ page, limit });
     const skip = (page - 1) * limit;
-    const sortField = params.sortBy || "remindTime";
+    const sortField = pickSortField(
+      ["remindTime", "createdAt", "updatedAt", "retryCount"] as const,
+      params.sortBy,
+      "remindTime",
+    );
     const sortOrder = params.order === "asc" ? 1 : -1;
 
     const query: Record<string, unknown> = {};

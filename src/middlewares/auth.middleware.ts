@@ -1,17 +1,17 @@
 import { Context, Next } from "koa";
 import jwt from "jsonwebtoken";
-import * as dotenv from "dotenv";
 import User from "../model/User";
+import logger from "../utils/logger";
 
-dotenv.config();
-
-if (!process.env.JWT_SECRET) {
-  throw new Error(
-    "JWT_SECRET environment variable is not defined. 请检查您的环境变量设置。"
-  );
+function getJwtSecret(): string {
+  const secret = process.env.JWT_SECRET;
+  if (!secret) {
+    throw new Error(
+      "JWT_SECRET environment variable is not defined. 请检查您的环境变量设置。",
+    );
+  }
+  return secret;
 }
-
-const JWT_SECRET = process.env.JWT_SECRET;
 
 export interface AuthUser {
   userId: string;
@@ -41,7 +41,7 @@ export const authMiddleware = async (ctx: AuthContext, next: Next) => {
   const token = authHeader.substring(7); // 移除"Bearer "前缀
 
   try {
-    const decoded = jwt.verify(token, JWT_SECRET) as AuthUser;
+    const decoded = jwt.verify(token, getJwtSecret()) as AuthUser;
     ctx.user = decoded;
 
     // Token 有效但用户不存在：通常是清库/换环境/老 token 导致，按登录态失效处理
@@ -58,7 +58,10 @@ export const authMiddleware = async (ctx: AuthContext, next: Next) => {
 
     await next();
   } catch (error) {
-    console.error("JWT验证失败:", error);
+    logger.warn("JWT验证失败", {
+      requestId: ctx.state.requestId,
+      error: error instanceof Error ? error.message : String(error),
+    });
 
     if (error instanceof jwt.TokenExpiredError) {
       ctx.status = 401;
@@ -95,11 +98,13 @@ export const optionalAuthMiddleware = async (ctx: AuthContext, next: Next) => {
   if (authHeader && authHeader.startsWith("Bearer ")) {
     const token = authHeader.substring(7);
     try {
-      const decoded = jwt.verify(token, JWT_SECRET) as AuthUser;
+      const decoded = jwt.verify(token, getJwtSecret()) as AuthUser;
       ctx.user = decoded;
     } catch (error) {
-      // Token无效，但不阻止请求继续
-      console.warn("可选认证：Token验证失败", error);
+      logger.debug("可选认证：Token验证失败", {
+        requestId: ctx.state.requestId,
+        error: error instanceof Error ? error.message : String(error),
+      });
     }
   }
 

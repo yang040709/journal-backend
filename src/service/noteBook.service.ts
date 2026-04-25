@@ -3,6 +3,7 @@ import Note from "../model/Note";
 import { ActivityLogger } from "../utils/ActivityLogger";
 import { ErrorCodes } from "../utils/response";
 import { toLeanNoteBookArray, toLeanNoteBook } from "../utils/typeUtils";
+import { ensurePageDepth, pickSortField } from "../utils/querySafety";
 
 export interface CreateNoteBookData {
   title: string;
@@ -68,9 +69,14 @@ export class NoteBookService {
   ): Promise<{ items: LeanNoteBook[]; total: number }> {
     const page = Math.max(1, params.page || 1);
     const limit = Math.min(100, Math.max(1, params.limit || 20));
+    ensurePageDepth({ page, limit });
     const skip = (page - 1) * limit;
 
-    const sortField = params.sortBy || "updatedAt";
+    const sortField = pickSortField(
+      ["createdAt", "updatedAt", "title", "count"] as const,
+      params.sortBy,
+      "updatedAt",
+    );
     const sortOrder = params.order === "asc" ? 1 : -1;
 
     const [items, total] = await Promise.all([
