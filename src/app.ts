@@ -20,6 +20,7 @@ import PointsRouter from "./routes/points.routes";
 import NoteExportUserRouter from "./routes/noteExportUser.routes";
 import AssetRouter from "./routes/asset.routes";
 import FeedbackRouter from "./routes/feedback.routes";
+import ReviewRouter from "./routes/review.routes";
 import AdminRouter from "./routes/admin.routes";
 import { adminCorsMiddleware } from "./middlewares/adminCors.middleware";
 import { staticFilesMiddleware } from "./middlewares/staticFiles.middleware";
@@ -104,6 +105,7 @@ app.use(ShareRouter.routes()).use(ShareRouter.allowedMethods());
 app.use(CoverRouter.routes()).use(CoverRouter.allowedMethods());
 app.use(AssetRouter.routes()).use(AssetRouter.allowedMethods());
 app.use(FeedbackRouter.routes()).use(FeedbackRouter.allowedMethods());
+app.use(ReviewRouter.routes()).use(ReviewRouter.allowedMethods());
 app.use(UploadRouter.routes()).use(UploadRouter.allowedMethods());
 app.use(PointsRouter.routes()).use(PointsRouter.allowedMethods());
 

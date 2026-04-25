@@ -8,8 +8,16 @@ import ShareSecurityTask, {
 } from "../model/ShareSecurityTask";
 import { WeChatContentSecurityService } from "./wechatContentSecurity.service";
 
-const WORKER_INTERVAL_MS = Number(process.env.SHARE_SECURITY_WORKER_INTERVAL_MS || 3000);
-const MAX_RETRY = Number(process.env.SHARE_SECURITY_MAX_RETRY || 3);
+function getWorkerIntervalMs(): number {
+  const v = Number(process.env.SHARE_SECURITY_WORKER_INTERVAL_MS || 3000);
+  return Number.isFinite(v) && v > 0 ? v : 3000;
+}
+
+function getMaxRetry(): number {
+  const v = Number(process.env.SHARE_SECURITY_MAX_RETRY || 3);
+  // Keep backward-compatible semantics with historical `Number(env || 3)` behavior.
+  return v || 3;
+}
 
 export interface ShareRiskSummary {
   riskStatus: "none" | "pass" | "risky_wechat" | "reject_local" | "reject_wechat" | "error";
@@ -178,7 +186,7 @@ export class ShareSecurityTaskService {
     workerStarted = true;
     setInterval(() => {
       void this.runOnce();
-    }, WORKER_INTERVAL_MS);
+    }, getWorkerIntervalMs());
   }
 
   private static async runOnce(): Promise<void> {
@@ -304,7 +312,7 @@ export class ShareSecurityTaskService {
       );
     } catch (e) {
       const retryCount = (task.retryCount || 0) + 1;
-      const exhausted = retryCount >= MAX_RETRY;
+      const exhausted = retryCount >= getMaxRetry();
       if (exhausted) {
         await closeShareIfVersionMatch(task.noteId, task.shareVersion);
       }

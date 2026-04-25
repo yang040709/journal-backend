@@ -1,4 +1,5 @@
 import axios from "axios";
+import { getWeChatAppId, getWeChatSecret } from "../config/wechatEnv";
 
 interface WeChatTokenResponse {
   access_token?: string;
@@ -33,10 +34,16 @@ function normalizeOpenId(openid?: string): string | undefined {
 }
 
 export class WeChatContentSecurityService {
-  private static appId = process.env.WX_APPID || "";
-  private static appSecret = process.env.WX_SECRET || "";
   private static accessToken = "";
   private static tokenExpiresAt = 0;
+
+  private static get appId(): string {
+    return getWeChatAppId();
+  }
+
+  private static get appSecret(): string {
+    return getWeChatSecret();
+  }
 
   static isConfigured(): boolean {
     return Boolean(this.appId && this.appSecret);

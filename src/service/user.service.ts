@@ -13,6 +13,7 @@ import { CoverService } from "./cover.service";
 import { InitialUserNotebookConfigService } from "./initialUserNotebookConfig.service";
 import { InitialUserNoteSeedConfigService } from "./initialUserNoteSeedConfig.service";
 import { nanoid } from "nanoid";
+import { getWeChatAppId, getWeChatSecret } from "../config/wechatEnv";
 
 export interface LoginResult {
   token: string;
@@ -119,8 +120,8 @@ export class UserService {
         url: "https://api.weixin.qq.com/sns/jscode2session",
         params: {
           js_code: code,
-          appid: process.env.WX_APPID,
-          secret: process.env.WX_SECRET,
+          appid: getWeChatAppId(),
+          secret: getWeChatSecret(),
           grant_type: "authorization_code",
         },
         timeout: 5000, // 5秒超时

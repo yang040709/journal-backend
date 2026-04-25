@@ -1,4 +1,5 @@
 import axios from "axios";
+import { getWeChatAppId, getWeChatSecret } from "../config/wechatEnv";
 
 export interface WeChatAccessToken {
   access_token: string;
@@ -15,10 +16,16 @@ export interface SubscriptionMessageData {
 }
 
 export class WeChatService {
-  private static appId = process.env.WX_APPID || "";
-  private static appSecret = process.env.WX_SECRET || "";
   private static accessToken: string = "";
   private static tokenExpiresAt: number = 0;
+
+  private static get appId(): string {
+    return getWeChatAppId();
+  }
+
+  private static get appSecret(): string {
+    return getWeChatSecret();
+  }
 
   /**
    * 获取微信访问令牌

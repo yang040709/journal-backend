@@ -1,4 +1,4 @@
-import dotenv from "dotenv";
+import "dotenv/config";
 import app, { startSchedulersAfterDBConnection } from "./app";
 
 import { connectDB } from "./config/db";
@@ -10,8 +10,6 @@ import { AiStyleService } from "./service/aiStyle.service";
 import { ShareSecurityTaskService } from "./service/shareSecurityTask.service";
 import { AlertRuleService } from "./service/alertRule.service";
 import logger from "./utils/logger";
-
-dotenv.config();
 
 const PORT = process.env.PORT || 3000;
 

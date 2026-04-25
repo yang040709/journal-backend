@@ -13,6 +13,7 @@ import {
   normalizeKeyword,
   toSafeRegex,
 } from "../utils/querySafety";
+import { getWeChatAppId, getWeChatSecret } from "../config/wechatEnv";
 
 type AdminActor = {
   id: string;
@@ -76,8 +77,8 @@ function toCampaignId(v: unknown) {
 
 async function getWeChatAccessToken(): Promise<string> {
   if (wxAccessToken && Date.now() < wxAccessTokenExpireAt) return wxAccessToken;
-  const appId = process.env.WX_APPID || "";
-  const secret = process.env.WX_SECRET || "";
+  const appId = getWeChatAppId();
+  const secret = getWeChatSecret();
   if (!appId || !secret) throw new Error("WX_APPID/WX_SECRET missing");
   const r = await withProxyEnvDisabled(() =>
     axios.get("https://api.weixin.qq.com/cgi-bin/token", {

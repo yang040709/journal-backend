@@ -107,7 +107,6 @@ const shareSecurityTaskSchema = new Schema<IShareSecurityTask>(
 
 shareSecurityTaskSchema.index({ noteId: 1, shareVersion: 1, createdAt: -1 });
 shareSecurityTaskSchema.index({ status: 1, updatedAt: 1 });
-shareSecurityTaskSchema.index({ taskId: 1 });
 
 shareSecurityTaskSchema.virtual("id").get(function (this: any) {
   return this._id.toString();

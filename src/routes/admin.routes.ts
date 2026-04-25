@@ -16,6 +16,7 @@ import {
   ADMIN_PAGE_GALLERY,
   ADMIN_PAGE_FEEDBACKS,
   ADMIN_PAGE_POINTS_CAMPAIGNS,
+  ADMIN_PAGE_REVIEWS,
 } from "../constant/adminPages";
 import {
   success,
@@ -67,6 +68,7 @@ import {
 import { AlertMetricService } from "../service/alertMetric.service";
 import { AlertRuleService } from "../service/alertRule.service";
 import AlertEvent from "../model/AlertEvent";
+import { UserReviewService } from "../service/userReview.service";
 
 const MAX_PAGE_DEPTH = (() => {
   const raw = String(process.env.ADMIN_MAX_PAGE_DEPTH ?? "").trim();
@@ -2758,6 +2760,33 @@ const pointsCampaignListQuerySchema = z.object({
   keyword: optionalKeywordSchema(100),
 });
 
+const adminReviewListQuerySchema = z
+  .object({
+    page: z.coerce.number().int().positive().optional().default(1),
+    limit: z.coerce.number().int().min(1).max(100).optional().default(20),
+    status: z.enum(["on", "off"]).optional(),
+  })
+  .refine((val) => val.page * val.limit <= MAX_PAGE_DEPTH, {
+    message: `分页深度超过限制（page*limit <= ${MAX_PAGE_DEPTH}）`,
+    path: ["page"],
+  });
+
+const adminReviewCreateSchema = z.object({
+  content: z.string().trim().min(1).max(1000),
+  username: z.string().trim().min(1).max(64),
+  tag: z.string().trim().max(64).optional().default(""),
+  status: z.enum(["on", "off"]).optional().default("on"),
+  sortOrder: z.coerce.number().int().min(-999999).max(999999).optional().default(0),
+});
+
+const adminReviewUpdateSchema = z.object({
+  content: z.string().trim().min(1).max(1000).optional(),
+  username: z.string().trim().min(1).max(64).optional(),
+  tag: z.string().trim().max(64).optional(),
+  status: z.enum(["on", "off"]).optional(),
+  sortOrder: z.coerce.number().int().min(-999999).max(999999).optional(),
+});
+
 authed.get(
   "/points/transactions",
   requireAdminPage(ADMIN_PAGE_USERS),
@@ -2794,6 +2823,87 @@ authed.get(
         500,
       );
     }
+  },
+);
+
+authed.get(
+  "/reviews",
+  requireAdminPage(ADMIN_PAGE_REVIEWS),
+  async (ctx) => {
+    try {
+      const q = adminReviewListQuerySchema.parse(ctx.query);
+      const data = await UserReviewService.adminList(q);
+      paginatedSuccess(ctx, data.items, data.total, data.page, data.limit);
+    } catch (e) {
+      if (e instanceof z.ZodError) {
+        error(ctx, "参数验证失败", ErrorCodes.PARAM_ERROR, 400);
+        return;
+      }
+      error(ctx, e instanceof Error ? e.message : "加载失败", ErrorCodes.INTERNAL_ERROR, 500);
+    }
+  },
+);
+
+authed.post(
+  "/reviews",
+  requireAdminPage(ADMIN_PAGE_REVIEWS),
+  async (ctx) => {
+    try {
+      const body = adminReviewCreateSchema.parse(ctx.request.body || {});
+      const row = await UserReviewService.adminCreate(body);
+      success(ctx, row, "创建成功");
+    } catch (e) {
+      if (e instanceof z.ZodError) {
+        error(ctx, "参数验证失败", ErrorCodes.PARAM_ERROR, 400);
+        return;
+      }
+      error(ctx, e instanceof Error ? e.message : "创建失败", ErrorCodes.PARAM_ERROR, 400);
+    }
+  },
+);
+
+authed.put(
+  "/reviews/:id",
+  requireAdminPage(ADMIN_PAGE_REVIEWS),
+  async (ctx) => {
+    try {
+      const body = adminReviewUpdateSchema.parse(ctx.request.body || {});
+      if (
+        body.content === undefined &&
+        body.username === undefined &&
+        body.tag === undefined &&
+        body.status === undefined &&
+        body.sortOrder === undefined
+      ) {
+        error(ctx, "无有效更新字段", ErrorCodes.PARAM_ERROR, 400);
+        return;
+      }
+      const row = await UserReviewService.adminUpdate(String(ctx.params.id || ""), body);
+      if (!row) {
+        error(ctx, "评价不存在", ErrorCodes.NOT_FOUND, 404);
+        return;
+      }
+      success(ctx, row, "更新成功");
+    } catch (e) {
+      if (e instanceof z.ZodError) {
+        error(ctx, "参数验证失败", ErrorCodes.PARAM_ERROR, 400);
+        return;
+      }
+      error(ctx, e instanceof Error ? e.message : "更新失败", ErrorCodes.PARAM_ERROR, 400);
+    }
+  },
+);
+
+authed.delete(
+  "/reviews/:id",
+  requireAdminPage(ADMIN_PAGE_REVIEWS),
+  async (ctx) => {
+    const ok = await UserReviewService.adminDelete(String(ctx.params.id || ""));
+    if (!ok) {
+      error(ctx, "评价不存在", ErrorCodes.NOT_FOUND, 404);
+      return;
+    }
+    success(ctx, { deleted: true });
   },
 );
 
