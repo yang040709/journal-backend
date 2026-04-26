@@ -2,6 +2,7 @@ import { Context, Next } from "koa";
 import jwt from "jsonwebtoken";
 import User from "../model/User";
 import logger from "../utils/logger";
+import { ErrorCodes } from "../utils/response";
 
 function getJwtSecret(): string {
   const secret = process.env.JWT_SECRET;
@@ -44,12 +45,13 @@ export const authMiddleware = async (ctx: AuthContext, next: Next) => {
     const decoded = jwt.verify(token, getJwtSecret()) as AuthUser;
     ctx.user = decoded;
 
-    // Token 有效但用户不存在：通常是清库/换环境/老 token 导致，按登录态失效处理
+    // Token 有效但用户不存在：通常是清库/换环境/老 token 导致，按登录态失效处理。
+    // 为兼容老客户端自动清登录态逻辑，保持 AUTH_ERROR(1002)。
     const userExists = await User.exists({ userId: decoded.userId });
     if (!userExists) {
       ctx.status = 401;
       ctx.body = {
-        code: 1002,
+        code: ErrorCodes.AUTH_ERROR,
         message: "认证失败：用户不存在，请重新登录",
         data: null,
       };
@@ -99,7 +101,15 @@ export const optionalAuthMiddleware = async (ctx: AuthContext, next: Next) => {
     const token = authHeader.substring(7);
     try {
       const decoded = jwt.verify(token, getJwtSecret()) as AuthUser;
-      ctx.user = decoded;
+      const userExists = await User.exists({ userId: decoded.userId });
+      if (userExists) {
+        ctx.user = decoded;
+      } else {
+        logger.debug("可选认证：token 对应用户不存在，忽略登录态", {
+          requestId: ctx.state.requestId,
+          userId: decoded.userId,
+        });
+      }
     } catch (error) {
       logger.debug("可选认证：Token验证失败", {
         requestId: ctx.state.requestId,

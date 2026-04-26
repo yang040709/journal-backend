@@ -5,6 +5,7 @@ import { refreshToken, verifyToken } from "../utils/jwt";
 import { authMiddleware, AuthContext } from "../middlewares/auth.middleware";
 import { z } from "zod";
 import { AlertMetricService } from "../service/alertMetric.service";
+import User from "../model/User";
 
 const router = new Router({
   prefix: "/auth",
@@ -137,6 +138,18 @@ router.post("/refresh", async (ctx) => {
     const decoded = verifyToken(oldToken, true);
     if (!decoded) {
       error(ctx, "无效的Token", ErrorCodes.AUTH_ERROR, 401);
+      return;
+    }
+
+    const userId = String(decoded.userId || "").trim();
+    if (!userId) {
+      error(ctx, "无效的Token", ErrorCodes.AUTH_ERROR, 401);
+      return;
+    }
+
+    const userExists = await User.exists({ userId });
+    if (!userExists) {
+      error(ctx, "用户不存在，请重新登录", ErrorCodes.AUTH_ERROR, 401);
       return;
     }
 
