@@ -54,9 +54,30 @@ jobs:
             cd /opt/journal
             # 创建 .env 文件
             cat > .env <<EOF
+            JWT_SECRET=${{ secrets.JWT_SECRET }}
             WX_APPID=${{ secrets.WX_APPID }}
             WX_SECRET=${{ secrets.WX_SECRET }}
-            JWT_SECRET=${{ secrets.JWT_SECRET }}
+            REDIS_URL=${{ secrets.REDIS_URL }}
+            SENSITIVE_WORDS_KEY=${{ secrets.SENSITIVE_WORDS_KEY }}
+            NODE_ENV=production
+            LOG_LEVEL=info
+            LOG_MAX_SIZE=5m
+            LOG_MAX_FILES=7d
+            COS_SECRET_ID=${{ secrets.COS_SECRET_ID }}
+            COS_SECRET_KEY=${{ secrets.COS_SECRET_KEY }}
+            COS_BUCKET=${{ secrets.COS_BUCKET }}
+            COS_REGION=${{ secrets.COS_REGION }}
+            COS_PUBLIC_DOMAIN=${{ secrets.COS_PUBLIC_DOMAIN }}
+            COS_UPLOAD_DIR=journal
+            COS_STS_DURATION_SECONDS=1800
+            COS_MAX_FILE_SIZE_MB=10
+            DEEPSEEK_API_KEY=${{ secrets.DEEPSEEK_API_KEY }}
+            DEEPSEEK_API_BASE=https://api.deepseek.com
+            DEEPSEEK_MODEL=deepseek-chat
+            ADMIN_JWT_SECRET=${{ secrets.ADMIN_JWT_SECRET }}
+            ADMIN_JWT_EXPIRES_IN=7d
+            ADMIN_BOOTSTRAP_USERNAME=${{ secrets.ADMIN_BOOTSTRAP_USERNAME }}
+            ADMIN_BOOTSTRAP_PASSWORD=${{ secrets.ADMIN_BOOTSTRAP_PASSWORD }}
             EOF
             # 拉取最新的镜像
             sudo docker pull yang0709/journal-backend:latest
