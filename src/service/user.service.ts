@@ -14,6 +14,7 @@ import { InitialUserNotebookConfigService } from "./initialUserNotebookConfig.se
 import { InitialUserNoteSeedConfigService } from "./initialUserNoteSeedConfig.service";
 import { nanoid } from "nanoid";
 import { getWeChatAppId, getWeChatSecret } from "../config/wechatEnv";
+import { Types } from "mongoose";
 
 export interface LoginResult {
   token: string;
@@ -233,12 +234,17 @@ export class UserService {
         incByNotebookId.set(n.noteBookId, (incByNotebookId.get(n.noteBookId) || 0) + 1);
       }
       await NoteBook.bulkWrite(
-        Array.from(incByNotebookId.entries()).map(([noteBookId, inc]) => ({
-          updateOne: {
-            filter: { _id: noteBookId },
-            update: { $inc: { count: inc } },
-          },
-        })),
+        Array.from(incByNotebookId.entries()).flatMap(([noteBookId, inc]) => {
+          if (!Types.ObjectId.isValid(noteBookId)) return [];
+          return [
+            {
+              updateOne: {
+                filter: { _id: new Types.ObjectId(noteBookId) },
+                update: { $inc: { count: inc } },
+              },
+            },
+          ];
+        }),
       );
       console.log(`✅ 为用户 ${userId} 创建了 ${notesToInsert.length} 篇初始手帐`);
     } catch (error) {
@@ -382,8 +388,11 @@ export class UserService {
 
   /**
    * 连续记录天数：按业务时区（与额度自然日一致）分桶；
-   * 从「不超过今天的、最近一条有记录的自然日」起向前数连续有记录的自然日。
-   * 例：今日 12 号且 10、11 有记、12 未记 → 2；12 号也记了 → 3。
+   * 口径为「截至今天的连续记录」：
+   * - 今天有记录：从今天向前数连续自然日；
+   * - 今天无记录但昨天有记录：从昨天向前数连续自然日；
+   * - 否则：0。
+   * 例：今日 12 号且 10、11 有记、12 未记 → 2；若 11 未记 → 0；12 号也记了 → 3。
    */
   private static calculateStreakDays(dates: Date[]): number {
     if (!Array.isArray(dates) || dates.length === 0) return 0;
@@ -394,12 +403,16 @@ export class UserService {
     }
 
     const todayKey = formatInstantAsDateKey(new Date(), timezone);
+    const yesterdayKey = previousDateKey(todayKey, timezone);
+
     let anchorKey = "";
-    for (const key of dateSet) {
-      if (key > todayKey) continue;
-      if (key > anchorKey) anchorKey = key;
+    if (dateSet.has(todayKey)) {
+      anchorKey = todayKey;
+    } else if (dateSet.has(yesterdayKey)) {
+      anchorKey = yesterdayKey;
+    } else {
+      return 0;
     }
-    if (!anchorKey) return 0;
 
     let streak = 0;
     let cursorKey = anchorKey;
