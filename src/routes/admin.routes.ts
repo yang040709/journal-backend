@@ -41,7 +41,7 @@ import { CoverService } from "../service/cover.service";
 import User from "../model/User";
 import PointsRuleChangeLog from "../model/PointsRuleChangeLog";
 import { PointsService } from "../service/points.service";
-import { listByUser } from "../service/userImageAsset.service";
+import { listAll, listByUser } from "../service/userImageAsset.service";
 import { NotePresetTagService } from "../service/notePresetTag.service";
 import { UserNoteCustomTagService } from "../service/userNoteCustomTag.service";
 import { QuotaBaseLimitsService } from "../service/quotaBaseLimits.service";
@@ -495,6 +495,7 @@ const adminSystemTemplateBodySchema = z.object({
   description: z.string().max(500).optional().default(""),
   systemKey: z.string().min(1).max(64).optional(),
   enabled: z.boolean().optional().default(true),
+  priority: z.coerce.number().int().min(-9999).max(9999).optional().default(100),
   fields: templateFieldsSchema,
 });
 
@@ -503,6 +504,7 @@ const adminUpdateSystemTemplateSchema = z.object({
   description: z.string().max(500).optional(),
   systemKey: z.string().min(1).max(64).optional(),
   enabled: z.boolean().optional(),
+  priority: z.coerce.number().int().min(-9999).max(9999).optional(),
   fields: templateFieldsSchema.partial().optional(),
 });
 
@@ -629,7 +631,13 @@ const adminGalleryRecordSchema = z.object({
   height: z.number().int().nonnegative().optional().default(0),
   thumbUrl: z.string().url("缩略图 URL 格式不正确").optional(),
   thumbKey: z.string().trim().min(1, "缩略图 key 不能为空").optional(),
-});
+}).refine(
+  (val) => (Boolean(val.thumbUrl) && Boolean(val.thumbKey)) || (!val.thumbUrl && !val.thumbKey),
+  {
+    message: "thumbUrl 和 thumbKey 必须同时传入或同时不传",
+    path: ["thumbUrl"],
+  },
+);
 
 const adminGalleryListQuerySchema = z.object({
   page: z.coerce.number().int().positive().optional().default(1),
@@ -639,6 +647,18 @@ const adminGalleryListQuerySchema = z.object({
   message: `分页深度超过限制（page*limit <= ${MAX_PAGE_DEPTH}）`,
   path: ["page"],
 });
+
+const adminImageAssetsListQuerySchema = z
+  .object({
+    page: z.coerce.number().int().positive().optional().default(1),
+    limit: z.coerce.number().int().min(1).max(100).optional().default(20),
+    source: z.enum(["note", "cover"]).optional(),
+    userId: z.string().trim().max(128).optional(),
+  })
+  .refine((val) => val.page * val.limit <= MAX_PAGE_DEPTH, {
+    message: `分页深度超过限制（page*limit <= ${MAX_PAGE_DEPTH}）`,
+    path: ["page"],
+  });
 
 const aiStyleModePromptsSchema = z.object({
   generate: z.string().optional(),
@@ -1680,7 +1700,16 @@ authed.get(
         );
         return;
       }
-      const header = ["模板ID", "systemKey", "名称", "描述", "状态", "更新时间"];
+      filtered = [...filtered].sort((a, b) => {
+        const pa = Number.isFinite(a.priority as number) ? Number(a.priority) : 100;
+        const pb = Number.isFinite(b.priority as number) ? Number(b.priority) : 100;
+        if (pa !== pb) return pa - pb;
+        const at = new Date(String(a.updatedAt || 0)).getTime();
+        const bt = new Date(String(b.updatedAt || 0)).getTime();
+        if (at !== bt) return bt - at;
+        return String(a.name || "").localeCompare(String(b.name || ""), "zh-Hans-CN");
+      });
+      const header = ["模板ID", "systemKey", "优先级", "名称", "描述", "状态", "更新时间"];
       const csvEscape = (value: unknown) =>
         `"${String(value ?? "").replace(/"/g, '""')}"`;
       const lines = [header.map(csvEscape).join(",")];
@@ -1689,6 +1718,7 @@ authed.get(
           [
             String(row.mongoId || row.id || ""),
             String(row.systemKey || ""),
+            Number.isFinite(row.priority as number) ? String(row.priority) : "100",
             String(row.name || ""),
             String(row.description || ""),
             Boolean(row.enabled ?? true) ? "enabled" : "disabled",
@@ -2142,6 +2172,29 @@ authed.get(
         ErrorCodes.USER_NOT_FOUND,
         404,
       );
+    }
+  },
+);
+
+authed.get(
+  "/image-assets",
+  requireAdminPage(ADMIN_PAGE_USERS),
+  async (ctx) => {
+    try {
+      const q = adminImageAssetsListQuerySchema.parse(ctx.query);
+      const { items, total } = await listAll({
+        page: q.page,
+        limit: q.limit,
+        source: q.source,
+        userId: q.userId,
+      });
+      paginatedSuccess(ctx, items, total, q.page, q.limit, "获取图片资产列表成功");
+    } catch (e) {
+      if (e instanceof z.ZodError) {
+        error(ctx, "参数验证失败", ErrorCodes.PARAM_ERROR, 400);
+        return;
+      }
+      error(ctx, e instanceof Error ? e.message : "加载失败", ErrorCodes.INTERNAL_ERROR, 500);
     }
   },
 );

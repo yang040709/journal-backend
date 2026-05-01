@@ -23,6 +23,7 @@ export function templateDocToClientLean(
       id: doc.systemKey || lean.id,
       systemKey: doc.systemKey,
       mongoId: doc._id.toString(),
+      priority: Number.isFinite(doc.priority) ? Number(doc.priority) : 100,
     } as LeanTemplate;
   }
   return lean;
@@ -46,12 +47,21 @@ export async function loadSystemTemplatesForClient(): Promise<LeanTemplate[]> {
     isSystem: true,
     $or: [{ enabled: true }, { enabled: { $exists: false } }],
   })
-    .sort({ name: 1 })
     .lean();
   if (docs.length === 0) {
     return getSystemTemplatesFallbackConstant();
   }
-  return docs.map((d) => templateDocToClientLean(d));
+  return docs
+    .map((d) => templateDocToClientLean(d))
+    .sort((a, b) => {
+      const pa = Number.isFinite((a as any).priority) ? Number((a as any).priority) : 100;
+      const pb = Number.isFinite((b as any).priority) ? Number((b as any).priority) : 100;
+      if (pa !== pb) return pa - pb;
+      const at = new Date(String((a as any).updatedAt || 0)).getTime();
+      const bt = new Date(String((b as any).updatedAt || 0)).getTime();
+      if (at !== bt) return bt - at;
+      return String(a.name || "").localeCompare(String(b.name || ""), "zh-Hans-CN");
+    });
 }
 
 export interface CreateTemplateData {

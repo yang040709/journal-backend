@@ -133,29 +133,7 @@ export class ShareSecurityTaskService {
       },
     });
 
-    for (const image of snapshotImages) {
-      await ShareSecurityTask.create({
-        taskId: nanoid(14),
-        noteId: params.noteId,
-        userId: params.userId,
-        shareVersion: params.shareVersion,
-        scene: "share_enable",
-        source: "wechat_image",
-        imageCount: 1,
-        status: "queued",
-        retryCount: 0,
-        nextRetryAt: new Date(),
-        snapshot: {
-          title: String(params.title || ""),
-          content: String(params.content || ""),
-          tags: snapshotTags,
-          images: [image],
-          riskMeta: {
-            source: "wechat_image",
-          },
-        },
-      });
-    }
+    // 仅保留微信文本风控；图片风控按产品策略关闭，不再入队图片检测任务。
   }
 
   static async getLatestRiskSummary(noteId: string): Promise<ShareRiskSummary> {
@@ -271,35 +249,15 @@ export class ShareSecurityTaskService {
       }
 
       if (task.source === "wechat_image") {
-        const imageUrl = String(task.snapshot?.images?.[0]?.url || task.resultDetail || "");
-        const result = await WeChatContentSecurityService.checkImageByUrl(imageUrl);
-        if (!result.passed) {
-          await closeShareIfVersionMatch(task.noteId, task.shareVersion);
-          await ShareSecurityTask.updateOne(
-            { _id: task._id },
-            {
-              $set: {
-                status: "reject_wechat",
-                resultCode: result.code || "WECHAT_IMAGE_REJECT",
-                resultDetail: result.detail || "",
-                wechatTraceId: result.traceId,
-                "snapshot.riskMeta.code": result.code || "WECHAT_IMAGE_REJECT",
-                "snapshot.riskMeta.detail": result.detail || "",
-                "snapshot.riskMeta.traceId": result.traceId || "",
-              },
-            },
-          );
-          return;
-        }
         await ShareSecurityTask.updateOne(
           { _id: task._id },
           {
             $set: {
               status: "pass",
-              resultCode: "WECHAT_IMAGE_ACCEPTED",
-              wechatTraceId: result.traceId,
-              "snapshot.riskMeta.code": "WECHAT_IMAGE_ACCEPTED",
-              "snapshot.riskMeta.traceId": result.traceId || "",
+              resultCode: "WECHAT_IMAGE_CHECK_DISABLED",
+              resultDetail: "image check skipped",
+              "snapshot.riskMeta.code": "WECHAT_IMAGE_CHECK_DISABLED",
+              "snapshot.riskMeta.detail": "image check skipped",
             },
           },
         );

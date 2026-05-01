@@ -173,7 +173,7 @@
 | `ADMIN_BOOTSTRAP_USERNAME` | 无超级管理员时的 bootstrap 用户名（与生产同名） |
 | `ADMIN_BOOTSTRAP_PASSWORD` | bootstrap 密码（与生产同名） |
 
-流水线中写死的非敏感默认值（与当前 `deploy-dev.yml` 一致）：`NODE_ENV=development`、`LOG_LEVEL`/`LOG_MAX_*`、`COS_UPLOAD_DIR=journal`、`COS_STS_DURATION_SECONDS=1800`、`COS_MAX_FILE_SIZE_MB=10`、`UPLOAD_DAILY_BASE_LIMIT=15`、`DEEPSEEK_API_BASE`/`DEEPSEEK_MODEL`/`AI_DAILY_BASE_LIMIT`、`ADMIN_JWT_EXPIRES_IN=7d`。若需改为可配置，可再改为 Repository variables 或新增 Secret。
+流水线中写死的非敏感默认值（与当前 `deploy-dev.yml` 一致）：`NODE_ENV=development`、`LOG_LEVEL`/`LOG_MAX_*`、`COS_UPLOAD_DIR=journal`、`COS_STS_DURATION_SECONDS=1800`、`COS_MAX_FILE_SIZE_MB=2`、`UPLOAD_DAILY_BASE_LIMIT=15`、`DEEPSEEK_API_BASE`/`DEEPSEEK_MODEL`/`AI_DAILY_BASE_LIMIT`、`ADMIN_JWT_EXPIRES_IN=7d`。若需改为可配置，可再改为 Repository variables 或新增 Secret。
 
 ---
 

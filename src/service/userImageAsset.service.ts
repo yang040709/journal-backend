@@ -103,6 +103,7 @@ export interface ListUserImageAssetsParams {
 
 export interface UserImageAssetListItem {
   id: string;
+  userId: string;
   url: string;
   thumbUrl?: string;
   storageKey: string;
@@ -114,6 +115,10 @@ export interface UserImageAssetListItem {
   mimeType?: string;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface ListAllUserImageAssetsParams extends ListUserImageAssetsParams {
+  userId?: string;
 }
 
 export async function listByUser(
@@ -140,6 +145,52 @@ export async function listByUser(
 
   const items: UserImageAssetListItem[] = docs.map((d: any) => ({
     id: String(d._id),
+    userId: String(d.userId || ""),
+    url: d.url,
+    ...(d.thumbUrl ? { thumbUrl: d.thumbUrl } : {}),
+    storageKey: d.storageKey,
+    source: d.source,
+    refId: d.refId,
+    width: d.width ?? 0,
+    height: d.height ?? 0,
+    size: d.size ?? 0,
+    ...(d.mimeType ? { mimeType: d.mimeType } : {}),
+    createdAt:
+      d.createdAt instanceof Date ? d.createdAt.toISOString() : String(d.createdAt),
+    updatedAt:
+      d.updatedAt instanceof Date ? d.updatedAt.toISOString() : String(d.updatedAt),
+  }));
+
+  return { items, total };
+}
+
+export async function listAll(
+  params: ListAllUserImageAssetsParams = {},
+): Promise<{ items: UserImageAssetListItem[]; total: number }> {
+  const page = Math.max(1, params.page || 1);
+  const limit = Math.min(100, Math.max(1, params.limit || 20));
+  const skip = (page - 1) * limit;
+
+  const query: Record<string, unknown> = {};
+  if (params.source === "note" || params.source === "cover") {
+    query.source = params.source;
+  }
+  if (params.userId) {
+    query.userId = params.userId;
+  }
+
+  const [docs, total] = await Promise.all([
+    UserImageAsset.find(query)
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limit)
+      .lean(),
+    UserImageAsset.countDocuments(query),
+  ]);
+
+  const items: UserImageAssetListItem[] = docs.map((d: any) => ({
+    id: String(d._id),
+    userId: String(d.userId || ""),
     url: d.url,
     ...(d.thumbUrl ? { thumbUrl: d.thumbUrl } : {}),
     storageKey: d.storageKey,

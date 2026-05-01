@@ -112,6 +112,7 @@ export class AdminTemplateService {
     fields: { title: string; content: string; tags: string[] };
     systemKey?: string;
     enabled?: boolean;
+    priority?: number;
   }): Promise<ITemplate> {
     const t = new Template({
       userId: "system",
@@ -125,6 +126,7 @@ export class AdminTemplateService {
       isSystem: true,
       systemKey: data.systemKey?.trim() || undefined,
       enabled: data.enabled ?? true,
+      priority: Number.isFinite(data.priority) ? Number(data.priority) : 100,
     });
     await t.save();
     return t;
@@ -170,6 +172,7 @@ export class AdminTemplateService {
       description?: string;
       systemKey?: string;
       enabled?: boolean;
+      priority?: number;
       fields?: { title?: string; content?: string; tags?: string[] };
     },
   ): Promise<ITemplate | null> {
@@ -189,6 +192,9 @@ export class AdminTemplateService {
     }
     if (data.enabled !== undefined) {
       template.enabled = Boolean(data.enabled);
+    }
+    if (data.priority !== undefined && Number.isFinite(data.priority)) {
+      template.priority = Number(data.priority);
     }
     if (data.fields) {
       if (data.fields.title !== undefined) {

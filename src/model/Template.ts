@@ -15,6 +15,8 @@ export interface ITemplate extends Document {
   systemKey?: string;
   /** 系统模板启用状态；用户模板固定视为启用 */
   enabled?: boolean;
+  /** 系统模板排序优先级，值越小越靠前 */
+  priority?: number;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -68,6 +70,11 @@ const templateSchema = new Schema(
     enabled: {
       type: Boolean,
       default: true,
+      index: true,
+    },
+    priority: {
+      type: Number,
+      default: 100,
       index: true,
     },
   },
