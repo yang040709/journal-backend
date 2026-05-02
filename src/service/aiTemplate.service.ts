@@ -3,6 +3,7 @@ import { z } from "zod";
 import { AI_TEMPLATE_SYSTEM_PROMPT, buildAiTemplateUserMessage } from "./aiTemplate.prompts";
 import { sanitizeModelText } from "./aiTextSanitize";
 import { rollbackAiUsage, reserveOneAiUsageOrThrow, remainingAfterUse } from "./aiUsageQuota";
+import { AiConsumptionLogService } from "./aiConsumptionLog.service";
 
 export type AiTemplateMode = "template_generate" | "template_rewrite";
 
@@ -133,6 +134,13 @@ export class AiTemplateService {
 
       const raw = completion.choices[0]?.message?.content?.trim() || "";
       const template = parseTemplateJson(raw);
+      void AiConsumptionLogService.recordTemplateSuccess({
+        userId: input.userId,
+        dateKey,
+        mode: input.mode,
+        userPrompt: userMessage,
+        outputText: JSON.stringify(template),
+      });
       const remainingToday = remainingAfterUse(dailyLimit, newUsed);
       return { template, remainingToday };
     } catch (e) {

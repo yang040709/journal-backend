@@ -37,6 +37,7 @@ import {
   MAX_RANGE_DAYS,
 } from "../service/adminOperationsReport.service";
 import { AdminQuotaService } from "../service/adminQuota.service";
+import { AiConsumptionLogService } from "../service/aiConsumptionLog.service";
 import { CoverService } from "../service/cover.service";
 import User from "../model/User";
 import PointsRuleChangeLog from "../model/PointsRuleChangeLog";
@@ -206,6 +207,25 @@ const quotaDailyListQuerySchema = z.object({
   userId: z.string().optional(),
   dateKeyFrom: z.string().optional(),
   dateKeyTo: z.string().optional(),
+}).refine((val) => val.page * val.limit <= MAX_PAGE_DEPTH, {
+  message: `分页深度超过限制（page*limit <= ${MAX_PAGE_DEPTH}）`,
+  path: ["page"],
+});
+
+const aiConsumptionLogListQuerySchema = z.object({
+  page: z.coerce.number().int().positive().optional().default(1),
+  limit: z.coerce.number().int().min(1).max(100).optional().default(20),
+  userId: z.string().optional(),
+  source: z.enum(["journal", "template"]).optional(),
+  mode: z.preprocess((v) => {
+    if (v == null || v === "") return undefined;
+    const s = String(v).trim();
+    return s.length ? s : undefined;
+  }, z.string().max(64).optional()),
+  dateKeyFrom: z.string().optional(),
+  dateKeyTo: z.string().optional(),
+  createdAtFrom: z.coerce.number().optional(),
+  createdAtTo: z.coerce.number().optional(),
 }).refine((val) => val.page * val.limit <= MAX_PAGE_DEPTH, {
   message: `分页深度超过限制（page*limit <= ${MAX_PAGE_DEPTH}）`,
   path: ["page"],
@@ -1306,6 +1326,34 @@ authed.post(
         return;
       }
       error(ctx, msg, ErrorCodes.PARAM_ERROR, 400);
+    }
+  },
+);
+
+authed.get(
+  "/ai-consumption-logs",
+  requireAdminPage(ADMIN_PAGE_NOTES),
+  async (ctx) => {
+    try {
+      const q = aiConsumptionLogListQuerySchema.parse(ctx.query);
+      const { items, total, page, limit } = await AiConsumptionLogService.listForAdmin({
+        page: q.page,
+        limit: q.limit,
+        userId: q.userId,
+        source: q.source,
+        mode: q.mode,
+        dateKeyFrom: q.dateKeyFrom,
+        dateKeyTo: q.dateKeyTo,
+        createdAtFrom: q.createdAtFrom,
+        createdAtTo: q.createdAtTo,
+      });
+      paginatedSuccess(ctx, items as unknown as Record<string, unknown>[], total, page, limit);
+    } catch (e) {
+      error(
+        ctx,
+        e instanceof Error ? e.message : "参数错误",
+        ErrorCodes.PARAM_ERROR,
+      );
     }
   },
 );

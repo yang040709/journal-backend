@@ -11,6 +11,7 @@ import ShareSecurityTask from "../model/ShareSecurityTask";
 import Template from "../model/Template";
 import User from "../model/User";
 import UserAdRewardLog from "../model/UserAdRewardLog";
+import UserAiConsumptionLog from "../model/UserAiConsumptionLog";
 import UserAiUsageDaily from "../model/UserAiUsageDaily";
 import UserFeedback from "../model/UserFeedback";
 import UserFeedbackImageQuotaDaily from "../model/UserFeedbackImageQuotaDaily";
@@ -27,6 +28,7 @@ type PurgeCollectionKey =
   | "pointsLedgers"
   | "uploadQuotaDaily"
   | "aiUsageDaily"
+  | "aiConsumptionLogs"
   | "feedbacks"
   | "feedbackImageQuotaDaily"
   | "shareSecurityTasks"
@@ -73,6 +75,7 @@ function blankStats(): PurgeStats {
     pointsLedgers: 0,
     uploadQuotaDaily: 0,
     aiUsageDaily: 0,
+    aiConsumptionLogs: 0,
     feedbacks: 0,
     feedbackImageQuotaDaily: 0,
     shareSecurityTasks: 0,
@@ -192,6 +195,7 @@ export class UserPurgeService {
         pointsLedgers,
         uploadQuotaDaily,
         aiUsageDaily,
+        aiConsumptionLogs,
         feedbacks,
         feedbackImageQuotaDaily,
         shareSecurityTasks,
@@ -208,6 +212,7 @@ export class UserPurgeService {
         PointsLedger.countDocuments({ userId }),
         UserUploadQuotaDaily.countDocuments({ userId }),
         UserAiUsageDaily.countDocuments({ userId }),
+        UserAiConsumptionLog.countDocuments({ userId }),
         UserFeedback.countDocuments({ userId }),
         UserFeedbackImageQuotaDaily.countDocuments({ userId }),
         ShareSecurityTask.countDocuments({ userId }),
@@ -227,6 +232,7 @@ export class UserPurgeService {
         pointsLedgers,
         uploadQuotaDaily,
         aiUsageDaily,
+        aiConsumptionLogs,
         feedbacks,
         feedbackImageQuotaDaily,
         shareSecurityTasks,
@@ -266,6 +272,7 @@ export class UserPurgeService {
         PointsLedger.deleteMany({ userId }, opt as any),
         UserUploadQuotaDaily.deleteMany({ userId }, opt as any),
         UserAiUsageDaily.deleteMany({ userId }, opt as any),
+        UserAiConsumptionLog.deleteMany({ userId }, opt as any),
         UserFeedback.deleteMany({ userId }, opt as any),
         UserFeedbackImageQuotaDaily.deleteMany({ userId }, opt as any),
         ShareSecurityTask.deleteMany({ userId }, opt as any),

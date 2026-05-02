@@ -16,6 +16,7 @@ import {
   appendPlatformSystemSuffix,
   truncateAiNoteOutput,
 } from "../constant/aiNoteOutputPolicy";
+import { AiConsumptionLogService } from "./aiConsumptionLog.service";
 
 export type AiNoteMode = "generate" | "rewrite" | "continue";
 
@@ -134,6 +135,15 @@ export class AiNoteService {
       if (!text) {
         throw new Error("AI 未返回有效内容，请稍后重试");
       }
+
+      void AiConsumptionLogService.recordJournalSuccess({
+        userId: input.userId,
+        dateKey,
+        mode: input.mode,
+        styleKey: style.styleKey,
+        userPrompt: prompts.userPrompt,
+        outputText: text,
+      });
 
       const remainingToday = remainingAfterUse(dailyLimit, newUsed);
       return { text, remainingToday, styleKey: style.styleKey };
