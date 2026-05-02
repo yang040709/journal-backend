@@ -108,7 +108,7 @@ export class AdminGalleryService {
     const ext = getFileExt(input.fileName, input.fileType);
     const id = randomUUID();
     const key = `${uploadDir}/admin-gallery/${input.biz}/${month}/${id}${ext}`;
-    const thumbKey = input.withThumb ? `${uploadDir}/admin-gallery/${input.biz}/${month}/${id}-mini.jpg` : undefined;
+    const thumbKey = input.withThumb ? `${uploadDir}/admin-gallery/${input.biz}/${month}/${id}-mini${ext}` : undefined;
     const resources =
       thumbKey != null
         ? [createCosResource(bucket, region, key), createCosResource(bucket, region, thumbKey)]
