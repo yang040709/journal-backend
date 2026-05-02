@@ -2467,6 +2467,28 @@ authed.get(
   },
 );
 
+authed.delete(
+  "/gallery/images/:id",
+  requireAdminPage(ADMIN_PAGE_GALLERY),
+  async (ctx) => {
+    try {
+      const ok = await AdminGalleryService.hideImage(ctx.params.id || "");
+      if (!ok) {
+        error(ctx, "记录不存在或 id 无效", ErrorCodes.NOT_FOUND, 404);
+        return;
+      }
+      success(ctx, { hidden: true }, "已从图库移除");
+    } catch (e) {
+      error(
+        ctx,
+        e instanceof Error ? e.message : "移除失败",
+        ErrorCodes.INTERNAL_ERROR,
+        500,
+      );
+    }
+  },
+);
+
 authed.post(
   "/users",
   requireAdminPage(ADMIN_PAGE_USERS),

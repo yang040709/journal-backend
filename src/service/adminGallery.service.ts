@@ -1,4 +1,5 @@
 import { randomUUID } from "crypto";
+import mongoose from "mongoose";
 import STS from "qcloud-cos-sts";
 import AdminGalleryImage, { AdminGalleryBiz } from "../model/AdminGalleryImage";
 
@@ -179,6 +180,7 @@ export class AdminGalleryService {
           createdByAdminUsername: input.createdByAdminUsername
             ? String(input.createdByAdminUsername).trim()
             : undefined,
+          hiddenFromGallery: false,
         },
       },
       { new: true, upsert: true, setDefaultsOnInsert: true },
@@ -195,11 +197,25 @@ export class AdminGalleryService {
     const limit = Math.min(100, Math.max(1, Number(params.limit || 20)));
     const skip = (page - 1) * limit;
     const biz = params.biz || "system_cover";
-    const query = { biz };
+    const query = { biz, hiddenFromGallery: { $ne: true } };
     const [items, total] = await Promise.all([
       AdminGalleryImage.find(query).sort({ createdAt: -1 }).skip(skip).limit(limit).lean(),
       AdminGalleryImage.countDocuments(query),
     ]);
     return { items, total, page, limit };
+  }
+
+  /** 仅从后台图库列表隐藏，不删除 COS 对象 */
+  static async hideImage(id: string): Promise<boolean> {
+    const trimmed = String(id || "").trim();
+    if (!mongoose.Types.ObjectId.isValid(trimmed)) {
+      return false;
+    }
+    const res = await AdminGalleryImage.findOneAndUpdate(
+      { _id: new mongoose.Types.ObjectId(trimmed), biz: "system_cover" },
+      { $set: { hiddenFromGallery: true } },
+      { new: true },
+    ).lean();
+    return !!res;
   }
 }

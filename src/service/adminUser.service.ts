@@ -25,6 +25,8 @@ import { signToken } from "../utils/jwt";
 type LeanUserRow = {
   _id: { toString: () => string };
   userId: string;
+  nickname?: string;
+  avatarUrl?: string;
   points?: number;
   adRewardDailyLimit?: number | null;
   aiBonusQuota?: number;
@@ -238,6 +240,8 @@ export class AdminUserService {
     return {
       id: user._id.toString(),
       userId: user.userId,
+      nickname: String(user.nickname ?? "").trim(),
+      avatarUrl: String(user.avatarUrl ?? "").trim(),
       points: pts === undefined || pts === null ? 200 : Math.max(0, Math.floor(Number(pts))),
       adRewardDailyLimit:
         typeof user.adRewardDailyLimit === "number" && user.adRewardDailyLimit >= 1

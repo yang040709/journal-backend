@@ -14,6 +14,8 @@ export interface IAdminGalleryImage extends Document {
   biz: AdminGalleryBiz;
   createdByAdminId: string;
   createdByAdminUsername?: string;
+  /** 后台「从图库移除」仅隐藏列表，不删 COS */
+  hiddenFromGallery?: boolean;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -40,6 +42,7 @@ const adminGalleryImageSchema = new Schema<IAdminGalleryImage>(
     },
     createdByAdminId: { type: String, required: true, trim: true, index: true },
     createdByAdminUsername: { type: String, trim: true },
+    hiddenFromGallery: { type: Boolean, default: false },
   },
   { timestamps: true },
 );
