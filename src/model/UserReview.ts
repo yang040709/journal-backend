@@ -6,6 +6,7 @@ export interface IUserReview extends Document {
   content: string;
   username: string;
   tag: string;
+  imageUrl: string;
   status: UserReviewStatus;
   sortOrder: number;
   createdAt: Date;
@@ -30,6 +31,12 @@ const userReviewSchema = new Schema<IUserReview>(
       type: String,
       trim: true,
       maxlength: 64,
+      default: "",
+    },
+    imageUrl: {
+      type: String,
+      trim: true,
+      maxlength: 2048,
       default: "",
     },
     status: {

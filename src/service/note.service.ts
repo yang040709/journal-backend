@@ -111,7 +111,8 @@ const NOTE_TAG_MAX_COUNT = 100;
 const MAX_PAGE_DEPTH = 10_000;
 const MIN_SEARCH_KEYWORD_LENGTH = 1;
 const WECHAT_OPENID_PATTERN = /^o[A-Za-z0-9_-]{15,63}$/;
-const MAX_PINNED_PER_NOTEBOOK = 5;
+/** 与 AdminNoteService 管理端编辑置顶共用上限 */
+export const MAX_PINNED_PER_NOTEBOOK = 5;
 
 type NoteListSortField = "createdAt" | "updatedAt" | "title" | "favoritedAt";
 

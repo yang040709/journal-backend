@@ -3,7 +3,11 @@ import NoteBook from "../model/NoteBook";
 import { nanoid } from "nanoid";
 import { toLeanNote, toLeanNoteArray } from "../utils/typeUtils";
 import { LeanNote } from "../types/mongoose";
-import { PaginationParams } from "./note.service";
+import {
+  MAX_PINNED_PER_NOTEBOOK,
+  NotePinLimitExceededError,
+  PaginationParams,
+} from "./note.service";
 import { checkNoteContent } from "../utils/sensitive-encrypted";
 import { ActivityLogger } from "../utils/ActivityLogger";
 import ShareSecurityTask from "../model/ShareSecurityTask";
@@ -33,6 +37,11 @@ export interface AdminUpdateNoteData {
   tags?: string[];
   noteBookId?: string;
   images?: INoteImage[];
+  isShare?: boolean;
+  isPinned?: boolean;
+  isFavorite?: boolean;
+  /** 传 `null` 或空串表示清空 */
+  appliedSystemTemplateKey?: string | null;
 }
 
 export type AdminNoteListItem = LeanNote & { sharePath?: string };
@@ -41,6 +50,10 @@ export interface AdminNoteListParams extends PaginationParams {
   userId?: string;
   /** 不传则不限；true/false 筛选是否已开启分享 */
   isShare?: boolean;
+  /** 不传则不限；筛选是否收藏 */
+  isFavorite?: boolean;
+  /** 不传则不限；筛选是否置顶 */
+  isPinned?: boolean;
   /** 标题/正文 $text 检索；与 tags 同时存在时忽略 tags */
   q?: string;
 }
@@ -82,7 +95,14 @@ export interface RiskSnapshotPayload {
 export function buildAdminNoteListQuery(
   params: Pick<
     AdminNoteListParams,
-    "userId" | "noteBookId" | "tags" | "startTime" | "endTime" | "isShare"
+    | "userId"
+    | "noteBookId"
+    | "tags"
+    | "startTime"
+    | "endTime"
+    | "isShare"
+    | "isFavorite"
+    | "isPinned"
   >,
 ): Record<string, unknown> {
   const query: Record<string, unknown> = {};
@@ -109,6 +129,12 @@ export function buildAdminNoteListQuery(
   }
   if (params.isShare === true || params.isShare === false) {
     query.isShare = params.isShare;
+  }
+  if (params.isFavorite === true || params.isFavorite === false) {
+    query.isFavorite = params.isFavorite;
+  }
+  if (params.isPinned === true || params.isPinned === false) {
+    query.isPinned = params.isPinned;
   }
   return query;
 }
@@ -335,6 +361,26 @@ export class AdminNoteService {
     return note;
   }
 
+  /** 与 adminSetShareStatus 开启/关闭分享逻辑一致（会_mutate_标题正文敏感词） */
+  private static applyShareFields(note: INote, share: boolean): void {
+    if (!note.shareId) {
+      note.shareId = nanoid(12);
+    }
+    if (share) {
+      const checkResult = checkNoteContent(note.title, note.content);
+      if (checkResult.hasAnySensitive) {
+        note.title = checkResult.processedTitle;
+        note.content = checkResult.processedContent;
+      }
+      note.isShare = true;
+      if (!note.firstSharedAt) {
+        note.firstSharedAt = new Date();
+      }
+    } else {
+      note.isShare = false;
+    }
+  }
+
   static async updateNote(
     id: string,
     data: AdminUpdateNoteData,
@@ -343,6 +389,8 @@ export class AdminNoteService {
     if (!note) {
       return null;
     }
+
+    const prevIsShare = note.isShare;
 
     if (data.noteBookId && data.noteBookId !== note.noteBookId) {
       const newNb = await NoteBook.findOne({
@@ -357,12 +405,71 @@ export class AdminNoteService {
         NoteBook.updateOne({ _id: data.noteBookId }, { $inc: { count: 1 } }),
       ]);
       note.noteBookId = data.noteBookId;
+      note.isPinned = false;
+      note.pinnedAt = null;
     }
 
     if (data.title !== undefined) note.title = data.title;
     if (data.content !== undefined) note.content = data.content;
     if (data.tags !== undefined) note.tags = data.tags;
     if (data.images !== undefined) note.images = data.images;
+
+    if (data.appliedSystemTemplateKey !== undefined) {
+      const k = data.appliedSystemTemplateKey;
+      if (k === null || k === "") {
+        note.set("appliedSystemTemplateKey", undefined);
+      } else {
+        note.appliedSystemTemplateKey = String(k).trim().slice(0, 120);
+      }
+    }
+
+    if (data.isFavorite !== undefined) {
+      note.isFavorite = data.isFavorite;
+      note.favoritedAt = data.isFavorite ? new Date() : null;
+    }
+
+    if (data.isPinned !== undefined) {
+      if (data.isPinned) {
+        const wasPinned = Boolean(note.isPinned);
+        if (!wasPinned) {
+          const pinnedCount = await Note.countDocuments({
+            userId: note.userId,
+            noteBookId: note.noteBookId,
+            isPinned: true,
+            isDeleted: { $ne: true },
+            _id: { $ne: note._id },
+          });
+          if (pinnedCount >= MAX_PINNED_PER_NOTEBOOK) {
+            throw new NotePinLimitExceededError();
+          }
+        }
+        note.isPinned = true;
+        if (!wasPinned) {
+          note.pinnedAt = new Date();
+        }
+      } else {
+        note.isPinned = false;
+        note.pinnedAt = null;
+      }
+    }
+
+    if (data.isShare !== undefined) {
+      AdminNoteService.applyShareFields(note, data.isShare);
+      if (data.isShare !== prevIsShare) {
+        void ActivityLogger.record(
+          {
+            type: data.isShare ? "share_enable" : "share_disable",
+            target: "note",
+            targetId: String(note._id),
+            title: data.isShare
+              ? `开启手帐分享：${note.title}`
+              : `关闭手帐分享：${note.title}`,
+            userId: note.userId,
+          },
+          { blocking: false },
+        );
+      }
+    }
 
     await note.save();
     return note;
@@ -384,22 +491,7 @@ export class AdminNoteService {
     if (!note) {
       return false;
     }
-    if (!note.shareId) {
-      note.shareId = nanoid(12);
-    }
-    if (share) {
-      const checkResult = checkNoteContent(note.title, note.content);
-      if (checkResult.hasAnySensitive) {
-        note.title = checkResult.processedTitle;
-        note.content = checkResult.processedContent;
-      }
-      note.isShare = true;
-      if (!note.firstSharedAt) {
-        note.firstSharedAt = new Date();
-      }
-    } else {
-      note.isShare = false;
-    }
+    AdminNoteService.applyShareFields(note, share);
     await note.save({ timestamps: false });
     void ActivityLogger.record(
       {

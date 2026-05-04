@@ -39,6 +39,7 @@ import {
 import { AdminQuotaService } from "../service/adminQuota.service";
 import { AiConsumptionLogService } from "../service/aiConsumptionLog.service";
 import { CoverService } from "../service/cover.service";
+import { BrowseBannerService } from "../service/browseBanner.service";
 import User from "../model/User";
 import PointsRuleChangeLog from "../model/PointsRuleChangeLog";
 import { PointsService } from "../service/points.service";
@@ -129,17 +130,20 @@ const tagsQuery = z.preprocess((val) => {
   return undefined;
 }, z.array(z.string()).optional());
 
+const booleanQueryParam = z.preprocess((v) => {
+  if (v === undefined || v === "") return undefined;
+  if (v === "true" || v === true) return true;
+  if (v === "false" || v === false) return false;
+  return undefined;
+}, z.boolean().optional());
+
 const noteListQuerySchema = paginationSchema.safeExtend({
   tags: tagsQuery,
   startTime: z.coerce.number().optional(),
   endTime: z.coerce.number().optional(),
-  isShare: z
-    .preprocess((v) => {
-      if (v === undefined || v === "") return undefined;
-      if (v === "true" || v === true) return true;
-      if (v === "false" || v === false) return false;
-      return undefined;
-    }, z.boolean().optional()),
+  isShare: booleanQueryParam,
+  isFavorite: booleanQueryParam,
+  isPinned: booleanQueryParam,
   /** 标题/正文全文检索（MongoDB $text）；与 tags 同时传时忽略 tags */
   q: optionalKeywordSchema(100),
 });
@@ -322,6 +326,12 @@ const updateNoteSchema = z.object({
   tags: z.array(z.string()).optional(),
   noteBookId: z.string().optional(),
   images: z.array(noteImageSchema).max(9).optional(),
+  isShare: z.boolean().optional(),
+  isPinned: z.boolean().optional(),
+  isFavorite: z.boolean().optional(),
+  appliedSystemTemplateKey: z
+    .union([z.string().trim().max(120), z.literal(""), z.null()])
+    .optional(),
 });
 
 const createNoteBookSchema = z.object({
@@ -591,6 +601,20 @@ const adminQuickCoversBodySchema = z.object({
 
 const adminSystemCoversPutSchema = z.object({
   coverUrls: z.array(z.string().min(1)).min(1, "至少一条封面 URL"),
+});
+
+const adminBrowseBannersPutSchema = z.object({
+  items: z.array(
+    z.object({
+      imageUrl: z.string().min(1),
+      type: z.enum(["none", "link", "preview_image"]),
+      linkPath: z.string().optional(),
+      previewImageUrl: z.string().optional(),
+      priority: z.coerce.number(),
+      enabled: z.coerce.boolean(),
+      title: z.string().optional(),
+    }),
+  ),
 });
 
 const adminNotePresetTagsPutSchema = z.object({
@@ -1066,6 +1090,37 @@ authed.put(
 );
 
 authed.get(
+  "/system/browse-banners",
+  requireSuperAdmin(),
+  async (ctx) => {
+    const data = await BrowseBannerService.getForAdmin();
+    success(ctx, data);
+  },
+);
+
+authed.put(
+  "/system/browse-banners",
+  requireSuperAdmin(),
+  async (ctx) => {
+    try {
+      const body = adminBrowseBannersPutSchema.parse(ctx.request.body);
+      const r = await BrowseBannerService.setForAdmin(body.items);
+      success(ctx, r);
+    } catch (e) {
+      if (e instanceof z.ZodError) {
+        error(ctx, "参数验证失败", ErrorCodes.PARAM_ERROR, 400);
+        return;
+      }
+      error(
+        ctx,
+        e instanceof Error ? e.message : "保存失败",
+        ErrorCodes.PARAM_ERROR,
+      );
+    }
+  },
+);
+
+authed.get(
   "/system/initial-notebooks",
   requireSuperAdmin(),
   async (ctx) => {
@@ -1376,6 +1431,8 @@ authed.get(
         startTime: q.startTime,
         endTime: q.endTime,
         isShare: q.isShare,
+        isFavorite: q.isFavorite,
+        isPinned: q.isPinned,
         q: q.q,
       });
       paginatedSuccess(ctx, items, total, q.page, q.limit);
@@ -2898,6 +2955,7 @@ const adminReviewCreateSchema = z.object({
   content: z.string().trim().min(1).max(1000),
   username: z.string().trim().min(1).max(64),
   tag: z.string().trim().max(64).optional().default(""),
+  imageUrl: z.string().trim().max(2048).optional().default(""),
   status: z.enum(["on", "off"]).optional().default("on"),
   sortOrder: z.coerce.number().int().min(-999999).max(999999).optional().default(0),
 });
@@ -2906,6 +2964,7 @@ const adminReviewUpdateSchema = z.object({
   content: z.string().trim().min(1).max(1000).optional(),
   username: z.string().trim().min(1).max(64).optional(),
   tag: z.string().trim().max(64).optional(),
+  imageUrl: z.string().trim().max(2048).optional(),
   status: z.enum(["on", "off"]).optional(),
   sortOrder: z.coerce.number().int().min(-999999).max(999999).optional(),
 });
@@ -2995,6 +3054,7 @@ authed.put(
         body.content === undefined &&
         body.username === undefined &&
         body.tag === undefined &&
+        body.imageUrl === undefined &&
         body.status === undefined &&
         body.sortOrder === undefined
       ) {

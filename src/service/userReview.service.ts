@@ -13,6 +13,7 @@ function serializeRow(row: Partial<IUserReview> & { _id?: unknown }) {
     content: String(row.content || ""),
     username: String(row.username || ""),
     tag: String(row.tag || ""),
+    imageUrl: String(row.imageUrl || "").trim(),
     status: (row.status || "on") as UserReviewStatus,
     sortOrder: toInt(row.sortOrder, 0, -999999, 999999),
     createdAt: row.createdAt instanceof Date ? row.createdAt.toISOString() : row.createdAt || null,
@@ -65,6 +66,7 @@ export class UserReviewService {
     content: string;
     username: string;
     tag?: string;
+    imageUrl?: string;
     status?: UserReviewStatus;
     sortOrder?: number;
   }) {
@@ -72,6 +74,7 @@ export class UserReviewService {
       content: String(input.content || "").trim(),
       username: String(input.username || "").trim(),
       tag: String(input.tag || "").trim(),
+      imageUrl: String(input.imageUrl ?? "").trim(),
       status: input.status || "on",
       sortOrder: toInt(input.sortOrder, 0, -999999, 999999),
     });
@@ -84,6 +87,7 @@ export class UserReviewService {
       content: string;
       username: string;
       tag: string;
+      imageUrl: string;
       status: UserReviewStatus;
       sortOrder: number;
     }>,
@@ -92,6 +96,7 @@ export class UserReviewService {
     if (input.content !== undefined) set.content = String(input.content || "").trim();
     if (input.username !== undefined) set.username = String(input.username || "").trim();
     if (input.tag !== undefined) set.tag = String(input.tag || "").trim();
+    if (input.imageUrl !== undefined) set.imageUrl = String(input.imageUrl || "").trim();
     if (input.status !== undefined) set.status = input.status;
     if (input.sortOrder !== undefined) {
       set.sortOrder = toInt(input.sortOrder, 0, -999999, 999999);

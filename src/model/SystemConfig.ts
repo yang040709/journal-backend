@@ -10,6 +10,19 @@ export const SYSTEM_CONFIG_POINTS_RULES_KEY = "points_rules";
 export const SYSTEM_CONFIG_QUOTA_BASE_LIMITS_KEY = "quota_base_limits";
 /** 手帐 xlsx 导出规则（JSON 存于 exportSettings） */
 export const SYSTEM_CONFIG_EXPORT_SETTINGS_KEY = "export_settings";
+/** 浏览 Tab 顶部轮播（仅 configKey=browse_banners 使用） */
+export const SYSTEM_CONFIG_BROWSE_BANNERS_KEY = "browse_banners";
+
+export type BrowseBannerItem = {
+  imageUrl: string;
+  /** 纯展示不跳转；link 需配 linkPath；preview_image 需配 previewImageUrl */
+  type: "none" | "link" | "preview_image";
+  linkPath?: string;
+  previewImageUrl?: string;
+  priority: number;
+  enabled: boolean;
+  title?: string;
+};
 
 export type InitialNotebookTemplate = {
   title: string;
@@ -45,6 +58,8 @@ export interface ISystemConfig extends Document {
   quotaBaseLimits?: Record<string, unknown> | null;
   /** 仅 configKey=export_settings 使用 */
   exportSettings?: Record<string, unknown> | null;
+  /** 仅 configKey=browse_banners 使用 */
+  browseBanners?: BrowseBannerItem[];
   createdAt: Date;
   updatedAt: Date;
 }
@@ -100,6 +115,20 @@ const systemConfigSchema = new Schema(
     },
     exportSettings: {
       type: Schema.Types.Mixed,
+    },
+    browseBanners: {
+      type: [
+        {
+          imageUrl: { type: String, default: "" },
+          type: { type: String, enum: ["none", "link", "preview_image"], default: "none" },
+          linkPath: { type: String, default: "" },
+          previewImageUrl: { type: String, default: "" },
+          priority: { type: Number, default: 0 },
+          enabled: { type: Boolean, default: true },
+          title: { type: String, default: "" },
+        },
+      ],
+      default: [],
     },
   },
   { timestamps: true },
