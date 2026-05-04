@@ -15,6 +15,7 @@ import {
   ADMIN_PAGE_AI_STYLES,
   ADMIN_PAGE_GALLERY,
   ADMIN_PAGE_FEEDBACKS,
+  ADMIN_PAGE_ANNOUNCEMENTS,
   ADMIN_PAGE_POINTS_CAMPAIGNS,
   ADMIN_PAGE_REVIEWS,
 } from "../constant/adminPages";
@@ -63,6 +64,7 @@ import {
 import { InitialUserNoteSeedConfigService } from "../service/initialUserNoteSeedConfig.service";
 import { AdminGalleryService } from "../service/adminGallery.service";
 import { FeedbackService } from "../service/feedback.service";
+import { AnnouncementService } from "../service/announcement.service";
 import {
   CampaignNotFoundError,
   PointsCampaignService,
@@ -449,6 +451,37 @@ const feedbackExportQuerySchema = z.object({
 const feedbackNextQuerySchema = z.object({
   currentId: z.string().trim().optional(),
   direction: z.enum(["next", "prev"]).optional().default("next"),
+});
+
+const announcementListQuerySchema = z
+  .object({
+    page: z.coerce.number().int().positive().optional().default(1),
+    limit: z.coerce.number().int().min(1).max(100).optional().default(20),
+    status: z.enum(["draft", "published", "offline"]).optional(),
+    keyword: optionalKeywordSchema(100),
+    sortBy: z.enum(["updatedAt", "createdAt", "priority", "publishedAt", "status"]).optional(),
+    order: z.enum(["asc", "desc"]).optional(),
+  })
+  .refine((val) => val.page * val.limit <= MAX_PAGE_DEPTH, {
+    message: `分页深度超过限制（page*limit <= ${MAX_PAGE_DEPTH}）`,
+    path: ["page"],
+  });
+
+const announcementCreateBodySchema = z.object({
+  title: z.string().trim().min(1).max(120),
+  content: z.string().trim().min(1).max(20_000),
+  images: z.array(z.string().trim().url("图片 URL 格式不正确")).max(30).optional().default([]),
+  priority: z.number().int().min(-1_000_000).max(1_000_000).optional(),
+  showViewCount: z.boolean().optional(),
+  status: z.enum(["draft", "published", "offline"]).optional(),
+});
+
+const announcementUpdateBodySchema = z.object({
+  title: z.string().trim().min(1).max(120).optional(),
+  content: z.string().trim().min(1).max(20_000).optional(),
+  images: z.array(z.string().trim().url("图片 URL 格式不正确")).max(30).optional(),
+  priority: z.number().int().min(-1_000_000).max(1_000_000).optional(),
+  showViewCount: z.boolean().optional(),
 });
 
 const adminQuotaBaseLimitsPutSchema = z
@@ -3286,6 +3319,124 @@ authed.get(
         ErrorCodes.PARAM_ERROR,
       );
     }
+  },
+);
+
+authed.get(
+  "/announcements",
+  requireAdminPage(ADMIN_PAGE_ANNOUNCEMENTS),
+  async (ctx) => {
+    try {
+      const q = announcementListQuerySchema.parse(ctx.query);
+      const { items, total, page, limit } = await AnnouncementService.adminList(q);
+      paginatedSuccess(ctx, items, total, page, limit);
+    } catch (e) {
+      if (e instanceof z.ZodError) {
+        error(ctx, "参数验证失败", ErrorCodes.PARAM_ERROR, 400);
+        return;
+      }
+      error(ctx, e instanceof Error ? e.message : "加载失败", ErrorCodes.INTERNAL_ERROR, 500);
+    }
+  },
+);
+
+authed.post(
+  "/announcements",
+  requireAdminPage(ADMIN_PAGE_ANNOUNCEMENTS),
+  async (ctx) => {
+    try {
+      const body = announcementCreateBodySchema.parse(ctx.request.body);
+      const row = await AnnouncementService.adminCreate(body, { id: ctx.state.admin?.id });
+      success(ctx, row, "创建成功");
+    } catch (e) {
+      if (e instanceof z.ZodError) {
+        error(ctx, "参数验证失败", ErrorCodes.PARAM_ERROR, 400);
+        return;
+      }
+      error(ctx, e instanceof Error ? e.message : "创建失败", ErrorCodes.INTERNAL_ERROR, 500);
+    }
+  },
+);
+
+authed.get(
+  "/announcements/:id",
+  requireAdminPage(ADMIN_PAGE_ANNOUNCEMENTS),
+  async (ctx) => {
+    const row = await AnnouncementService.adminGetById(String(ctx.params.id || ""));
+    if (!row) {
+      error(ctx, "公告不存在", ErrorCodes.NOT_FOUND, 404);
+      return;
+    }
+    success(ctx, row);
+  },
+);
+
+authed.put(
+  "/announcements/:id",
+  requireAdminPage(ADMIN_PAGE_ANNOUNCEMENTS),
+  async (ctx) => {
+    try {
+      const body = announcementUpdateBodySchema.parse(ctx.request.body);
+      const row = await AnnouncementService.adminUpdate(
+        String(ctx.params.id || ""),
+        body,
+        { id: ctx.state.admin?.id },
+      );
+      if (!row) {
+        error(ctx, "公告不存在", ErrorCodes.NOT_FOUND, 404);
+        return;
+      }
+      success(ctx, row, "保存成功");
+    } catch (e) {
+      if (e instanceof z.ZodError) {
+        error(ctx, "参数验证失败", ErrorCodes.PARAM_ERROR, 400);
+        return;
+      }
+      error(ctx, e instanceof Error ? e.message : "保存失败", ErrorCodes.INTERNAL_ERROR, 500);
+    }
+  },
+);
+
+authed.post(
+  "/announcements/:id/publish",
+  requireAdminPage(ADMIN_PAGE_ANNOUNCEMENTS),
+  async (ctx) => {
+    const row = await AnnouncementService.adminPublish(String(ctx.params.id || ""), {
+      id: ctx.state.admin?.id,
+    });
+    if (!row) {
+      error(ctx, "公告不存在", ErrorCodes.NOT_FOUND, 404);
+      return;
+    }
+    success(ctx, row, "发布成功");
+  },
+);
+
+authed.post(
+  "/announcements/:id/offline",
+  requireAdminPage(ADMIN_PAGE_ANNOUNCEMENTS),
+  async (ctx) => {
+    const row = await AnnouncementService.adminOffline(String(ctx.params.id || ""), {
+      id: ctx.state.admin?.id,
+    });
+    if (!row) {
+      error(ctx, "公告不存在或未发布", ErrorCodes.NOT_FOUND, 404);
+      return;
+    }
+    success(ctx, row, "下线成功");
+  },
+);
+
+authed.delete(
+  "/announcements/:id",
+  requireAdminPage(ADMIN_PAGE_ANNOUNCEMENTS),
+  async (ctx) => {
+    const ok = await AnnouncementService.adminDeleteDraft(String(ctx.params.id || ""));
+    if (!ok) {
+      error(ctx, "仅草稿公告可删除", ErrorCodes.PARAM_ERROR, 400);
+      return;
+    }
+    success(ctx, { deleted: true }, "删除成功");
   },
 );
 
