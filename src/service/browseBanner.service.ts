@@ -2,10 +2,12 @@ import SystemConfig, {
   SYSTEM_CONFIG_BROWSE_BANNERS_KEY,
   type BrowseBannerItem,
 } from "../model/SystemConfig";
+import { Types } from "mongoose";
 
 export const MAX_BROWSE_BANNERS = 30;
 
 export type BrowseBannerPublicItem = {
+  id: string;
   imageUrl: string;
   type: "none" | "link" | "preview_image";
   linkPath?: string;
@@ -13,7 +15,10 @@ export type BrowseBannerPublicItem = {
   title?: string;
 };
 
-export type BrowseBannerAdminItem = BrowseBannerItem & { id: string };
+export type BrowseBannerAdminItem = Omit<BrowseBannerItem, "clickUvUsers"> & {
+  id: string;
+  clickUv: number;
+};
 
 function maxBanners(): number {
   const n = Number(process.env.MAX_BROWSE_BANNERS);
@@ -64,6 +69,16 @@ function assertPreviewImageUrl(raw: string, imageUrl: string): string {
   return u;
 }
 
+function normalizeNonNegativeInt(input: unknown): number {
+  const n = Number(input);
+  if (!Number.isFinite(n)) return 0;
+  return Math.max(0, Math.floor(n));
+}
+
+function normalizeUserId(raw: unknown): string {
+  return String(raw || "").trim().slice(0, 128);
+}
+
 function normalizeInputItem(
   input: Record<string, unknown>,
   index: number,
@@ -108,7 +123,8 @@ function normalizeInputItem(
   } else if (input.previewImageUrl != null && String(input.previewImageUrl).trim()) {
     throw new Error(`第 ${index + 1} 条：类型为「仅展示」时不应填写预览图片链接`);
   }
-  return {
+  const id = String(input.id ?? "").trim();
+  const normalized: BrowseBannerItem = {
     imageUrl,
     type,
     ...(linkPath ? { linkPath } : {}),
@@ -117,6 +133,16 @@ function normalizeInputItem(
     enabled,
     ...(title ? { title } : {}),
   };
+  if (id) {
+    if (!Types.ObjectId.isValid(id)) {
+      throw new Error(`第 ${index + 1} 条：id 非法`);
+    }
+    return {
+      ...normalized,
+      _id: new Types.ObjectId(id),
+    } as BrowseBannerItem;
+  }
+  return normalized;
 }
 
 export class BrowseBannerService {
@@ -133,6 +159,7 @@ export class BrowseBannerService {
     const enabled = list.filter((b) => b.enabled && String(b.imageUrl || "").trim());
     enabled.sort((a, b) => (b.priority ?? 0) - (a.priority ?? 0));
     return enabled.map((b) => {
+      const id = String((b as { _id?: unknown })?._id || "").trim();
       const titleRaw =
         b?.title != null
           ? String(b.title).trim()
@@ -140,6 +167,7 @@ export class BrowseBannerService {
             ? String((b as { miniappTitle?: unknown }).miniappTitle).trim()
             : "";
       const base: BrowseBannerPublicItem = {
+        id,
         imageUrl: String(b.imageUrl).trim(),
         type:
           b.type === "link" ? "link" : b.type === "preview_image" ? "preview_image" : "none",
@@ -200,6 +228,12 @@ export class BrowseBannerService {
         type === "preview_image" && sub?.previewImageUrl
           ? String(sub.previewImageUrl).trim()
           : undefined;
+      const clickPv = normalizeNonNegativeInt(sub?.clickPv);
+      const clickUvUsers = Array.isArray(sub?.clickUvUsers)
+        ? sub.clickUvUsers
+            .map((x: unknown) => normalizeUserId(x))
+            .filter(Boolean)
+        : [];
       return {
         id,
         imageUrl,
@@ -208,6 +242,8 @@ export class BrowseBannerService {
         ...(previewImageUrl ? { previewImageUrl } : {}),
         priority,
         enabled,
+        clickPv,
+        clickUv: clickUvUsers.length,
         ...(title ? { title } : {}),
       };
     });
@@ -220,6 +256,7 @@ export class BrowseBannerService {
   /** 全量替换列表 */
   static async setForAdmin(
     inputs: Array<{
+      id?: string;
       imageUrl: string;
       type: "none" | "link" | "preview_image";
       linkPath?: string;
@@ -233,9 +270,43 @@ export class BrowseBannerService {
     if (inputs.length > max) {
       throw new Error(`轮播最多 ${max} 条`);
     }
-    const browseBanners: BrowseBannerItem[] = inputs.map((row, i) =>
-      normalizeInputItem(row as unknown as Record<string, unknown>, i),
-    );
+    const currentDoc = await SystemConfig.findOne({
+      configKey: SYSTEM_CONFIG_BROWSE_BANNERS_KEY,
+    })
+      .select({ browseBanners: 1 })
+      .lean();
+    const currentList = (currentDoc?.browseBanners || []) as BrowseBannerItem[];
+    const statsById = new Map<
+      string,
+      {
+        clickPv: number;
+        clickUvUsers: string[];
+      }
+    >();
+    for (const item of currentList) {
+      const id = String((item as { _id?: unknown })?._id || "").trim();
+      if (!id) continue;
+      statsById.set(id, {
+        clickPv: normalizeNonNegativeInt((item as { clickPv?: unknown }).clickPv),
+        clickUvUsers: Array.isArray((item as { clickUvUsers?: unknown[] }).clickUvUsers)
+          ? (item as { clickUvUsers?: unknown[] }).clickUvUsers!
+              .map((x) => normalizeUserId(x))
+              .filter(Boolean)
+          : [],
+      });
+    }
+    const browseBanners: BrowseBannerItem[] = inputs.map((row, i) => {
+      const normalized = normalizeInputItem(row as unknown as Record<string, unknown>, i);
+      const rawId = String(row.id || "").trim();
+      if (!rawId) return normalized;
+      const existingStats = statsById.get(rawId);
+      if (!existingStats) return normalized;
+      return {
+        ...normalized,
+        clickPv: existingStats.clickPv,
+        clickUvUsers: existingStats.clickUvUsers,
+      };
+    });
     const doc = await SystemConfig.findOneAndUpdate(
       { configKey: SYSTEM_CONFIG_BROWSE_BANNERS_KEY },
       { $set: { browseBanners } },
@@ -249,5 +320,39 @@ export class BrowseBannerService {
       items: next.items,
       updatedAt: next.updatedAt ?? new Date().toISOString(),
     };
+  }
+
+  static async recordClick(params: { bannerId: string; userId?: string | null }): Promise<void> {
+    const bannerId = String(params.bannerId || "").trim();
+    if (!Types.ObjectId.isValid(bannerId)) {
+      throw new Error("轮播 ID 非法");
+    }
+    const userId = normalizeUserId(params.userId);
+    const exists = await SystemConfig.exists({
+      configKey: SYSTEM_CONFIG_BROWSE_BANNERS_KEY,
+      "browseBanners._id": new Types.ObjectId(bannerId),
+    });
+    if (!exists) {
+      throw new Error("轮播不存在");
+    }
+    await SystemConfig.updateOne(
+      {
+        configKey: SYSTEM_CONFIG_BROWSE_BANNERS_KEY,
+        "browseBanners._id": new Types.ObjectId(bannerId),
+      },
+      {
+        $inc: { "browseBanners.$.clickPv": 1 },
+      },
+    );
+    if (!userId) return;
+    await SystemConfig.updateOne(
+      {
+        configKey: SYSTEM_CONFIG_BROWSE_BANNERS_KEY,
+        "browseBanners._id": new Types.ObjectId(bannerId),
+      },
+      {
+        $addToSet: { "browseBanners.$.clickUvUsers": userId },
+      },
+    );
   }
 }

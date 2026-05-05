@@ -14,6 +14,7 @@ export const SYSTEM_CONFIG_EXPORT_SETTINGS_KEY = "export_settings";
 export const SYSTEM_CONFIG_BROWSE_BANNERS_KEY = "browse_banners";
 
 export type BrowseBannerItem = {
+  _id?: unknown;
   imageUrl: string;
   /** 纯展示不跳转；link 需配 linkPath；preview_image 需配 previewImageUrl */
   type: "none" | "link" | "preview_image";
@@ -22,6 +23,10 @@ export type BrowseBannerItem = {
   priority: number;
   enabled: boolean;
   title?: string;
+  /** 点击 PV（登录+匿名） */
+  clickPv?: number;
+  /** 点击 UV 去重集合（仅登录用户） */
+  clickUvUsers?: string[];
 };
 
 export type InitialNotebookTemplate = {
@@ -126,6 +131,8 @@ const systemConfigSchema = new Schema(
           priority: { type: Number, default: 0 },
           enabled: { type: Boolean, default: true },
           title: { type: String, default: "" },
+          clickPv: { type: Number, default: 0, min: 0 },
+          clickUvUsers: { type: [String], default: [] },
         },
       ],
       default: [],
