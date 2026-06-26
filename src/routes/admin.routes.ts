@@ -73,6 +73,7 @@ import { AlertMetricService } from "../service/alertMetric.service";
 import { AlertRuleService } from "../service/alertRule.service";
 import AlertEvent from "../model/AlertEvent";
 import { UserReviewService } from "../service/userReview.service";
+import { optionalNoteImagesSchema } from "../schemas/noteImage.schema";
 
 const MAX_PAGE_DEPTH = (() => {
   const raw = String(process.env.ADMIN_MAX_PAGE_DEPTH ?? "").trim();
@@ -300,24 +301,12 @@ const adRewardLogListQuerySchema = z.object({
   path: ["page"],
 });
 
-const noteImageSchema = z.object({
-  url: z.string().url("图片URL格式不正确"),
-  key: z.string().min(1, "图片Key不能为空"),
-  thumbUrl: z.string().url("缩略图URL格式不正确").optional(),
-  thumbKey: z.string().min(1, "缩略图Key不能为空").optional(),
-  width: z.number().int().nonnegative(),
-  height: z.number().int().nonnegative(),
-  size: z.number().int().nonnegative(),
-  mimeType: z.enum(["image/jpeg", "image/png", "image/webp"]),
-  createdAt: z.coerce.date().optional(),
-});
-
 const createNoteSchema = z.object({
   noteBookId: z.string().min(1),
   title: z.string().min(1).max(200),
   content: z.string(),
   tags: z.array(z.string()).optional().default([]),
-  images: z.array(noteImageSchema).max(9).optional(),
+  images: optionalNoteImagesSchema,
   userId: z.string().min(1, "所属用户 userId 不能为空"),
   appliedSystemTemplateKey: z.string().trim().max(120).optional(),
 });
@@ -327,7 +316,7 @@ const updateNoteSchema = z.object({
   content: z.string().optional(),
   tags: z.array(z.string()).optional(),
   noteBookId: z.string().optional(),
-  images: z.array(noteImageSchema).max(9).optional(),
+  images: optionalNoteImagesSchema,
   isShare: z.boolean().optional(),
   isPinned: z.boolean().optional(),
   isFavorite: z.boolean().optional(),

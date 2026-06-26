@@ -2,6 +2,7 @@ import UserImageAsset from "../model/UserImageAsset";
 import type { INoteImage } from "../model/Note";
 import mongoose from "mongoose";
 import { logger } from "../utils/logger";
+import { normalizeImageMimeType } from "../utils/imageMime";
 
 function logWarn(message: string, meta: Record<string, unknown>) {
   logger.warn(message, meta);
@@ -87,6 +88,8 @@ export function recordFromCover(
   };
   if (thumbUrl) $set.thumbUrl = thumbUrl;
   if (thumbKey) $set.thumbKey = thumbKey;
+  const mimeType = normalizeImageMimeType(undefined, coverUrl);
+  if (mimeType) $set.mimeType = mimeType;
 
   void UserImageAsset.updateOne(
     { userId, storageKey },
