@@ -5,6 +5,7 @@ import { toLeanNoteArray, toLeanNote } from "../utils/typeUtils";
 import { checkNoteContent } from "../utils/sensitive-encrypted";
 import { nanoid } from "nanoid";
 import { recordFromNoteImages } from "./userImageAsset.service";
+import { MediaReferenceService } from "./mediaReference.service";
 import { ShareSecurityTaskService } from "./shareSecurityTask.service";
 
 export interface CreateNoteData {
@@ -293,6 +294,11 @@ export class NoteService {
     );
 
     recordFromNoteImages(data.userId, String(note.id), data.images || []);
+    void MediaReferenceService.syncNoteImages(
+      data.userId,
+      String(note.id),
+      data.images || [],
+    );
 
     return note;
   }
@@ -429,7 +435,6 @@ export class NoteService {
     if (data.tags !== undefined) {
       note.tags = sanitizeNoteTags(data.tags);
     }
-    const previousImages = data.images !== undefined ? [...(note.images || [])] : null;
     if (data.images !== undefined) note.images = data.images;
 
     if (data.isFavorite !== undefined) {
@@ -487,10 +492,13 @@ export class NoteService {
       { blocking: false },
     );
 
-    if (data.images !== undefined && previousImages) {
-      const oldKeys = new Set(previousImages.map((i) => i.key));
-      const added = data.images.filter((i) => !oldKeys.has(i.key));
-      recordFromNoteImages(userId, String(note.id), added);
+    if (data.images !== undefined) {
+      recordFromNoteImages(userId, String(note.id), data.images);
+      void MediaReferenceService.syncNoteImages(
+        userId,
+        String(note.id),
+        data.images,
+      );
     }
 
     return note;
@@ -917,6 +925,11 @@ export class NoteService {
   }
 
   static async purgeNote(id: string, userId: string): Promise<boolean> {
+    const note = await Note.findOne({ _id: id, userId, isDeleted: true });
+    if (!note) return false;
+
+    await MediaReferenceService.releaseNoteRefs(userId, id);
+
     const result = await Note.deleteOne({ _id: id, userId, isDeleted: true });
     return Boolean(result.deletedCount);
   }

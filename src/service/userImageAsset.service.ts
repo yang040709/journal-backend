@@ -1,9 +1,15 @@
 import UserImageAsset from "../model/UserImageAsset";
 import type { INoteImage } from "../model/Note";
+import mongoose from "mongoose";
 import { logger } from "../utils/logger";
 
 function logWarn(message: string, meta: Record<string, unknown>) {
   logger.warn(message, meta);
+}
+
+function isStrictObjectId(id: string): boolean {
+  if (!mongoose.Types.ObjectId.isValid(id)) return false;
+  return String(new mongoose.Types.ObjectId(id)) === id;
 }
 
 /**
@@ -207,4 +213,33 @@ export async function listAll(
   }));
 
   return { items, total };
+}
+
+export async function findAssetByIdForUser(userId: string, id: string) {
+  const trimmedId = String(id || "").trim();
+  if (!trimmedId || !isStrictObjectId(trimmedId)) return null;
+  return UserImageAsset.findOne({ _id: trimmedId, userId }).lean();
+}
+
+export async function deleteIndexByUser(
+  userId: string,
+  id: string,
+): Promise<boolean> {
+  const trimmedId = String(id || "").trim();
+  if (!trimmedId || !isStrictObjectId(trimmedId)) return false;
+  const result = await UserImageAsset.findOneAndDelete({
+    _id: trimmedId,
+    userId,
+  });
+  return !!result;
+}
+
+export async function deleteIndexByStorageKey(
+  userId: string,
+  storageKey: string,
+): Promise<boolean> {
+  const key = String(storageKey || "").trim();
+  if (!key) return false;
+  const result = await UserImageAsset.findOneAndDelete({ userId, storageKey: key });
+  return !!result;
 }

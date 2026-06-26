@@ -3,6 +3,7 @@ import SystemConfig, { SYSTEM_CONFIG_COVERS_KEY } from "../model/SystemConfig";
 import { coverPreviewList } from "../constant/img";
 import { ActivityLogger } from "../utils/ActivityLogger";
 import { recordFromCover } from "./userImageAsset.service";
+import { MediaReferenceService } from "./mediaReference.service";
 
 export interface UpdateQuickCoversData {
   covers: string[];
@@ -336,6 +337,11 @@ export class CoverService {
         thumbUrl: thumbUrl || undefined,
         thumbKey: thumbKey || undefined,
       });
+      void MediaReferenceService.referenceCover(userId, String(matched._id), {
+        coverUrl: normalizedCoverUrl,
+        thumbUrl: thumbUrl || undefined,
+        thumbKey: thumbKey || undefined,
+      });
     }
 
     return customCovers.map((item: any) => this.normalizeCustomCoverItem(item));
@@ -421,12 +427,21 @@ export class CoverService {
         ...(tu ? { thumbUrl: tu } : {}),
         ...(tk ? { thumbKey: tk } : {}),
       });
+      void MediaReferenceService.referenceCover(userId, String(coverId), {
+        coverUrl: String(updatedDoc.coverUrl || "").trim(),
+        ...(tu ? { thumbUrl: tu } : {}),
+        ...(tk ? { thumbKey: tk } : {}),
+      });
     }
 
     return customCovers.map((item: any) => this.normalizeCustomCoverItem(item));
   }
 
-  static async deleteUserCustomCover(userId: string, coverId: string): Promise<UserCustomCoverItem[]> {
+  static async deleteUserCustomCover(
+    userId: string,
+    coverId: string,
+    options: { releaseMedia?: boolean } = {},
+  ): Promise<UserCustomCoverItem[]> {
     if (!coverId) {
       throw new Error("封面ID不能为空");
     }
@@ -444,6 +459,9 @@ export class CoverService {
       throw new Error("自定义封面不存在");
     }
 
+    const targetThumbKey =
+      targetCover?.thumbKey != null ? String(targetCover.thumbKey).trim() : "";
+
     const updatedUser = await User.findOneAndUpdate(
       {
         userId,
@@ -460,6 +478,13 @@ export class CoverService {
 
     if (!updatedUser) {
       throw new Error("自定义封面不存在");
+    }
+
+    if (options.releaseMedia !== false) {
+      void MediaReferenceService.releaseCoverRef(userId, coverId, {
+        coverUrl: targetCoverUrl,
+        ...(targetThumbKey ? { thumbKey: targetThumbKey } : {}),
+      });
     }
 
     void ActivityLogger.record(
