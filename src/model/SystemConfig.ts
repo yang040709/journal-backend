@@ -12,6 +12,16 @@ export const SYSTEM_CONFIG_QUOTA_BASE_LIMITS_KEY = "quota_base_limits";
 export const SYSTEM_CONFIG_EXPORT_SETTINGS_KEY = "export_settings";
 /** 浏览 Tab 顶部轮播（仅 configKey=browse_banners 使用） */
 export const SYSTEM_CONFIG_BROWSE_BANNERS_KEY = "browse_banners";
+/** 反馈审批快捷回复（仅 configKey=feedback_quick_replies 使用） */
+export const SYSTEM_CONFIG_FEEDBACK_QUICK_REPLIES_KEY = "feedback_quick_replies";
+
+export type FeedbackQuickReplyConfigItem = {
+  id: string;
+  label: string;
+  content: string;
+  sortOrder: number;
+  enabled: boolean;
+};
 
 export type BrowseBannerItem = {
   _id?: unknown;
@@ -57,6 +67,8 @@ export interface ISystemConfig extends Document {
   initialNotebookCount: number;
   /** 新用户初始手帐模板（仅 configKey=initial_user_notes 使用） */
   initialNoteTemplates: InitialNoteTemplate[];
+  /** 历史出现过的初始手帐 seedKey（只增不减，供管理端排除默认手帐） */
+  initialNoteUsedSeedKeys: string[];
   /** 仅 configKey=points_rules 使用：积分/广告/兑换配置 */
   pointsRules?: Record<string, unknown> | null;
   /** 仅 configKey=quota_base_limits 使用：上传/AI 每日基础额度 */
@@ -65,6 +77,8 @@ export interface ISystemConfig extends Document {
   exportSettings?: Record<string, unknown> | null;
   /** 仅 configKey=browse_banners 使用 */
   browseBanners?: BrowseBannerItem[];
+  /** 仅 configKey=feedback_quick_replies 使用 */
+  feedbackQuickReplies?: FeedbackQuickReplyConfigItem[];
   createdAt: Date;
   updatedAt: Date;
 }
@@ -112,6 +126,10 @@ const systemConfigSchema = new Schema(
       ],
       default: [],
     },
+    initialNoteUsedSeedKeys: {
+      type: [String],
+      default: [],
+    },
     pointsRules: {
       type: Schema.Types.Mixed,
     },
@@ -133,6 +151,18 @@ const systemConfigSchema = new Schema(
           title: { type: String, default: "" },
           clickPv: { type: Number, default: 0, min: 0 },
           clickUvUsers: { type: [String], default: [] },
+        },
+      ],
+      default: [],
+    },
+    feedbackQuickReplies: {
+      type: [
+        {
+          id: { type: String, default: "" },
+          label: { type: String, default: "" },
+          content: { type: String, default: "" },
+          sortOrder: { type: Number, default: 0 },
+          enabled: { type: Boolean, default: true },
         },
       ],
       default: [],
