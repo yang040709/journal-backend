@@ -1,9 +1,11 @@
 import UserFeedback, { FeedbackReviewLevel, FeedbackType } from "../model/UserFeedback";
+import { Types } from "mongoose";
 import { getQuotaDateContext, previousDateKey } from "../utils/dateKey";
 import { PointsService } from "./points.service";
 import { normalizeKeyword, toSafeRegex } from "../utils/querySafety";
 
 const RATE_LIMIT_MS = 60 * 1000;
+export const CRITICAL_FEEDBACK_REWARD_MAX = 10_000;
 const MAX_PAGE_DEPTH = 10_000;
 
 function normalizeInt(v: unknown, fallback: number, min = 0): number {
@@ -29,14 +31,27 @@ function getWeekRangeByDateKey(dateKey: string) {
   };
 }
 
-function reviewRewardTarget(level?: FeedbackReviewLevel, rules?: { important: number; critical: number }) {
+function reviewRewardTarget(
+  level?: FeedbackReviewLevel,
+  rules?: { important: number; critical: number },
+  customRewardPoints?: number,
+) {
   if (!level || !rules) return 0;
   if (level === "important") return normalizeInt(rules.important, 500);
-  if (level === "critical") return normalizeInt(rules.critical, 2000);
+  if (level === "critical") {
+    if (customRewardPoints != null && Number.isFinite(customRewardPoints)) {
+      return Math.min(
+        CRITICAL_FEEDBACK_REWARD_MAX,
+        Math.max(0, Math.floor(Number(customRewardPoints))),
+      );
+    }
+    return normalizeInt(rules.critical, 2000);
+  }
   return 0;
 }
 
 function serializeFeedbackRow(row: Record<string, unknown>) {
+  const userReply = String(row.userReply || "").trim();
   return {
     id: String(row._id || ""),
     userId: String(row.userId || ""),
@@ -48,6 +63,10 @@ function serializeFeedbackRow(row: Record<string, unknown>) {
     status: String(row.status || "pending"),
     reviewLevel: row.reviewLevel ? String(row.reviewLevel) : null,
     reviewRemark: row.reviewRemark ? String(row.reviewRemark) : "",
+    userReply,
+    userReplyAt: row.userReplyAt instanceof Date ? row.userReplyAt.toISOString() : row.userReplyAt || null,
+    userReplyReadAt:
+      row.userReplyReadAt instanceof Date ? row.userReplyReadAt.toISOString() : row.userReplyReadAt || null,
     reviewedBy: row.reviewedBy ? String(row.reviewedBy) : "",
     reviewedAt: row.reviewedAt instanceof Date ? row.reviewedAt.toISOString() : row.reviewedAt || null,
     weeklyFirstRewardGranted: Boolean(row.weeklyFirstRewardGranted),
@@ -56,6 +75,56 @@ function serializeFeedbackRow(row: Record<string, unknown>) {
     totalGrantedPoints: normalizeInt(row.totalGrantedPoints, 0),
     createdAt: row.createdAt instanceof Date ? row.createdAt.toISOString() : row.createdAt,
     updatedAt: row.updatedAt instanceof Date ? row.updatedAt.toISOString() : row.updatedAt,
+  };
+}
+
+function serializeUserFeedbackRow(row: Record<string, unknown>) {
+  const userReply = String(row.userReply || "").trim();
+  const userReplyReadAt =
+    row.userReplyReadAt instanceof Date ? row.userReplyReadAt.toISOString() : row.userReplyReadAt || null;
+  const status = String(row.status || "pending");
+  const hasUnreadReply = status === "reviewed" && userReply.length > 0 && !userReplyReadAt;
+
+  return {
+    id: String(row._id || ""),
+    type: String(row.type || ""),
+    content: String(row.content || ""),
+    images: Array.isArray(row.images) ? row.images : [],
+    status,
+    userReply,
+    userReplyAt: row.userReplyAt instanceof Date ? row.userReplyAt.toISOString() : row.userReplyAt || null,
+    userReplyReadAt,
+    hasUnreadReply,
+    reviewedAt: row.reviewedAt instanceof Date ? row.reviewedAt.toISOString() : row.reviewedAt || null,
+    totalGrantedPoints: normalizeInt(row.totalGrantedPoints, 0),
+    createdAt: row.createdAt instanceof Date ? row.createdAt.toISOString() : row.createdAt,
+  };
+}
+
+function applyUserReplyFields(
+  row: { userReply?: string; userReplyAt?: Date; userReplyReadAt?: Date | null },
+  userReplyInput?: string,
+) {
+  const userReply = String(userReplyInput || "").trim();
+  const prevReply = String(row.userReply || "").trim();
+  row.userReply = userReply;
+  if (userReply) {
+    if (userReply !== prevReply) {
+      row.userReplyAt = new Date();
+      row.userReplyReadAt = null;
+    }
+  } else {
+    row.userReplyAt = undefined;
+    row.userReplyReadAt = null;
+  }
+}
+
+function buildUserUnreadReplyWhere(userId: string) {
+  return {
+    userId,
+    status: "reviewed" as const,
+    userReply: { $nin: [null, ""] },
+    $or: [{ userReplyReadAt: null }, { userReplyReadAt: { $exists: false } }],
   };
 }
 
@@ -108,6 +177,21 @@ export class FeedbackService {
       weekEndAt: weekEndDate.toISOString(),
       granted,
       rewardPoints: normalizeInt(rules.feedbackRewards.weeklyFirstSubmit, 200),
+      feedbackRewards: {
+        important: normalizeInt(rules.feedbackRewards.important, 500),
+        critical: normalizeInt(rules.feedbackRewards.critical, 2000),
+        criticalMax: CRITICAL_FEEDBACK_REWARD_MAX,
+      },
+    };
+  }
+
+  static async getFeedbackRewardRulesPublic() {
+    const rules = await PointsService.getRules();
+    return {
+      weeklyFirstSubmit: normalizeInt(rules.feedbackRewards.weeklyFirstSubmit, 200),
+      important: normalizeInt(rules.feedbackRewards.important, 500),
+      critical: normalizeInt(rules.feedbackRewards.critical, 2000),
+      criticalMax: CRITICAL_FEEDBACK_REWARD_MAX,
     };
   }
 
@@ -177,7 +261,7 @@ export class FeedbackService {
     }
 
     return {
-      feedback: serializeFeedbackRow(doc.toObject() as Record<string, unknown>),
+      feedback: serializeUserFeedbackRow(doc.toObject() as unknown as Record<string, unknown>),
       awardedWeeklyPoints: weeklyRewardPoints,
       currentPoints,
     };
@@ -195,7 +279,7 @@ export class FeedbackService {
       UserFeedback.countDocuments({ userId }),
     ]);
     return {
-      items: rows.map((row) => serializeFeedbackRow(row as Record<string, unknown>)),
+      items: rows.map((row) => serializeUserFeedbackRow(row as Record<string, unknown>)),
       total,
       page,
       pageSize,
@@ -203,10 +287,69 @@ export class FeedbackService {
     };
   }
 
+  static async getUnreadReplySummary(userId: string) {
+    const where = buildUserUnreadReplyWhere(userId);
+    const [unreadCount, latest] = await Promise.all([
+      UserFeedback.countDocuments(where),
+      UserFeedback.findOne(where).sort({ userReplyAt: -1 }).lean(),
+    ]);
+    if (!latest) {
+      return { unreadCount, latestUnread: null };
+    }
+    const serialized = serializeUserFeedbackRow(latest as Record<string, unknown>);
+    return {
+      unreadCount,
+      latestUnread: {
+        id: serialized.id,
+        type: serialized.type,
+        userReply: serialized.userReply,
+        userReplyAt: serialized.userReplyAt,
+        contentPreview: String(serialized.content || "").slice(0, 80),
+      },
+    };
+  }
+
+  static async markReplyRead(userId: string, id: string) {
+    const trimmed = String(id || "").trim();
+    if (!trimmed || !Types.ObjectId.isValid(trimmed)) {
+      throw new Error("反馈不存在");
+    }
+    const row = await UserFeedback.findOne({ _id: trimmed, userId });
+    if (!row) {
+      throw new Error("反馈不存在");
+    }
+    const userReply = String(row.userReply || "").trim();
+    if (!userReply) {
+      throw new Error("该反馈暂无回复");
+    }
+    if (row.userReplyReadAt) {
+      return serializeUserFeedbackRow(row.toObject() as unknown as Record<string, unknown>);
+    }
+    row.userReplyReadAt = new Date();
+    await row.save();
+    return serializeUserFeedbackRow(row.toObject() as unknown as Record<string, unknown>);
+  }
+
+  static async markAllRepliesRead(userId: string) {
+    const where = buildUserUnreadReplyWhere(userId);
+    const result = await UserFeedback.updateMany(where, {
+      $set: { userReplyReadAt: new Date() },
+    });
+    const unreadCount = await UserFeedback.countDocuments(buildUserUnreadReplyWhere(userId));
+    return {
+      markedCount: result.modifiedCount || 0,
+      unreadCount,
+    };
+  }
+
   static async getMyFeedbackDetail(userId: string, id: string) {
-    const row = await UserFeedback.findOne({ _id: id, userId }).lean();
+    const trimmed = String(id || "").trim();
+    if (!trimmed || !Types.ObjectId.isValid(trimmed)) {
+      return null;
+    }
+    const row = await UserFeedback.findOne({ _id: trimmed, userId }).lean();
     if (!row) return null;
-    return serializeFeedbackRow(row as Record<string, unknown>);
+    return serializeUserFeedbackRow(row as Record<string, unknown>);
   }
 
   static async adminListFeedbacks(query: {
@@ -239,23 +382,40 @@ export class FeedbackService {
   }
 
   static async adminGetFeedback(id: string) {
-    const row = await UserFeedback.findById(id).lean();
+    const trimmed = String(id || "").trim();
+    if (!trimmed || !Types.ObjectId.isValid(trimmed)) {
+      return null;
+    }
+    const row = await UserFeedback.findById(trimmed).lean();
     if (!row) return null;
     return serializeFeedbackRow(row as Record<string, unknown>);
   }
 
   static async adminReviewFeedback(
     id: string,
-    payload: { reviewLevel: FeedbackReviewLevel; reviewRemark?: string },
+    payload: {
+      reviewLevel: FeedbackReviewLevel;
+      reviewRemark?: string;
+      userReply?: string;
+      rewardPoints?: number;
+    },
     admin: { id: string; username: string },
   ) {
-    const row = await UserFeedback.findById(id);
+    const trimmed = String(id || "").trim();
+    if (!trimmed || !Types.ObjectId.isValid(trimmed)) {
+      throw new Error("反馈不存在");
+    }
+    const row = await UserFeedback.findById(trimmed);
     if (!row) {
       throw new Error("反馈不存在");
     }
 
     const rules = await PointsService.getRules();
-    const targetReward = reviewRewardTarget(payload.reviewLevel, rules.feedbackRewards);
+    const targetReward = reviewRewardTarget(
+      payload.reviewLevel,
+      rules.feedbackRewards,
+      payload.reviewLevel === "critical" ? payload.rewardPoints : undefined,
+    );
     const granted = normalizeInt(row.reviewRewardPointsGranted, 0);
     const delta = Math.max(0, targetReward - granted);
 
@@ -284,15 +444,37 @@ export class FeedbackService {
     row.status = "reviewed";
     row.reviewLevel = payload.reviewLevel;
     row.reviewRemark = String(payload.reviewRemark || "").trim();
+    applyUserReplyFields(row, payload.userReply);
     row.reviewedBy = admin.username;
     row.reviewedAt = new Date();
     await row.save();
 
     return {
-      feedback: serializeFeedbackRow(row.toObject() as Record<string, unknown>),
+      feedback: serializeFeedbackRow(row.toObject() as unknown as Record<string, unknown>),
       deltaRewardPoints: delta,
       pointsAfter,
     };
+  }
+
+  static async adminUpdateUserReply(
+    id: string,
+    payload: { userReply?: string },
+    admin: { id: string; username: string },
+  ) {
+    const trimmed = String(id || "").trim();
+    if (!trimmed || !Types.ObjectId.isValid(trimmed)) {
+      throw new Error("反馈不存在");
+    }
+    const row = await UserFeedback.findById(trimmed);
+    if (!row) {
+      throw new Error("反馈不存在");
+    }
+    if (row.status !== "reviewed") {
+      throw new Error("仅已处理的反馈可修改回复");
+    }
+    applyUserReplyFields(row, payload.userReply);
+    await row.save();
+    return serializeFeedbackRow(row.toObject() as unknown as Record<string, unknown>);
   }
 
   static async adminNextPendingFeedbackId(currentId?: string, direction: "next" | "prev" = "next") {
@@ -303,7 +485,8 @@ export class FeedbackService {
           direction === "prev"
             ? { createdAt: { $lt: current.createdAt } }
             : { createdAt: { $gt: current.createdAt } };
-        const sortQuery = direction === "prev" ? { createdAt: -1 } : { createdAt: 1 };
+        const sortQuery =
+          direction === "prev" ? ({ createdAt: -1 } as const) : ({ createdAt: 1 } as const);
         const next = await UserFeedback.findOne({
           status: "pending",
           ...timeQuery,
@@ -323,7 +506,12 @@ export class FeedbackService {
 
   static async adminBatchReviewFeedbacks(
     ids: string[],
-    payload: { reviewLevel: FeedbackReviewLevel; reviewRemark?: string },
+    payload: {
+      reviewLevel: FeedbackReviewLevel;
+      reviewRemark?: string;
+      userReply?: string;
+      rewardPoints?: number;
+    },
     admin: { id: string; username: string },
   ) {
     const uniqueIds = Array.from(
@@ -383,6 +571,7 @@ export class FeedbackService {
       "处理等级",
       "处理人",
       "处理备注",
+      "用户回复",
       "提交时间",
       "处理时间",
       "奖励积分",
@@ -398,6 +587,7 @@ export class FeedbackService {
           row.reviewLevel || "",
           row.reviewedBy || "",
           row.reviewRemark || "",
+          row.userReply || "",
           row.createdAt instanceof Date ? row.createdAt.toISOString() : "",
           row.reviewedAt instanceof Date ? row.reviewedAt.toISOString() : "",
           normalizeInt(row.totalGrantedPoints, 0),

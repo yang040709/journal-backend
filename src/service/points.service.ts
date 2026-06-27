@@ -86,7 +86,7 @@ function normalizeRules(raw: unknown): PointsRulesPayload {
         feedbackRewards.critical,
         DEFAULT_POINTS_RULES.feedbackRewards.critical,
         0,
-        1_000_000,
+        10_000,
       ),
     },
   };

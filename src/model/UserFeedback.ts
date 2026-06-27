@@ -14,6 +14,9 @@ export interface IUserFeedback extends Document {
   status: FeedbackStatus;
   reviewLevel?: FeedbackReviewLevel;
   reviewRemark?: string;
+  userReply?: string;
+  userReplyAt?: Date;
+  userReplyReadAt?: Date | null;
   reviewedBy?: string;
   reviewedAt?: Date;
   weeklyFirstRewardGranted: boolean;
@@ -75,6 +78,20 @@ const userFeedbackSchema = new Schema<IUserFeedback>(
       maxlength: 1000,
       default: "",
     },
+    userReply: {
+      type: String,
+      trim: true,
+      maxlength: 1000,
+      default: "",
+    },
+    userReplyAt: {
+      type: Date,
+      index: true,
+    },
+    userReplyReadAt: {
+      type: Date,
+      default: null,
+    },
     reviewedBy: {
       type: String,
       trim: true,
@@ -114,5 +131,6 @@ userFeedbackSchema.index({ status: 1, createdAt: -1 });
 userFeedbackSchema.index({ reviewLevel: 1, createdAt: -1 });
 userFeedbackSchema.index({ status: 1, type: 1, reviewLevel: 1, createdAt: -1 });
 userFeedbackSchema.index({ userId: 1, status: 1, createdAt: -1 });
+userFeedbackSchema.index({ userId: 1, status: 1, userReplyReadAt: 1, userReplyAt: -1 });
 
 export default model<IUserFeedback>("UserFeedback", userFeedbackSchema);

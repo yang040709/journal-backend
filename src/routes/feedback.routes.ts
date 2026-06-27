@@ -12,9 +12,16 @@ router.get("/weekly-first-status", optionalAuthMiddleware, async (ctx: AuthConte
   try {
     const userId = ctx.user?.userId;
     if (!userId) {
+      const feedbackRewards = await FeedbackService.getFeedbackRewardRulesPublic();
       success(
         ctx,
-        { granted: false, rewardPoints: 200, weekStartDateKey: null, weekEndAt: null },
+        {
+          granted: false,
+          rewardPoints: feedbackRewards.weeklyFirstSubmit,
+          weekStartDateKey: null,
+          weekEndAt: null,
+          feedbackRewards,
+        },
         "ok",
       );
       return;
@@ -79,6 +86,44 @@ router.get("/my", async (ctx: AuthContext) => {
       return;
     }
     error(ctx, e instanceof Error ? e.message : "加载失败", ErrorCodes.INTERNAL_ERROR, 500);
+  }
+});
+
+router.get("/unread-summary", async (ctx: AuthContext) => {
+  const userId = ctx.user!.userId;
+  try {
+    const data = await FeedbackService.getUnreadReplySummary(userId);
+    success(ctx, data, "ok");
+  } catch (e) {
+    error(ctx, e instanceof Error ? e.message : "加载失败", ErrorCodes.INTERNAL_ERROR, 500);
+  }
+});
+
+router.post("/mark-all-replies-read", async (ctx: AuthContext) => {
+  const userId = ctx.user!.userId;
+  try {
+    const data = await FeedbackService.markAllRepliesRead(userId);
+    success(ctx, data, "ok");
+  } catch (e) {
+    error(ctx, e instanceof Error ? e.message : "操作失败", ErrorCodes.INTERNAL_ERROR, 500);
+  }
+});
+
+router.post("/:id/mark-reply-read", async (ctx: AuthContext) => {
+  const userId = ctx.user!.userId;
+  try {
+    const data = await FeedbackService.markReplyRead(userId, String(ctx.params.id || ""));
+    success(ctx, data, "ok");
+  } catch (e) {
+    if (e instanceof Error && e.message === "反馈不存在") {
+      error(ctx, "反馈不存在", ErrorCodes.NOT_FOUND, 404);
+      return;
+    }
+    if (e instanceof Error && e.message === "该反馈暂无回复") {
+      error(ctx, e.message, ErrorCodes.PARAM_ERROR, 400);
+      return;
+    }
+    error(ctx, e instanceof Error ? e.message : "操作失败", ErrorCodes.INTERNAL_ERROR, 500);
   }
 });
 
