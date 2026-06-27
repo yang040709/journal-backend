@@ -138,7 +138,9 @@ export class AiTemplateService {
         userId: input.userId,
         dateKey,
         mode: input.mode,
+        systemPrompt: AI_TEMPLATE_SYSTEM_PROMPT,
         userPrompt: userMessage,
+        rawOutputText: raw,
         outputText: JSON.stringify(template),
       });
       const remainingToday = remainingAfterUse(dailyLimit, newUsed);

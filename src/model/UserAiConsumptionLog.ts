@@ -8,7 +8,9 @@ export interface IUserAiConsumptionLog extends Document {
   source: UserAiConsumptionSource;
   mode: string;
   styleKey?: string;
+  systemPrompt: string;
   userPrompt: string;
+  rawOutputText: string;
   outputText: string;
   createdAt: Date;
   updatedAt: Date;
@@ -41,9 +43,17 @@ const userAiConsumptionLogSchema = new Schema(
       type: String,
       trim: true,
     },
+    systemPrompt: {
+      type: String,
+      default: "",
+    },
     userPrompt: {
       type: String,
       required: true,
+    },
+    rawOutputText: {
+      type: String,
+      default: "",
     },
     outputText: {
       type: String,
