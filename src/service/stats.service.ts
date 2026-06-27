@@ -167,17 +167,18 @@ export class StatsService {
    * 获取标签统计信息
    */
   static async getTagStats(userId: string): Promise<TagStats[]> {
-    // 使用MongoDB的聚合管道统计标签使用频率
-    const tagStats = await Note.aggregate([
-      { $match: { userId, isDeleted: { $ne: true } } },
-      { $unwind: "$tags" },
-      { $group: { _id: "$tags", count: { $sum: 1 } } },
-      { $sort: { count: -1 } },
-      { $limit: 50 },
-      { $project: { tag: "$_id", count: 1, _id: 0 } },
-    ]);
+    return StatsService.cachedStats(userId, "tags", {}, "heavy", async () => {
+      const tagStats = await Note.aggregate([
+        { $match: { userId, isDeleted: { $ne: true } } },
+        { $unwind: "$tags" },
+        { $group: { _id: "$tags", count: { $sum: 1 } } },
+        { $sort: { count: -1 } },
+        { $limit: 50 },
+        { $project: { tag: "$_id", count: 1, _id: 0 } },
+      ]);
 
-    return tagStats;
+      return tagStats;
+    });
   }
 
   /**
