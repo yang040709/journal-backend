@@ -7,6 +7,7 @@ import { z } from "zod";
 import { AlertMetricService } from "../service/alertMetric.service";
 import User from "../model/User";
 import logger from "../utils/logger";
+import { READING_STYLE_KEYS } from "../constant/noteReadingTheme";
 
 const router = new Router({
   prefix: "/auth",
@@ -31,6 +32,12 @@ const updateMeProfileSchema = z
   .refine((data) => Object.keys(data).length > 0, {
     message: "至少更新一个字段",
   });
+
+const updateDefaultReadingThemeSchema = z.object({
+  defaultReadingStyleKey: z.enum(READING_STYLE_KEYS).nullable().optional(),
+  defaultReadingThemeId: z.string().trim().max(64).nullable().optional(),
+  readingThemeApplyScope: z.enum(["global", "note"]).optional(),
+});
 
 /**
  * @swagger
@@ -279,6 +286,24 @@ router.put("/me/profile", authMiddleware, async (ctx: AuthContext) => {
     }
     console.error("更新资料失败:", err);
     error(ctx, err.message || "更新资料失败", ErrorCodes.INTERNAL_ERROR, 500);
+  }
+});
+
+router.put("/me/reading-theme", authMiddleware, async (ctx: AuthContext) => {
+  try {
+    const body = updateDefaultReadingThemeSchema.parse(ctx.request.body || {});
+    const data = await UserService.updateDefaultReadingTheme(
+      ctx.user!.userId,
+      body,
+    );
+    success(ctx, data, "更新全局阅读主题成功");
+  } catch (err) {
+    if (err instanceof z.ZodError) {
+      error(ctx, err.issues[0]?.message || "参数验证失败", ErrorCodes.PARAM_ERROR, 400);
+      return;
+    }
+    console.error("更新全局阅读主题失败:", err);
+    error(ctx, err.message || "更新全局阅读主题失败", ErrorCodes.INTERNAL_ERROR, 500);
   }
 });
 

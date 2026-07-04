@@ -25,6 +25,12 @@ export interface INote extends Document {
   /** 置顶（仅当前 noteBookId 内列表排序） */
   isPinned: boolean;
   pinnedAt?: Date | null;
+  /** 详情页阅读风格 key；null 表示标准阅读 */
+  readingStyleKey?: string | null;
+  /** 详情页阅读主题色 id（与导出 preset theme.id 一致）；null 时用该风格默认主题 */
+  readingThemeId?: string | null;
+  /** 阅读主题作用范围：note=仅该手帐，global=跟随用户全局默认 */
+  readingThemeScope?: "note" | "global";
   createdAt: Date;
   updatedAt: Date;
 }
@@ -186,6 +192,22 @@ const noteSchema = new Schema(
       type: Date,
       default: null,
       sparse: true,
+    },
+    readingStyleKey: {
+      type: String,
+      default: null,
+      trim: true,
+    },
+    readingThemeId: {
+      type: String,
+      default: null,
+      trim: true,
+      maxlength: 64,
+    },
+    readingThemeScope: {
+      type: String,
+      enum: ["note", "global"],
+      default: "note",
     },
   },
   {

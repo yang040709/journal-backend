@@ -27,6 +27,9 @@ export interface MePageProfile {
   avatarUrl: string;
   bio: string;
   membershipText: string;
+  defaultReadingStyleKey: string | null;
+  defaultReadingThemeId: string | null;
+  readingThemeApplyScope: "global" | "note";
 }
 
 export interface MePageStats {
@@ -41,12 +44,43 @@ export interface UpdateMeProfileInput {
   bio?: string;
 }
 
+export interface UpdateDefaultReadingThemeInput {
+  defaultReadingStyleKey?: string | null;
+  defaultReadingThemeId?: string | null;
+  readingThemeApplyScope?: "global" | "note";
+}
+
 export class UserService {
   private static buildDefaultNickname(userId: string): string {
     const normalized = String(userId || "").trim();
     if (!normalized) return "手帐用户";
     const suffix = normalized.slice(-4);
     return `手帐用户${suffix}`;
+  }
+
+  private static parseReadingThemeApplyScope(value: unknown): "global" | "note" {
+    return value === "global" ? "global" : "note";
+  }
+
+  private static parseReadingThemeFields(user: any): Pick<
+    MePageProfile,
+    "defaultReadingStyleKey" | "defaultReadingThemeId" | "readingThemeApplyScope"
+  > {
+    return {
+      defaultReadingStyleKey:
+        user?.defaultReadingStyleKey === undefined ||
+        user?.defaultReadingStyleKey === null
+          ? null
+          : String(user.defaultReadingStyleKey),
+      defaultReadingThemeId:
+        user?.defaultReadingThemeId === undefined ||
+        user?.defaultReadingThemeId === null
+          ? null
+          : String(user.defaultReadingThemeId),
+      readingThemeApplyScope: UserService.parseReadingThemeApplyScope(
+        user?.readingThemeApplyScope,
+      ),
+    };
   }
 
   /**
@@ -299,6 +333,7 @@ export class UserService {
       avatarUrl: String((user as any).avatarUrl || "").trim(),
       bio: String((user as any).bio || "").trim() || "手帐记录生活点滴",
       membershipText: String((user as any).membershipText || "").trim(),
+      ...UserService.parseReadingThemeFields(user),
     };
   }
 
@@ -354,6 +389,7 @@ export class UserService {
         avatarUrl: String((user as any)?.avatarUrl || "").trim(),
         bio: String((user as any)?.bio || "").trim() || "手帐记录生活点滴",
         membershipText: String((user as any)?.membershipText || "").trim(),
+        ...UserService.parseReadingThemeFields(user),
       };
     }
 
@@ -375,7 +411,59 @@ export class UserService {
       avatarUrl: String((user as any).avatarUrl || "").trim(),
       bio: String((user as any).bio || "").trim() || "手帐记录生活点滴",
       membershipText: String((user as any).membershipText || "").trim(),
+      ...UserService.parseReadingThemeFields(user),
     };
+  }
+
+  static async updateDefaultReadingTheme(
+    userId: string,
+    input: UpdateDefaultReadingThemeInput,
+  ): Promise<Pick<
+    MePageProfile,
+    "defaultReadingStyleKey" | "defaultReadingThemeId" | "readingThemeApplyScope"
+  >> {
+    const updatePayload: UpdateDefaultReadingThemeInput = {};
+
+    if (input.readingThemeApplyScope !== undefined) {
+      updatePayload.readingThemeApplyScope = input.readingThemeApplyScope;
+    }
+
+    if (input.defaultReadingStyleKey !== undefined) {
+      updatePayload.defaultReadingStyleKey = input.defaultReadingStyleKey;
+      if (input.defaultReadingStyleKey === null) {
+        updatePayload.defaultReadingThemeId = null;
+      }
+    }
+
+    if (input.defaultReadingThemeId !== undefined) {
+      const styleKey =
+        updatePayload.defaultReadingStyleKey !== undefined
+          ? updatePayload.defaultReadingStyleKey
+          : input.defaultReadingStyleKey;
+      updatePayload.defaultReadingThemeId =
+        styleKey === null ? null : input.defaultReadingThemeId;
+    }
+
+    if (Object.keys(updatePayload).length === 0) {
+      const profile = await UserService.getMeProfile(userId);
+      return {
+        defaultReadingStyleKey: profile.defaultReadingStyleKey,
+        defaultReadingThemeId: profile.defaultReadingThemeId,
+        readingThemeApplyScope: profile.readingThemeApplyScope,
+      };
+    }
+
+    const user = await User.findOneAndUpdate(
+      { userId },
+      { $set: updatePayload },
+      { new: true },
+    ).lean();
+
+    if (!user) {
+      throw new Error("用户不存在");
+    }
+
+    return UserService.parseReadingThemeFields(user);
   }
 
   /**

@@ -28,6 +28,12 @@ export interface IUser extends Document {
   }>;
   /** 用户手帐自定义标签（与系统预设合并为可选白名单），最多 12 个 */
   customNoteTags: string[];
+  /** 详情页全局默认阅读风格 key；null 表示标准阅读 */
+  defaultReadingStyleKey?: string | null;
+  /** 详情页全局默认阅读主题色 id；null 时用该风格默认主题 */
+  defaultReadingThemeId?: string | null;
+  /** 阅读主题作用范围：global=全局默认，note=各手帐独立 */
+  readingThemeApplyScope?: "global" | "note";
   createdAt: Date;
   updatedAt: Date;
 }
@@ -126,6 +132,22 @@ const userSchema = new Schema(
     customNoteTags: {
       type: [String],
       default: [],
+    },
+    defaultReadingStyleKey: {
+      type: String,
+      default: null,
+      trim: true,
+    },
+    defaultReadingThemeId: {
+      type: String,
+      default: null,
+      trim: true,
+      maxlength: 64,
+    },
+    readingThemeApplyScope: {
+      type: String,
+      enum: ["global", "note"],
+      default: "note",
     },
   },
   {

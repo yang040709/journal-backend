@@ -11,6 +11,7 @@ import { ShareSecurityTaskService } from "../service/shareSecurityTask.service";
 import { AiNoteService } from "../service/aiNote.service";
 import { AiStyleService } from "../service/aiStyle.service";
 import { z } from "zod";
+import { READING_STYLE_KEYS } from "../constant/noteReadingTheme";
 import { NotePresetTagService } from "../service/notePresetTag.service";
 import { UserNoteCustomTagService } from "../service/userNoteCustomTag.service";
 import {
@@ -299,6 +300,12 @@ const updateNoteSchema = z.object({
   images: optionalNoteImagesSchema,
   isFavorite: z.boolean().optional(),
   isPinned: z.boolean().optional(),
+  readingStyleKey: z
+    .enum(READING_STYLE_KEYS)
+    .nullable()
+    .optional(),
+  readingThemeId: z.string().trim().max(64).nullable().optional(),
+  readingThemeScope: z.enum(["note", "global"]).optional(),
 });
 
 function parseFavoriteOnlyQuery(
@@ -1225,6 +1232,23 @@ router.post("/", async (ctx: AuthContext) => {
  *                 type: string
  *                 description: 目标手帐本ID
  *                 example: "67a1b2c3d4e5f6a7b8c9d0e1"
+ *               readingStyleKey:
+ *                 type: string
+ *                 nullable: true
+ *                 description: 详情页阅读风格 key；null 表示标准阅读
+ *                 enum:
+ *                   - journal
+ *                   - minimalNordic
+ *                   - vintageJournal
+ *                   - watercolorSketch
+ *                   - dreamyCinematic
+ *                   - productMemo
+ *                 example: "vintageJournal"
+ *               readingThemeId:
+ *                 type: string
+ *                 nullable: true
+ *                 description: 阅读主题色 id（与导出 preset 一致）；null 时使用该风格默认主题
+ *                 example: "vintage-rose"
  *     responses:
  *       200:
  *         description: 更新手帐成功

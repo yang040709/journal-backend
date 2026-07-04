@@ -105,5 +105,87 @@ describe("integration: /auth", () => {
     expect(res.body.code).toBe(0);
     expect(res.body.data.userId).toBe("profile-user");
     expect(res.body.data.nickname).toBe("昵称 A");
+    expect(res.body.data.defaultReadingStyleKey).toBeNull();
+    expect(res.body.data.defaultReadingThemeId).toBeNull();
+    expect(res.body.data.readingThemeApplyScope).toBe("note");
+  });
+
+  it("PUT /auth/me/reading-theme 可写入全局阅读主题", async () => {
+    const { token } = await createAuthUser({ userId: "reading-theme-user" });
+
+    const putRes = await agent
+      .put("/auth/me/reading-theme")
+      .set(authHeader(token))
+      .send({
+        defaultReadingStyleKey: "vintageJournal",
+        defaultReadingThemeId: "vintage-rose",
+        readingThemeApplyScope: "global",
+      })
+      .expect(200);
+
+    expect(putRes.body.data.defaultReadingStyleKey).toBe("vintageJournal");
+    expect(putRes.body.data.defaultReadingThemeId).toBe("vintage-rose");
+    expect(putRes.body.data.readingThemeApplyScope).toBe("global");
+
+    const getRes = await agent
+      .get("/auth/me-profile")
+      .set(authHeader(token))
+      .expect(200);
+
+    expect(getRes.body.data.defaultReadingStyleKey).toBe("vintageJournal");
+    expect(getRes.body.data.defaultReadingThemeId).toBe("vintage-rose");
+    expect(getRes.body.data.readingThemeApplyScope).toBe("global");
+  });
+
+  it("PUT /auth/me/reading-theme 可切换为仅该手帐", async () => {
+    const { token } = await createAuthUser({ userId: "reading-theme-note-scope" });
+
+    await agent
+      .put("/auth/me/reading-theme")
+      .set(authHeader(token))
+      .send({ readingThemeApplyScope: "global" })
+      .expect(200);
+
+    const res = await agent
+      .put("/auth/me/reading-theme")
+      .set(authHeader(token))
+      .send({ readingThemeApplyScope: "note" })
+      .expect(200);
+
+    expect(res.body.data.readingThemeApplyScope).toBe("note");
+  });
+
+  it("PUT /auth/me/reading-theme defaultReadingStyleKey null 清空 themeId", async () => {
+    const { token } = await createAuthUser({ userId: "reading-theme-clear" });
+
+    await agent
+      .put("/auth/me/reading-theme")
+      .set(authHeader(token))
+      .send({
+        defaultReadingStyleKey: "journal",
+        defaultReadingThemeId: "vintage_paper",
+      })
+      .expect(200);
+
+    const res = await agent
+      .put("/auth/me/reading-theme")
+      .set(authHeader(token))
+      .send({ defaultReadingStyleKey: null })
+      .expect(200);
+
+    expect(res.body.data.defaultReadingStyleKey).toBeNull();
+    expect(res.body.data.defaultReadingThemeId).toBeNull();
+  });
+
+  it("PUT /auth/me/reading-theme 非法 defaultReadingStyleKey 返回 400", async () => {
+    const { token } = await createAuthUser({ userId: "reading-theme-invalid" });
+
+    const res = await agent
+      .put("/auth/me/reading-theme")
+      .set(authHeader(token))
+      .send({ defaultReadingStyleKey: "filmTravel" })
+      .expect(400);
+
+    expect(res.body.code).toBe(ErrorCodes.PARAM_ERROR);
   });
 });

@@ -31,6 +31,9 @@ export interface UpdateNoteData {
   images?: INoteImage[];
   isFavorite?: boolean;
   isPinned?: boolean;
+  readingStyleKey?: string | null;
+  readingThemeId?: string | null;
+  readingThemeScope?: "note" | "global";
 }
 
 export interface PaginationParams {
@@ -487,6 +490,24 @@ export class NoteService {
         note.isPinned = false;
         note.pinnedAt = null;
       }
+    }
+
+    if (data.readingStyleKey !== undefined) {
+      note.readingStyleKey = data.readingStyleKey;
+      if (data.readingStyleKey === null) {
+        note.readingThemeId = null;
+      }
+    }
+
+    if (data.readingThemeId !== undefined) {
+      note.readingThemeId =
+        note.readingStyleKey === null || note.readingStyleKey === undefined
+          ? null
+          : data.readingThemeId;
+    }
+
+    if (data.readingThemeScope !== undefined) {
+      note.readingThemeScope = data.readingThemeScope;
     }
 
     const shouldBumpUpdatedAt =
