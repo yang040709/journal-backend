@@ -3,6 +3,7 @@ import { z } from "zod";
 import { authMiddleware, AuthContext, optionalAuthMiddleware } from "../middlewares/auth.middleware";
 import { ErrorCodes, error, success } from "../utils/response";
 import { FeedbackRateLimitError, FeedbackService } from "../service/feedback.service";
+import logger from "../utils/logger";
 
 const router = new Router({
   prefix: "/feedbacks",
@@ -70,6 +71,7 @@ router.post("/", async (ctx: AuthContext) => {
       error(ctx, e.message, ErrorCodes.FEEDBACK_RATE_LIMIT, 400);
       return;
     }
+    logger.error("反馈提交失败", e);
     error(ctx, e instanceof Error ? e.message : "反馈提交失败", ErrorCodes.INTERNAL_ERROR, 500);
   }
 });

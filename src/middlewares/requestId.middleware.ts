@@ -1,5 +1,9 @@
 import { Context, Next } from "koa";
 import { nanoid } from "nanoid";
+import {
+  buildRequestContextStore,
+  runWithRequestContext,
+} from "../utils/requestContext";
 
 /**
  * 请求ID中间件
@@ -15,8 +19,10 @@ export const requestIdMiddleware = async (ctx: Context, next: Next) => {
   // 将请求ID添加到响应头
   ctx.set("X-Request-Id", requestId);
 
-  // 继续处理请求
-  await next();
+  const store = buildRequestContextStore(ctx);
+
+  // 继续处理请求（AsyncLocalStorage 传递 requestId 至 service/logger）
+  await runWithRequestContext(store, () => next());
 };
 
 /**

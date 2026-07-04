@@ -1,6 +1,7 @@
 import winston from "winston";
 import DailyRotateFile from "winston-daily-rotate-file";
 import path from "path";
+import { getRequestIdFromContext } from "./requestContext";
 
 // 日志级别定义
 export enum LogLevel {
@@ -19,6 +20,17 @@ export interface LogContext {
   responseTime?: number;
   error?: Error;
   [key: string]: any;
+}
+
+function withRequestContext(meta: LogContext = {}): LogContext {
+  if (meta.requestId) {
+    return meta;
+  }
+  const requestId = getRequestIdFromContext();
+  if (requestId && requestId !== "unknown") {
+    return { ...meta, requestId };
+  }
+  return meta;
 }
 
 // 创建日志格式
@@ -105,7 +117,23 @@ const isDevelopment = process.env.NODE_ENV === "development";
 const logLevel =
   process.env.LOG_LEVEL || (isDevelopment ? LogLevel.DEBUG : LogLevel.INFO);
 
-export const logger = winston.createLogger({
+function enrichLogMeta(meta?: unknown): LogContext {
+  if (meta instanceof Error) {
+    return withRequestContext({
+      error: {
+        name: meta.name,
+        message: meta.message,
+        stack: meta.stack,
+      },
+    });
+  }
+  if (typeof meta === "object" && meta !== null) {
+    return withRequestContext(meta as LogContext);
+  }
+  return withRequestContext({});
+}
+
+const baseLogger = winston.createLogger({
   level: logLevel,
   levels: {
     [LogLevel.ERROR]: 0,
@@ -130,26 +158,41 @@ export const logger = winston.createLogger({
   exitOnError: false,
 });
 
+export const logger = {
+  ...baseLogger,
+  error: (message: string, meta?: unknown) =>
+    baseLogger.error(message, enrichLogMeta(meta)),
+  warn: (message: string, meta?: unknown) =>
+    baseLogger.warn(message, enrichLogMeta(meta)),
+  info: (message: string, meta?: unknown) =>
+    baseLogger.info(message, enrichLogMeta(meta)),
+  debug: (message: string, meta?: unknown) =>
+    baseLogger.debug(message, enrichLogMeta(meta)),
+  log: (level: string, message: string, meta?: unknown) =>
+    baseLogger.log(level, message, enrichLogMeta(meta)),
+};
+
 // 向后兼容的console接口
 export const consoleCompat = {
-  log: (...args: any[]) => logger.info(args.join(" ")),
-  error: (...args: any[]) => logger.error(args.join(" ")),
-  warn: (...args: any[]) => logger.warn(args.join(" ")),
-  info: (...args: any[]) => logger.info(args.join(" ")),
-  debug: (...args: any[]) => logger.debug(args.join(" ")),
+  log: (...args: any[]) => baseLogger.info(args.join(" ")),
+  error: (...args: any[]) => baseLogger.error(args.join(" ")),
+  warn: (...args: any[]) => baseLogger.warn(args.join(" ")),
+  info: (...args: any[]) => baseLogger.info(args.join(" ")),
+  debug: (...args: any[]) => baseLogger.debug(args.join(" ")),
 };
 
 // 工具函数：创建带上下文的日志记录器
 export const createContextLogger = (context: LogContext) => {
+  const baseContext = withRequestContext(context);
   return {
     error: (message: string, extra?: any) =>
-      logger.error(message, { ...context, ...extra }),
+      logger.error(message, withRequestContext({ ...baseContext, ...extra })),
     warn: (message: string, extra?: any) =>
-      logger.warn(message, { ...context, ...extra }),
+      logger.warn(message, withRequestContext({ ...baseContext, ...extra })),
     info: (message: string, extra?: any) =>
-      logger.info(message, { ...context, ...extra }),
+      logger.info(message, withRequestContext({ ...baseContext, ...extra })),
     debug: (message: string, extra?: any) =>
-      logger.debug(message, { ...context, ...extra }),
+      logger.debug(message, withRequestContext({ ...baseContext, ...extra })),
   };
 };
 
@@ -170,7 +213,7 @@ export const logHttpRequest = (
         ? LogLevel.WARN
         : LogLevel.INFO;
 
-  logger.log(level, `${method} ${url} ${statusCode}`, {
+  logger.log(level, `${method} ${url} ${statusCode}`, withRequestContext({
     requestId,
     userId,
     method,
@@ -178,7 +221,7 @@ export const logHttpRequest = (
     statusCode,
     responseTime,
     ...extra,
-  });
+  }));
 };
 
 // 工具函数：记录错误
@@ -187,15 +230,15 @@ export const logError = (
   context?: LogContext,
   message?: string,
 ) => {
-  logger.error(message || error.message, {
+  logger.error(message || error.message, withRequestContext({
     ...context,
     error: {
       name: error.name,
       message: error.message,
       stack: error.stack,
     },
-  });
+  }));
 };
 
-// 默认导出
+// 默认导出（路由层 logger.error 自动补 requestId）
 export default logger;
