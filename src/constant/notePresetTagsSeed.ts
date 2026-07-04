@@ -1,4 +1,4 @@
-/** 与 C 端 `src/constant/tags.js` 初始列表一致，用于库中无配置时的种子 */
+/** 与 C 端 `client/src/constant/tags.js` 初始列表一致，用于库中无配置时的种子 */
 export const NOTE_PRESET_TAGS_SEED: readonly string[] = Object.freeze([
   "日常",
   "心情",
