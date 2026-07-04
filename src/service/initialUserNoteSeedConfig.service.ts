@@ -1,6 +1,7 @@
 import SystemConfig, {
   SYSTEM_CONFIG_INITIAL_NOTES_KEY,
   type InitialNoteTemplate,
+  type ISystemConfig,
 } from "../model/SystemConfig";
 
 const MAX_TITLE_LEN = 200;
@@ -8,6 +9,8 @@ const MAX_CONTENT_LEN = 20_000;
 /** 模板行数上限（与手帐本上限一致，便于运营配置） */
 export const MAX_INITIAL_NOTE_TEMPLATES = 40;
 export const MAX_INITIAL_NOTE_TARGET_INDEX = 19;
+/** 累积 seedKey 上限（防异常膨胀） */
+const MAX_USED_SEED_KEYS = 200;
 
 function seedTemplates(): InitialNoteTemplate[] {
   return [
@@ -112,6 +115,44 @@ function normalizeTemplates(
   return out;
 }
 
+function mergeSeedKeys(...lists: Iterable<string>[]): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const list of lists) {
+    for (const raw of list) {
+      const s = String(raw || "").trim().slice(0, 120);
+      if (!s || seen.has(s)) continue;
+      seen.add(s);
+      out.push(s);
+      if (out.length >= MAX_USED_SEED_KEYS) {
+        return out;
+      }
+    }
+  }
+  return out;
+}
+
+async function ensureUsedSeedKeysBackfill(doc: ISystemConfig): Promise<void> {
+  const existing = (doc.initialNoteUsedSeedKeys || [])
+    .map((s) => String(s).trim())
+    .filter(Boolean);
+  if (existing.length > 0) {
+    return;
+  }
+
+  const fromTemplates = (doc.initialNoteTemplates || []).map((r) =>
+    String(r.seedKey || ""),
+  );
+  const fromSeed = seedTemplates().map((t) => t.seedKey);
+  const merged = mergeSeedKeys(fromTemplates, fromSeed);
+  if (merged.length === 0) {
+    return;
+  }
+
+  doc.initialNoteUsedSeedKeys = merged;
+  await doc.save();
+}
+
 export class InitialUserNoteSeedConfigService {
   static async ensureSeededDoc() {
     let doc = await SystemConfig.findOne({
@@ -127,6 +168,9 @@ export class InitialUserNoteSeedConfigService {
         initialNotebookTemplates: [],
         initialNotebookCount: 0,
         initialNoteTemplates: seed,
+        initialNoteUsedSeedKeys: seed
+          .map((t) => String(t.seedKey || "").trim())
+          .filter(Boolean),
       });
       doc = await SystemConfig.findOne({
         configKey: SYSTEM_CONFIG_INITIAL_NOTES_KEY,
@@ -141,6 +185,8 @@ export class InitialUserNoteSeedConfigService {
       doc.initialNoteTemplates = seed;
       await doc.save();
     }
+
+    await ensureUsedSeedKeysBackfill(doc);
 
     return doc;
   }
@@ -206,11 +252,23 @@ export class InitialUserNoteSeedConfigService {
     return templates.filter((t) => t.seedKey && t.title);
   }
 
+  /** 管理/运营：排除「系统初始手帐」的 seedKey 集合（含历史曾用 key） */
+  static async getExcludedNoteSeedKeys(): Promise<Set<string>> {
+    const doc = await InitialUserNoteSeedConfigService.ensureSeededDoc();
+    await ensureUsedSeedKeysBackfill(doc);
+    const keys = (doc.initialNoteUsedSeedKeys || [])
+      .map((s) => String(s).trim())
+      .filter(Boolean);
+    return new Set(keys);
+  }
+
   static async getForAdmin(): Promise<{
     templates: InitialNoteTemplate[];
+    usedSeedKeys: string[];
     updatedAt: string | null;
   }> {
     const doc = await InitialUserNoteSeedConfigService.ensureSeededDoc();
+    await ensureUsedSeedKeysBackfill(doc);
     const templates = (doc.initialNoteTemplates || []).map((r) => ({
       seedKey: String(r.seedKey || ""),
       targetIndex: Number(r.targetIndex ?? 0),
@@ -219,8 +277,13 @@ export class InitialUserNoteSeedConfigService {
       tags: Array.isArray(r.tags) ? r.tags.map((t) => String(t || "")) : [],
       isPinned: Boolean(r.isPinned),
     }));
+    const usedSeedKeys = [...(doc.initialNoteUsedSeedKeys || [])]
+      .map((s) => String(s).trim())
+      .filter(Boolean)
+      .sort();
     return {
       templates,
+      usedSeedKeys,
       updatedAt: doc.updatedAt ? new Date(doc.updatedAt).toISOString() : null,
     };
   }
@@ -234,11 +297,21 @@ export class InitialUserNoteSeedConfigService {
     const templates = normalizeTemplates(input.templates || []);
     InitialUserNoteSeedConfigService.assertValidInput(templates);
 
+    const prev = await InitialUserNoteSeedConfigService.ensureSeededDoc();
+    await ensureUsedSeedKeysBackfill(prev);
+    const prevUsed = prev.initialNoteUsedSeedKeys || [];
+    const prevTemplateKeys = (prev.initialNoteTemplates || []).map((r) =>
+      String(r.seedKey || ""),
+    );
+    const newTemplateKeys = templates.map((t) => t.seedKey);
+    const usedSeedKeys = mergeSeedKeys(prevUsed, prevTemplateKeys, newTemplateKeys);
+
     const doc = await SystemConfig.findOneAndUpdate(
       { configKey: SYSTEM_CONFIG_INITIAL_NOTES_KEY },
       {
         $set: {
           initialNoteTemplates: templates,
+          initialNoteUsedSeedKeys: usedSeedKeys,
         },
       },
       { new: true, upsert: true, setDefaultsOnInsert: true },

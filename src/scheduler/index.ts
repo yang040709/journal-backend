@@ -1,5 +1,6 @@
 import { ReminderScheduler } from "./reminder.scheduler";
 import { AlertScheduler } from "./alert.scheduler";
+import { CosDeleteScheduler } from "./cosDelete.scheduler";
 import { logger } from "../utils/logger";
 
 /**
@@ -9,9 +10,9 @@ export function startAllSchedulers(): void {
   logger.info("启动所有调度器...");
 
   try {
-    // 启动提醒调度器
     ReminderScheduler.start();
     AlertScheduler.start();
+    CosDeleteScheduler.start();
     logger.info("所有调度器已启动");
   } catch (error: any) {
     logger.error("调度器启动失败，但不会终止后端进程", {
@@ -32,9 +33,9 @@ export function startAllSchedulers(): void {
 export function stopAllSchedulers(): void {
   logger.info("停止所有调度器...");
 
-  // 停止提醒调度器
   ReminderScheduler.stop();
   AlertScheduler.stop();
+  CosDeleteScheduler.stop();
 
   logger.info("所有调度器已停止");
 }
@@ -51,12 +52,18 @@ export function getSchedulerStatus(): {
     isRunning: boolean;
     nextInvocation?: Date;
   };
+  cosDeleteScheduler: {
+    isRunning: boolean;
+    nextInvocation?: Date;
+  };
 } {
   return {
     reminderScheduler: ReminderScheduler.getStatus(),
     alertScheduler: AlertScheduler.getStatus(),
+    cosDeleteScheduler: CosDeleteScheduler.getStatus(),
   };
 }
 
 export { ReminderScheduler } from "./reminder.scheduler";
 export { AlertScheduler } from "./alert.scheduler";
+export { CosDeleteScheduler } from "./cosDelete.scheduler";

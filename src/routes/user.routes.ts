@@ -6,6 +6,7 @@ import { authMiddleware, AuthContext } from "../middlewares/auth.middleware";
 import { z } from "zod";
 import { AlertMetricService } from "../service/alertMetric.service";
 import User from "../model/User";
+import logger from "../utils/logger";
 
 const router = new Router({
   prefix: "/auth",
@@ -83,7 +84,7 @@ router.post("/login", async (ctx) => {
       error(ctx, "参数验证失败", ErrorCodes.PARAM_ERROR, 400);
     } else {
       void AlertMetricService.recordOperation("login_auth", { success: false });
-      console.error("登录失败:", err);
+      logger.error("登录失败", err);
       error(ctx, err.message || "登录失败", ErrorCodes.INTERNAL_ERROR, 500);
     }
   }
@@ -165,7 +166,7 @@ router.post("/refresh", async (ctx) => {
     if (err instanceof z.ZodError) {
       error(ctx, "参数验证失败", ErrorCodes.PARAM_ERROR, 400);
     } else {
-      console.error("刷新token失败:", err);
+      logger.error("刷新token失败", err);
       error(
         ctx,
         err.message || "刷新token失败",

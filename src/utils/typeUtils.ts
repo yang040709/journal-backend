@@ -56,3 +56,15 @@ export function toLeanTemplate(doc: FlattenMaps<any>): LeanTemplate {
 export function toLeanTemplateArray(docs: FlattenMaps<any>[]): LeanTemplate[] {
   return docs.map(toLeanTemplate);
 }
+
+export function toLeanReminder(doc: FlattenMaps<any>) {
+  const { _id, __v, ...rest } = doc;
+  return {
+    ...rest,
+    id: _id?.toString() || "",
+  };
+}
+
+export function toLeanReminderArray(docs: FlattenMaps<any>[]) {
+  return docs.map(toLeanReminder);
+}

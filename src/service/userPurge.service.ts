@@ -1,4 +1,5 @@
-import COS from "cos-nodejs-sdk-v5";
+import { enqueueCosDeletes } from "./pendingCosDelete.service";
+import { isCosObjectKey } from "../utils/cosDelete";
 import mongoose from "mongoose";
 import Activity from "../model/Activity";
 import Note from "../model/Note";
@@ -17,6 +18,7 @@ import UserFeedback from "../model/UserFeedback";
 import UserFeedbackImageQuotaDaily from "../model/UserFeedbackImageQuotaDaily";
 import UserImageAsset from "../model/UserImageAsset";
 import UserUploadQuotaDaily from "../model/UserUploadQuotaDaily";
+import MediaRef from "../model/MediaRef";
 
 type PurgeCollectionKey =
   | "notes"
@@ -53,6 +55,7 @@ export type PurgeExecutionResult = {
     deletedKeys?: number;
     skippedKeys?: number;
     failedKeys?: number;
+    queuedKeys?: number;
     error?: string;
   };
 };
@@ -84,48 +87,6 @@ function blankStats(): PurgeStats {
     userImageAssets: 0,
     user: 0,
   };
-}
-
-function getCosClient() {
-  const secretId = process.env.COS_SECRET_ID || "";
-  const secretKey = process.env.COS_SECRET_KEY || "";
-  if (!secretId || !secretKey) {
-    throw new Error("COS credentials missing");
-  }
-  return new COS({ SecretId: secretId, SecretKey: secretKey });
-}
-
-async function deleteCosObjects(keys: string[]) {
-  const bucket = process.env.COS_BUCKET || "";
-  const region = process.env.COS_REGION || "";
-  if (!bucket || !region) throw new Error("COS_BUCKET/COS_REGION missing");
-  const cos = getCosClient();
-
-  const objects = keys.map((Key) => ({ Key }));
-  const chunkSize = 1000; // COS 单次最多 1000
-
-  let deletedKeys = 0;
-  for (let i = 0; i < objects.length; i += chunkSize) {
-    const batch = objects.slice(i, i + chunkSize);
-    await new Promise<void>((resolve, reject) => {
-      cos.deleteMultipleObject(
-        {
-          Bucket: bucket,
-          Region: region,
-          Objects: batch,
-          Quiet: true,
-        },
-        (err, data) => {
-          if (err) return reject(err);
-          const deleted = Array.isArray((data as any)?.Deleted) ? (data as any).Deleted.length : 0;
-          deletedKeys += deleted;
-          resolve();
-        },
-      );
-    });
-  }
-
-  return { deletedKeys };
 }
 
 function isMongoTransactionNotSupportedError(e: unknown): boolean {
@@ -279,6 +240,7 @@ export class UserPurgeService {
         NoteExportLog.deleteMany({ userId }, opt as any),
         PointsCampaignClaim.deleteMany({ userId }, opt as any),
         UserImageAsset.deleteMany({ userId }, opt as any),
+        MediaRef.deleteMany({ userId }, opt as any),
       ]);
       await User.deleteOne({ _id: id }, opt as any);
     };
@@ -291,8 +253,7 @@ export class UserPurgeService {
       const keys = docs
         .map((d: any) => String(d?.storageKey || "").trim())
         .filter(Boolean);
-      // 仅删除看起来像 COS key 的项（避免 cover:{id} 这种业务去重键误删）
-      cosKeys = keys.filter((k) => k.includes("/") && !k.startsWith("cover:"));
+      cosKeys = keys.filter(isCosObjectKey);
     }
 
     let session: mongoose.ClientSession | null = null;
@@ -328,14 +289,14 @@ export class UserPurgeService {
         deletedKeys: 0,
         skippedKeys: 0,
         failedKeys: 0,
+        queuedKeys: 0,
       };
       try {
         if (cosKeys.length) {
-          const { deletedKeys } = await deleteCosObjects(cosKeys);
-          cosOut.deletedKeys = deletedKeys;
-          cosOut.skippedKeys = Math.max(0, cosKeys.length - deletedKeys);
-        } else {
-          cosOut.skippedKeys = 0;
+          cosOut.queuedKeys = await enqueueCosDeletes(cosKeys, {
+            userId,
+            source: "purge",
+          });
         }
       } catch (e) {
         cosOut.error = e instanceof Error ? e.message : String(e);

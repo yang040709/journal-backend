@@ -19,6 +19,8 @@ import {
 } from "../service/noteExport.service";
 import logger from "../utils/logger";
 import { AlertMetricService } from "../service/alertMetric.service";
+import { getDateKeyByTimezone } from "../utils/dateKey";
+import { optionalNoteImagesSchema } from "../schemas/noteImage.schema";
 
 const MAX_PAGE_DEPTH = 10_000;
 const MIN_SEARCH_KEYWORD_LENGTH = 1;
@@ -278,25 +280,13 @@ router.delete("/custom-tags", async (ctx: AuthContext) => {
   }
 });
 
-const noteImageSchema = z.object({
-  url: z.string().url("图片URL格式不正确"),
-  key: z.string().min(1, "图片Key不能为空"),
-  thumbUrl: z.string().url("缩略图URL格式不正确").optional(),
-  thumbKey: z.string().min(1, "缩略图Key不能为空").optional(),
-  width: z.number().int().nonnegative(),
-  height: z.number().int().nonnegative(),
-  size: z.number().int().nonnegative(),
-  mimeType: z.enum(["image/jpeg", "image/png", "image/webp"]),
-  createdAt: z.coerce.date().optional(),
-});
-
 // 创建手帐请求验证
 const createNoteSchema = z.object({
   noteBookId: z.string().min(1, "手帐本ID不能为空"),
   title: z.string().min(1).max(200),
   content: z.string(),
   tags: z.array(z.string()).optional().default([]),
-  images: z.array(noteImageSchema).max(9, "最多上传9张图片").optional(),
+  images: optionalNoteImagesSchema,
   appliedSystemTemplateKey: z.string().trim().max(120).optional(),
 });
 
@@ -306,7 +296,7 @@ const updateNoteSchema = z.object({
   content: z.string().optional(),
   tags: z.array(z.string()).optional(),
   noteBookId: z.string().optional(),
-  images: z.array(noteImageSchema).max(9, "最多上传9张图片").optional(),
+  images: optionalNoteImagesSchema,
   isFavorite: z.boolean().optional(),
   isPinned: z.boolean().optional(),
 });
@@ -595,6 +585,87 @@ const calendarDailyCountsSchema = z
     message: "时间跨度不能超过 45 天",
     path: ["endTime"],
   });
+
+const onThisDaySchema = z.object({
+  month: z.coerce.number().int().min(1).max(12).optional(),
+  day: z.coerce.number().int().min(1).max(31).optional(),
+  tz: z.string().trim().max(64).optional().default("Asia/Shanghai"),
+  limit: z.coerce.number().int().min(1).max(100).optional().default(50),
+});
+
+/**
+ * @swagger
+ * /notes/on-this-day:
+ *   get:
+ *     tags:
+ *       - 手帐管理
+ *     summary: 时光回顾（历史上的今天）
+ *     description: 按用户时区对 createdAt 的月-日匹配，跨年聚合手帐列表（不含 content）
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: month
+ *         schema:
+ *           type: integer
+ *           minimum: 1
+ *           maximum: 12
+ *         description: 月，默认当前时区当天
+ *       - in: query
+ *         name: day
+ *         schema:
+ *           type: integer
+ *           minimum: 1
+ *           maximum: 31
+ *         description: 日，默认当前时区当天
+ *       - in: query
+ *         name: tz
+ *         schema:
+ *           type: string
+ *           default: Asia/Shanghai
+ *       - in: query
+ *         name: limit
+ *         schema:
+ *           type: integer
+ *           default: 50
+ *           maximum: 100
+ *     responses:
+ *       200:
+ *         description: 成功；data 含 total、totalMatched、truncated
+ */
+/** GET /notes/on-this-day — 按「月-日」跨年聚合手帐（createdAt，未删除） */
+router.get("/on-this-day", async (ctx: AuthContext) => {
+  try {
+    const userId = ctx.user!.userId;
+    const q = onThisDaySchema.parse(ctx.query);
+    const tz = q.tz.trim() || "Asia/Shanghai";
+    const dateKey = getDateKeyByTimezone(tz);
+    const parts = dateKey.split("-").map((v) => Number(v));
+    const defaultMonth = parts[1] || new Date().getMonth() + 1;
+    const defaultDay = parts[2] || new Date().getDate();
+    const month = q.month ?? defaultMonth;
+    const day = q.day ?? defaultDay;
+    const data = await NoteService.getNotesOnThisDay(
+      userId,
+      month,
+      day,
+      tz,
+      q.limit,
+    );
+    success(ctx, data, "获取时光回顾成功");
+  } catch (err) {
+    if (err instanceof z.ZodError) {
+      error(ctx, "参数验证失败", ErrorCodes.PARAM_ERROR, 400);
+      return;
+    }
+    if (err instanceof Error && err.message) {
+      error(ctx, err.message, ErrorCodes.PARAM_ERROR, 400);
+      return;
+    }
+    logger.error("获取时光回顾失败:", err);
+    error(ctx, "获取时光回顾失败", ErrorCodes.INTERNAL_ERROR, 500);
+  }
+});
 
 /** GET /notes/calendar/daily-counts — 热力图按日汇总（createdAt，未删除） */
 router.get("/calendar/daily-counts", async (ctx: AuthContext) => {

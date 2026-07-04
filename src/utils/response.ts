@@ -7,6 +7,7 @@ export interface SuccessResponse<T = any> {
   code: number;
   message: string;
   data: T;
+  requestId: string;
   timestamp: number;
 }
 
@@ -17,7 +18,12 @@ export interface ErrorResponse {
   code: number;
   message: string;
   data: unknown;
+  requestId: string;
   timestamp: number;
+}
+
+function getRequestIdFromContext(ctx: Context): string {
+  return String(ctx.state?.requestId || "unknown");
 }
 
 /**
@@ -33,6 +39,7 @@ export const success = <T = any>(
     code,
     message,
     data,
+    requestId: getRequestIdFromContext(ctx),
     timestamp: Date.now(),
   };
 };
@@ -53,6 +60,7 @@ export const error = (
     code,
     message,
     data: data === undefined ? null : data,
+    requestId: getRequestIdFromContext(ctx),
     timestamp: Date.now(),
   };
 };
@@ -88,6 +96,7 @@ export const paginatedSuccess = <T = any>(
       limit,
       totalPages,
     },
+    requestId: getRequestIdFromContext(ctx),
     timestamp: Date.now(),
   };
 };

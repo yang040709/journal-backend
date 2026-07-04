@@ -53,6 +53,7 @@ export const adminCorsMiddleware = async (ctx: Context, next: Next) => {
       "Access-Control-Allow-Methods",
       "GET, POST, PUT, PATCH, DELETE, OPTIONS",
     );
+    ctx.set("Access-Control-Expose-Headers", "X-Request-Id");
   }
 
   if (ctx.method === "OPTIONS") {

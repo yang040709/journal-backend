@@ -27,7 +27,9 @@ export class AiConsumptionLogService {
     dateKey: string;
     mode: string;
     styleKey: string;
+    systemPrompt: string;
     userPrompt: string;
+    rawOutputText: string;
     outputText: string;
   }): Promise<void> {
     try {
@@ -37,7 +39,9 @@ export class AiConsumptionLogService {
         source: "journal",
         mode: params.mode,
         styleKey: params.styleKey,
+        systemPrompt: params.systemPrompt,
         userPrompt: params.userPrompt,
+        rawOutputText: params.rawOutputText,
         outputText: params.outputText,
       });
     } catch (e) {
@@ -49,7 +53,9 @@ export class AiConsumptionLogService {
     userId: string;
     dateKey: string;
     mode: string;
+    systemPrompt: string;
     userPrompt: string;
+    rawOutputText: string;
     outputText: string;
   }): Promise<void> {
     try {
@@ -58,7 +64,9 @@ export class AiConsumptionLogService {
         dateKey: params.dateKey,
         source: "template",
         mode: params.mode,
+        systemPrompt: params.systemPrompt,
         userPrompt: params.userPrompt,
+        rawOutputText: params.rawOutputText,
         outputText: params.outputText,
       });
     } catch (e) {
@@ -125,7 +133,9 @@ export class AiConsumptionLogService {
       source: r.source,
       mode: r.mode,
       styleKey: r.styleKey ?? "",
+      systemPrompt: r.systemPrompt ?? "",
       userPrompt: r.userPrompt,
+      rawOutputText: r.rawOutputText ?? "",
       outputText: r.outputText,
       createdAt: r.createdAt,
       updatedAt: r.updatedAt,

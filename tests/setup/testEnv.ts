@@ -1,0 +1,22 @@
+process.env.NODE_ENV = "test";
+process.env.PORT = "0";
+process.env.JWT_SECRET = "test-jwt-secret-at-least-32-chars-long!!";
+process.env.ADMIN_JWT_SECRET = "test-admin-jwt-secret-different-key!!";
+process.env.SENSITIVE_WORDS_KEY = "test-sensitive-words-key-32bytes!";
+process.env.LOG_LEVEL = "error";
+process.env.CACHE_ENABLED = "true";
+process.env.ADMIN_BOOTSTRAP_USERNAME = "testadmin";
+process.env.ADMIN_BOOTSTRAP_PASSWORD = "testadminpass";
+process.env.WX_APPID = "wx-test-appid";
+process.env.WX_SECRET = "wx-test-secret";
+process.env.DEEPSEEK_API_KEY = "test-deepseek-key";
+process.env.DEEPSEEK_API_BASE = "https://api.deepseek.com";
+process.env.DEEPSEEK_MODEL = "deepseek-chat";
+process.env.COS_SECRET_ID = "test-cos-secret-id";
+process.env.COS_SECRET_KEY = "test-cos-secret-key";
+process.env.COS_BUCKET = "test-bucket-1234567890";
+process.env.COS_REGION = "ap-guangzhou";
+process.env.COS_PUBLIC_DOMAIN = "https://cdn.test.example.com";
+process.env.COS_UPLOAD_DIR = "journal-test";
+process.env.MONGO_URI =
+  process.env.MONGO_URI ?? "mongodb://127.0.0.1:27017/journal-test-placeholder";

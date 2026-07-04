@@ -17,6 +17,7 @@ import {
   pickSortField,
   toSafeRegex,
 } from "../utils/querySafety";
+import { InitialUserNoteSeedConfigService } from "./initialUserNoteSeedConfig.service";
 
 export const ADMIN_SHARE_NOTE_PATH_PREFIX =
   "/share/pages/share-note/share-note?share_id=";
@@ -56,6 +57,8 @@ export interface AdminNoteListParams extends PaginationParams {
   isPinned?: boolean;
   /** 标题/正文 $text 检索；与 tags 同时存在时忽略 tags */
   q?: string;
+  /** 排除系统初始种子手帐（appliedSystemTemplateKey）；与 noteBookId 同时存在时忽略 */
+  excludeDefaultNotes?: boolean;
 }
 
 export interface AdminRiskNoteListParams {
@@ -139,6 +142,12 @@ export function buildAdminNoteListQuery(
   return query;
 }
 
+/** 管理列表：按初始手帐 seedKey 排除系统种子手帐 */
+async function resolveDefaultNoteSeedKeys(): Promise<string[]> {
+  const keys = await InitialUserNoteSeedConfigService.getExcludedNoteSeedKeys();
+  return [...keys];
+}
+
 function enrichNoteWithSharePath<T extends LeanNote>(note: T): AdminNoteListItem {
   if (note.isShare && note.shareId) {
     return {
@@ -173,6 +182,15 @@ export class AdminNoteService {
     };
     if (textQ) {
       query.$text = { $search: textQ };
+    }
+    if (
+      params.excludeDefaultNotes === true &&
+      !params.noteBookId?.trim()
+    ) {
+      const seedKeys = await resolveDefaultNoteSeedKeys();
+      if (seedKeys.length > 0) {
+        query.appliedSystemTemplateKey = { $nin: seedKeys };
+      }
     }
 
     const [items, total] = await Promise.all([

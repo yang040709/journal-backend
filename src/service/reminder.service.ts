@@ -1,5 +1,6 @@
 import Reminder, { IReminder } from "../model/Reminder";
 import { ActivityLogger } from "../utils/ActivityLogger";
+import { toLeanReminder, toLeanReminderArray } from "../utils/typeUtils";
 import { NoteService } from "./note.service";
 import { WeChatService } from "./wechat.service";
 
@@ -18,6 +19,10 @@ export interface UpdateReminderData {
   retryCount?: number;
   lastError?: string;
   sentAt?: Date;
+}
+
+function getReminderDbId(reminder: { id?: string; _id?: unknown }): string {
+  return String(reminder.id || reminder._id);
 }
 
 export class ReminderService {
@@ -57,7 +62,7 @@ export class ReminderService {
       { blocking: false },
     );
 
-    return reminder;
+    return toLeanReminder(reminder.toJSON()) as unknown as IReminder;
   }
 
   /**
@@ -95,7 +100,7 @@ export class ReminderService {
     ]);
 
     return {
-      items: items as unknown as IReminder[],
+      items: toLeanReminderArray(items) as unknown as IReminder[],
       total,
       page,
       limit,
@@ -110,7 +115,9 @@ export class ReminderService {
     userId: string,
   ): Promise<IReminder | null> {
     const reminder = await Reminder.findOne({ _id: id, userId }).lean();
-    return reminder as unknown as IReminder | null;
+    return reminder
+      ? (toLeanReminder(reminder) as unknown as IReminder)
+      : null;
   }
 
   /**
@@ -145,7 +152,9 @@ export class ReminderService {
       { blocking: false },
     );
 
-    return reminder as unknown as IReminder | null;
+    return reminder
+      ? (toLeanReminder(reminder) as unknown as IReminder)
+      : null;
   }
 
   /**
@@ -234,7 +243,7 @@ export class ReminderService {
       retryCount: { $lt: 3 },
     }).lean();
 
-    return reminders as unknown as IReminder[];
+    return toLeanReminderArray(reminders) as unknown as IReminder[];
   }
 
   /**
@@ -256,7 +265,7 @@ export class ReminderService {
       if (success) {
         // 更新发送状态
         await Reminder.updateOne(
-          { _id: reminder._id },
+          { _id: getReminderDbId(reminder) },
           {
             $set: {
               sendStatus: "sent",
@@ -341,7 +350,7 @@ export class ReminderService {
       updateData.sendStatus = "failed";
     }
 
-    await Reminder.updateOne({ _id: reminder._id }, { $set: updateData });
+    await Reminder.updateOne({ _id: getReminderDbId(reminder) }, { $set: updateData });
   }
 
   /**

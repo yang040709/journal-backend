@@ -28,6 +28,7 @@ import {
 import { AdminAccountService } from "../service/adminAccount.service";
 import { AdminNoteService } from "../service/adminNote.service";
 import { AdminNoteBookService } from "../service/adminNoteBook.service";
+import { AdminNotebookMigrationService } from "../service/adminNotebookMigration.service";
 import { AdminUserService } from "../service/adminUser.service";
 import { AdminTemplateService } from "../service/adminTemplate.service";
 import { AdminReminderService } from "../service/adminReminder.service";
@@ -64,6 +65,7 @@ import {
 import { InitialUserNoteSeedConfigService } from "../service/initialUserNoteSeedConfig.service";
 import { AdminGalleryService } from "../service/adminGallery.service";
 import { FeedbackService } from "../service/feedback.service";
+import { FeedbackQuickReplyService } from "../service/feedbackQuickReply.service";
 import { AnnouncementService } from "../service/announcement.service";
 import {
   CampaignNotFoundError,
@@ -73,6 +75,7 @@ import { AlertMetricService } from "../service/alertMetric.service";
 import { AlertRuleService } from "../service/alertRule.service";
 import AlertEvent from "../model/AlertEvent";
 import { UserReviewService } from "../service/userReview.service";
+import { optionalNoteImagesSchema } from "../schemas/noteImage.schema";
 
 const MAX_PAGE_DEPTH = (() => {
   const raw = String(process.env.ADMIN_MAX_PAGE_DEPTH ?? "").trim();
@@ -146,6 +149,10 @@ const noteListQuerySchema = paginationSchema.safeExtend({
   isShare: booleanQueryParam,
   isFavorite: booleanQueryParam,
   isPinned: booleanQueryParam,
+  /** 排除新用户初始种子手帐（欢迎/指南等）；与 noteBookId 同时传时忽略 */
+  excludeDefaultNotes: booleanQueryParam,
+  /** @deprecated 兼容旧参数名 excludeDefaultNotebooks */
+  excludeDefaultNotebooks: booleanQueryParam,
   /** 标题/正文全文检索（MongoDB $text）；与 tags 同时传时忽略 tags */
   q: optionalKeywordSchema(100),
 });
@@ -300,24 +307,12 @@ const adRewardLogListQuerySchema = z.object({
   path: ["page"],
 });
 
-const noteImageSchema = z.object({
-  url: z.string().url("图片URL格式不正确"),
-  key: z.string().min(1, "图片Key不能为空"),
-  thumbUrl: z.string().url("缩略图URL格式不正确").optional(),
-  thumbKey: z.string().min(1, "缩略图Key不能为空").optional(),
-  width: z.number().int().nonnegative(),
-  height: z.number().int().nonnegative(),
-  size: z.number().int().nonnegative(),
-  mimeType: z.enum(["image/jpeg", "image/png", "image/webp"]),
-  createdAt: z.coerce.date().optional(),
-});
-
 const createNoteSchema = z.object({
   noteBookId: z.string().min(1),
   title: z.string().min(1).max(200),
   content: z.string(),
   tags: z.array(z.string()).optional().default([]),
-  images: z.array(noteImageSchema).max(9).optional(),
+  images: optionalNoteImagesSchema,
   userId: z.string().min(1, "所属用户 userId 不能为空"),
   appliedSystemTemplateKey: z.string().trim().max(120).optional(),
 });
@@ -327,7 +322,7 @@ const updateNoteSchema = z.object({
   content: z.string().optional(),
   tags: z.array(z.string()).optional(),
   noteBookId: z.string().optional(),
-  images: z.array(noteImageSchema).max(9).optional(),
+  images: optionalNoteImagesSchema,
   isShare: z.boolean().optional(),
   isPinned: z.boolean().optional(),
   isFavorite: z.boolean().optional(),
@@ -345,6 +340,12 @@ const createNoteBookSchema = z.object({
 const updateNoteBookSchema = z.object({
   title: z.string().min(1).max(100).optional(),
   coverImg: z.string().optional(),
+});
+
+const importNotebookJsonSchema = z.object({
+  userId: z.string().trim().min(1),
+  titleOverride: z.string().trim().max(100).optional(),
+  data: z.unknown(),
 });
 
 const createUserSchema = z.object({
@@ -402,7 +403,7 @@ const adminPointsRulesPutSchema = z.object({
     .object({
       weeklyFirstSubmit: z.number().int().min(0).max(1_000_000).optional(),
       important: z.number().int().min(0).max(1_000_000).optional(),
-      critical: z.number().int().min(0).max(1_000_000).optional(),
+      critical: z.number().int().min(0).max(10_000).optional(),
     })
     .optional(),
 });
@@ -422,20 +423,62 @@ const feedbackListQuerySchema = z
     path: ["page"],
   });
 
-const feedbackReviewBodySchema = z.object({
-  reviewLevel: z.enum(["trash", "normal", "important", "critical"]),
-  reviewRemark: z.string().trim().max(1000).optional(),
+const feedbackQuickReplyItemSchema = z.object({
+  id: z.string().trim().min(1).max(64).optional(),
+  label: z.string().trim().min(1, "标题不能为空").max(30),
+  content: z.string().trim().min(1, "内容不能为空").max(1000),
+  sortOrder: z.number().int().min(0).optional(),
+  enabled: z.boolean().optional().default(true),
 });
+
+const feedbackQuickRepliesBodySchema = z.object({
+  items: z.array(feedbackQuickReplyItemSchema).max(50),
+});
+
+const feedbackReviewRewardPointsSchema = z.number().int().min(0).max(10_000);
+
+const feedbackReviewBodySchema = z
+  .object({
+    reviewLevel: z.enum(["trash", "normal", "important", "critical"]),
+    reviewRemark: z.string().trim().max(1000).optional(),
+    userReply: z.string().trim().max(1000).optional(),
+    rewardPoints: feedbackReviewRewardPointsSchema.optional(),
+  })
+  .superRefine((val, ctx) => {
+    if (val.rewardPoints != null && val.reviewLevel !== "critical") {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "仅「非常重要意见」可自定义奖励积分",
+        path: ["rewardPoints"],
+      });
+    }
+  });
 
 const batchIdsSchema = z
   .array(z.string().trim().min(1))
   .min(1, "至少选择一条数据")
   .max(500, "单次最多处理 500 条");
 
-const feedbackBatchReviewBodySchema = z.object({
-  ids: batchIdsSchema,
-  reviewLevel: z.enum(["trash", "normal", "important", "critical"]),
-  reviewRemark: z.string().trim().max(1000).optional(),
+const feedbackBatchReviewBodySchema = z
+  .object({
+    ids: batchIdsSchema,
+    reviewLevel: z.enum(["trash", "normal", "important", "critical"]),
+    reviewRemark: z.string().trim().max(1000).optional(),
+    userReply: z.string().trim().max(1000).optional(),
+    rewardPoints: feedbackReviewRewardPointsSchema.optional(),
+  })
+  .superRefine((val, ctx) => {
+    if (val.rewardPoints != null && val.reviewLevel !== "critical") {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "仅「非常重要意见」可自定义奖励积分",
+        path: ["rewardPoints"],
+      });
+    }
+  });
+
+const feedbackUserReplyBodySchema = z.object({
+  userReply: z.string().trim().max(1000).optional(),
 });
 
 const feedbackExportQuerySchema = z.object({
@@ -1466,6 +1509,8 @@ authed.get(
         isShare: q.isShare,
         isFavorite: q.isFavorite,
         isPinned: q.isPinned,
+        excludeDefaultNotes:
+          q.excludeDefaultNotes ?? q.excludeDefaultNotebooks,
         q: q.q,
       });
       paginatedSuccess(ctx, items, total, q.page, q.limit);
@@ -1669,6 +1714,62 @@ authed.get(
         e instanceof Error ? e.message : "参数错误",
         ErrorCodes.PARAM_ERROR,
       );
+    }
+  },
+);
+
+authed.get(
+  "/notebooks/:id/export-json",
+  requireAdminPage(ADMIN_PAGE_NOTEBOOKS),
+  async (ctx) => {
+    try {
+      const result = await AdminNotebookMigrationService.exportNotebook(
+        ctx.params.id,
+      );
+      const encodedFileName = encodeURIComponent(result.fileName).replace(
+        /'/g,
+        "%27",
+      );
+      ctx.set("Content-Type", "application/json; charset=utf-8");
+      ctx.set(
+        "Content-Disposition",
+        `attachment; filename*=UTF-8''${encodedFileName}`,
+      );
+      ctx.body = JSON.stringify(result.envelope, null, 2);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "导出失败";
+      if (msg.includes("不存在") || msg.includes("已删除")) {
+        error(ctx, msg, ErrorCodes.NOTEBOOK_NOT_FOUND, 404);
+        return;
+      }
+      error(ctx, msg, ErrorCodes.PARAM_ERROR, 400);
+    }
+  },
+);
+
+authed.post(
+  "/notebooks/import-json",
+  requireAdminPage(ADMIN_PAGE_NOTEBOOKS),
+  async (ctx) => {
+    try {
+      const body = importNotebookJsonSchema.parse(ctx.request.body);
+      const result = await AdminNotebookMigrationService.importNotebook(
+        body.userId,
+        body.data,
+        { titleOverride: body.titleOverride },
+      );
+      success(ctx, result, "导入成功");
+    } catch (e) {
+      if (e instanceof z.ZodError) {
+        error(ctx, "参数验证失败", ErrorCodes.PARAM_ERROR, 400);
+        return;
+      }
+      const msg = e instanceof Error ? e.message : "导入失败";
+      if (msg.includes("目标用户不存在")) {
+        error(ctx, msg, ErrorCodes.NOT_FOUND, 404);
+        return;
+      }
+      error(ctx, msg, ErrorCodes.PARAM_ERROR, 400);
     }
   },
 );
@@ -3476,15 +3577,50 @@ authed.get(
 );
 
 authed.get(
+  "/feedbacks/quick-replies",
+  requireAdminPage(ADMIN_PAGE_FEEDBACKS),
+  async (ctx) => {
+    try {
+      const data = await FeedbackQuickReplyService.getForAdmin();
+      success(ctx, data);
+    } catch (e) {
+      error(ctx, e instanceof Error ? e.message : "加载失败", ErrorCodes.INTERNAL_ERROR, 500);
+    }
+  },
+);
+
+authed.put(
+  "/feedbacks/quick-replies",
+  requireAdminPage(ADMIN_PAGE_FEEDBACKS),
+  async (ctx) => {
+    try {
+      const body = feedbackQuickRepliesBodySchema.parse(ctx.request.body);
+      const data = await FeedbackQuickReplyService.setItems(body.items);
+      success(ctx, data, "保存成功");
+    } catch (e) {
+      if (e instanceof z.ZodError) {
+        error(ctx, "参数验证失败", ErrorCodes.PARAM_ERROR, 400);
+        return;
+      }
+      error(ctx, e instanceof Error ? e.message : "保存失败", ErrorCodes.PARAM_ERROR, 400);
+    }
+  },
+);
+
+authed.get(
   "/feedbacks/:id",
   requireAdminPage(ADMIN_PAGE_FEEDBACKS),
   async (ctx) => {
-    const row = await FeedbackService.adminGetFeedback(String(ctx.params.id || ""));
-    if (!row) {
-      error(ctx, "反馈不存在", ErrorCodes.NOT_FOUND, 404);
-      return;
+    try {
+      const row = await FeedbackService.adminGetFeedback(String(ctx.params.id || ""));
+      if (!row) {
+        error(ctx, "反馈不存在", ErrorCodes.NOT_FOUND, 404);
+        return;
+      }
+      success(ctx, row);
+    } catch (e) {
+      error(ctx, e instanceof Error ? e.message : "加载失败", ErrorCodes.INTERNAL_ERROR, 500);
     }
-    success(ctx, row);
   },
 );
 
@@ -3499,6 +3635,8 @@ authed.post(
         {
           reviewLevel: body.reviewLevel,
           reviewRemark: body.reviewRemark,
+          userReply: body.userReply,
+          rewardPoints: body.rewardPoints,
         },
         ctx.state.admin!,
       );
@@ -3528,6 +3666,8 @@ authed.post(
         {
           reviewLevel: body.reviewLevel,
           reviewRemark: body.reviewRemark,
+          userReply: body.userReply,
+          rewardPoints: body.rewardPoints,
         },
         ctx.state.admin!,
       );
@@ -3546,6 +3686,36 @@ authed.post(
         return;
       }
       error(ctx, e instanceof Error ? e.message : "处理失败", ErrorCodes.INTERNAL_ERROR, 500);
+    }
+  },
+);
+
+authed.patch(
+  "/feedbacks/:id/user-reply",
+  requireAdminPage(ADMIN_PAGE_FEEDBACKS),
+  async (ctx) => {
+    try {
+      const body = feedbackUserReplyBodySchema.parse(ctx.request.body);
+      const data = await FeedbackService.adminUpdateUserReply(
+        String(ctx.params.id || ""),
+        { userReply: body.userReply },
+        ctx.state.admin!,
+      );
+      success(ctx, data, "回复已更新");
+    } catch (e) {
+      if (e instanceof z.ZodError) {
+        error(ctx, "参数验证失败", ErrorCodes.PARAM_ERROR, 400);
+        return;
+      }
+      if (e instanceof Error && e.message === "反馈不存在") {
+        error(ctx, "反馈不存在", ErrorCodes.NOT_FOUND, 404);
+        return;
+      }
+      if (e instanceof Error && e.message === "仅已处理的反馈可修改回复") {
+        error(ctx, e.message, ErrorCodes.PARAM_ERROR, 400);
+        return;
+      }
+      error(ctx, e instanceof Error ? e.message : "更新失败", ErrorCodes.INTERNAL_ERROR, 500);
     }
   },
 );
@@ -3629,7 +3799,7 @@ authed.put(
         .object({
           weeklyFirstSubmit: z.number().int().min(0).max(1_000_000).optional(),
           important: z.number().int().min(0).max(1_000_000).optional(),
-          critical: z.number().int().min(0).max(1_000_000).optional(),
+          critical: z.number().int().min(0).max(10_000).optional(),
         })
         .parse(ctx.request.body);
       const admin = ctx.state.admin!;

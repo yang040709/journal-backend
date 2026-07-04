@@ -5,7 +5,12 @@ import { toLeanNoteArray, toLeanNote } from "../utils/typeUtils";
 import { checkNoteContent } from "../utils/sensitive-encrypted";
 import { nanoid } from "nanoid";
 import { recordFromNoteImages } from "./userImageAsset.service";
+import { MediaReferenceService } from "./mediaReference.service";
 import { ShareSecurityTaskService } from "./shareSecurityTask.service";
+import {
+  formatInstantAsDateKey,
+  getDateKeyByTimezone,
+} from "../utils/dateKey";
 
 export interface CreateNoteData {
   noteBookId: string;
@@ -103,6 +108,24 @@ export function toSharedNoteView(
 export interface SearchNotesResult {
   items: LeanNote[];
   total: number;
+}
+
+export interface OnThisDayGroup {
+  year: number;
+  yearsAgo: number;
+  items: LeanNote[];
+}
+
+export interface OnThisDayResult {
+  anchor: { month: number; day: number; label: string };
+  tz: string;
+  groups: OnThisDayGroup[];
+  /** 本次返回条数（受 limit 限制） */
+  total: number;
+  /** 匹配月-日的总条数（未截断前） */
+  totalMatched: number;
+  /** 是否因 limit 未展示全部匹配结果 */
+  truncated: boolean;
 }
 
 const TRASH_RETAIN_DAYS = 7;
@@ -293,6 +316,11 @@ export class NoteService {
     );
 
     recordFromNoteImages(data.userId, String(note.id), data.images || []);
+    void MediaReferenceService.syncNoteImages(
+      data.userId,
+      String(note.id),
+      data.images || [],
+    );
 
     return note;
   }
@@ -429,7 +457,6 @@ export class NoteService {
     if (data.tags !== undefined) {
       note.tags = sanitizeNoteTags(data.tags);
     }
-    const previousImages = data.images !== undefined ? [...(note.images || [])] : null;
     if (data.images !== undefined) note.images = data.images;
 
     if (data.isFavorite !== undefined) {
@@ -487,10 +514,13 @@ export class NoteService {
       { blocking: false },
     );
 
-    if (data.images !== undefined && previousImages) {
-      const oldKeys = new Set(previousImages.map((i) => i.key));
-      const added = data.images.filter((i) => !oldKeys.has(i.key));
-      recordFromNoteImages(userId, String(note.id), added);
+    if (data.images !== undefined) {
+      recordFromNoteImages(userId, String(note.id), data.images);
+      void MediaReferenceService.syncNoteImages(
+        userId,
+        String(note.id),
+        data.images,
+      );
     }
 
     return note;
@@ -917,6 +947,11 @@ export class NoteService {
   }
 
   static async purgeNote(id: string, userId: string): Promise<boolean> {
+    const note = await Note.findOne({ _id: id, userId, isDeleted: true });
+    if (!note) return false;
+
+    await MediaReferenceService.releaseNoteRefs(userId, id);
+
     const result = await Note.deleteOne({ _id: id, userId, isDeleted: true });
     return Boolean(result.deletedCount);
   }
@@ -987,5 +1022,110 @@ export class NoteService {
     const days = rows.map((r) => ({ date: r._id, count: r.count }));
     const maxCount = days.reduce((m, d) => Math.max(m, d.count), 0);
     return { days, maxCount, tz: appliedTz };
+  }
+
+  /** 校验月-日是否合法（2/29 仅在闰年有效） */
+  static isValidMonthDay(month: number, day: number): boolean {
+    const year = month === 2 && day === 29 ? 2020 : 2000;
+    const probe = new Date(year, month - 1, day);
+    return probe.getMonth() === month - 1 && probe.getDate() === day;
+  }
+
+  /**
+   * 按用户时区的「月-日」聚合手帐（createdAt，未删除），供「时光回顾 / 历史上的今天」。
+   */
+  static async getNotesOnThisDay(
+    userId: string,
+    month: number,
+    day: number,
+    timeZone: string,
+    limit: number,
+  ): Promise<OnThisDayResult> {
+    const tz = NoteService.sanitizeIanaTimeZone(timeZone);
+    const label = `${month}月${day}日`;
+    const emptyResult = (appliedTz: string): OnThisDayResult => ({
+      anchor: { month, day, label },
+      tz: appliedTz,
+      groups: [],
+      total: 0,
+      totalMatched: 0,
+      truncated: false,
+    });
+
+    if (!NoteService.isValidMonthDay(month, day)) {
+      return emptyResult(tz);
+    }
+
+    const pipelineForTz = (zone: string) => [
+      { $match: { userId, isDeleted: { $ne: true } } },
+      {
+        $addFields: {
+          dateParts: { $dateToParts: { date: "$createdAt", timezone: zone } },
+        },
+      },
+      {
+        $match: {
+          "dateParts.month": month,
+          "dateParts.day": day,
+        },
+      },
+      {
+        $facet: {
+          meta: [{ $count: "count" }],
+          items: [
+            { $sort: { createdAt: -1 as const } },
+            { $limit: limit },
+            { $project: { content: 0, dateParts: 0 } },
+          ],
+        },
+      },
+    ];
+
+    let appliedTz = tz;
+    let facetRow: { meta?: { count: number }[]; items?: Record<string, unknown>[] };
+    try {
+      [facetRow] = await Note.aggregate(pipelineForTz(tz));
+    } catch {
+      appliedTz = "UTC";
+      [facetRow] = await Note.aggregate(pipelineForTz("UTC"));
+    }
+
+    const anchorYear =
+      Number(getDateKeyByTimezone(appliedTz).split("-")[0]) ||
+      new Date().getFullYear();
+
+    const totalMatched = facetRow?.meta?.[0]?.count ?? 0;
+    const rows = facetRow?.items ?? [];
+    const items = toLeanNoteArray(rows);
+    const yearMap = new Map<number, LeanNote[]>();
+
+    for (const item of items) {
+      const raw = item.createdAt;
+      const createdAt =
+        raw instanceof Date ? raw : new Date(raw as string | number);
+      const dateKey = formatInstantAsDateKey(createdAt, appliedTz);
+      const year = Number(dateKey.split("-")[0]);
+      if (!year) continue;
+      const bucket = yearMap.get(year);
+      if (bucket) bucket.push(item);
+      else yearMap.set(year, [item]);
+    }
+
+    const groups: OnThisDayGroup[] = Array.from(yearMap.entries())
+      .sort((a, b) => b[0] - a[0])
+      .map(([year, groupItems]) => ({
+        year,
+        yearsAgo: anchorYear - year,
+        items: groupItems,
+      }));
+
+    return {
+      anchor: { month, day, label },
+      tz: appliedTz,
+      groups,
+      total: items.length,
+      totalMatched,
+      truncated: totalMatched > items.length,
+    };
   }
 }

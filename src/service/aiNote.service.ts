@@ -11,7 +11,7 @@ import {
 } from "./aiUsageQuota";
 import { AiStyleService } from "./aiStyle.service";
 import {
-  AI_NOTE_OUTPUT_MAX_CHARS,
+  AI_NOTE_OUTPUT_HARD_MAX_CHARS,
   aiNoteMaxCompletionTokensForChars,
   appendPlatformSystemSuffix,
   truncateAiNoteOutput,
@@ -129,7 +129,7 @@ export class AiNoteService {
 
     try {
       const systemPrompt = appendPlatformSystemSuffix(prompts.systemPrompt);
-      const maxTokens = aiNoteMaxCompletionTokensForChars(AI_NOTE_OUTPUT_MAX_CHARS);
+      const maxTokens = aiNoteMaxCompletionTokensForChars(AI_NOTE_OUTPUT_HARD_MAX_CHARS);
       const raw = await AiNoteService.invokeModel(systemPrompt, prompts.userPrompt, maxTokens);
       const text = AiNoteService.finalizeAiNoteText(raw);
       if (!text) {
@@ -141,7 +141,9 @@ export class AiNoteService {
         dateKey,
         mode: input.mode,
         styleKey: style.styleKey,
+        systemPrompt,
         userPrompt: prompts.userPrompt,
+        rawOutputText: raw,
         outputText: text,
       });
 
@@ -177,7 +179,7 @@ export class AiNoteService {
       today: dateKey,
     });
     const systemPrompt = appendPlatformSystemSuffix(prompts.systemPrompt);
-    const maxTokens = aiNoteMaxCompletionTokensForChars(AI_NOTE_OUTPUT_MAX_CHARS);
+    const maxTokens = aiNoteMaxCompletionTokensForChars(AI_NOTE_OUTPUT_HARD_MAX_CHARS);
     const raw = await AiNoteService.invokeModel(systemPrompt, prompts.userPrompt, maxTokens);
     const text = AiNoteService.finalizeAiNoteText(raw);
     if (!text) {

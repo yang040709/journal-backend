@@ -33,7 +33,9 @@ export class UserReviewService {
       UserReview.countDocuments(where),
     ]);
     return {
-      items: rows.map((row) => serializeRow(row as Partial<IUserReview> & { _id?: unknown })),
+      items: rows.map((row) =>
+        serializeRow(row as unknown as Partial<IUserReview> & { _id?: unknown }),
+      ),
       total,
       page,
       pageSize,
@@ -55,7 +57,9 @@ export class UserReviewService {
       UserReview.countDocuments(where),
     ]);
     return {
-      items: rows.map((row) => serializeRow(row as Partial<IUserReview> & { _id?: unknown })),
+      items: rows.map((row) =>
+        serializeRow(row as unknown as Partial<IUserReview> & { _id?: unknown }),
+      ),
       total,
       page,
       limit,
@@ -103,7 +107,7 @@ export class UserReviewService {
     }
     const row = await UserReview.findByIdAndUpdate(id, { $set: set }, { new: true }).lean();
     if (!row) return null;
-    return serializeRow(row as Partial<IUserReview> & { _id?: unknown });
+    return serializeRow(row as unknown as Partial<IUserReview> & { _id?: unknown });
   }
 
   static async adminDelete(id: string) {

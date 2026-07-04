@@ -1,6 +1,7 @@
 import Router from "@koa/router";
 import { authMiddleware, AuthContext } from "../middlewares/auth.middleware";
-import { error, ErrorCodes, paginatedSuccess } from "../utils/response";
+import { error, ErrorCodes, paginatedSuccess, success } from "../utils/response";
+import { MediaDeleteOrchestrator } from "../service/mediaDeleteOrchestrator.service";
 import { listByUser } from "../service/userImageAsset.service";
 import { z } from "zod";
 
@@ -69,6 +70,50 @@ router.get("/images", async (ctx: AuthContext) => {
     }
     console.error("获取图片资产失败:", err);
     error(ctx, "获取图片资产失败", ErrorCodes.INTERNAL_ERROR, 500);
+  }
+});
+
+/**
+ * @swagger
+ * /assets/images/{id}:
+ *   delete:
+ *     tags:
+ *       - 用户资产
+ *     summary: 彻底删除用户图片（同步手帐/封面引用，COS 异步入队删除）
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: 成功
+ *       404:
+ *         description: 记录不存在或无权操作
+ */
+router.delete("/images/:id", async (ctx: AuthContext) => {
+  try {
+    const userId = ctx.user!.userId;
+    const id = ctx.params.id || "";
+    const result = await MediaDeleteOrchestrator.deleteUserImageAsset(userId, id);
+    if (!result) {
+      error(ctx, "记录不存在或无权操作", ErrorCodes.NOT_FOUND, 404);
+      return;
+    }
+    success(ctx, result, "图片已删除");
+  } catch (err) {
+    console.error("移除图片资产失败:", err);
+    const msg = err instanceof Error ? err.message : "移除图片资产失败";
+    const isBizError = /无法彻底删除|不存在|无权/.test(msg);
+    error(
+      ctx,
+      msg,
+      isBizError ? ErrorCodes.PARAM_ERROR : ErrorCodes.INTERNAL_ERROR,
+      isBizError ? 400 : 500,
+    );
   }
 });
 
