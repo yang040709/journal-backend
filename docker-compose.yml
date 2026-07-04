@@ -48,6 +48,7 @@ services:
 
   mongo:
     image: mongo:7
+    command: ["mongod", "--wiredTigerCacheSizeGB", "0.5"]
     ports:
       - "127.0.0.1:27018:27017"
     volumes:
