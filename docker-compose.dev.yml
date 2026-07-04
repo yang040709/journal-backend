@@ -1,5 +1,5 @@
 # 开发环境：与生产 docker-compose.yml 隔离（独立卷、端口、镜像 tag）
-# 部署目录建议 /opt/journal-dev，详见 docs/spec/feature-dev-deploy-技术文档.md
+# 部署目录建议 /opt/journal-dev，详见 docs/spec/feature/feature-dev-deploy-技术文档.md
 version: "3.8"
 
 name: journal-dev
