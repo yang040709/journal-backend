@@ -17,7 +17,7 @@ function resolveAllowedOrigin(requestOrigin: string): string | null {
     return explicit.includes(requestOrigin) ? requestOrigin : null;
   }
 
-  // 开发环境未配置时：允许本机任意端口（避免 Vite 占用 5173 后自动改用 5174 等导致联调失败）
+  // 开发环境未配置时：允许本机任意端口（避免固定端口被占用时联调失败）
   if (process.env.NODE_ENV !== "production") {
     try {
       const u = new URL(requestOrigin);
