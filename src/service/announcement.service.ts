@@ -43,7 +43,7 @@ function serializeAnnouncement(row: Record<string, unknown>) {
 
 export class AnnouncementService {
   static buildFrontendPath(id: string): string {
-    return `/pages/announcement/detail?id=${encodeURIComponent(id)}`;
+    return `/packages/me-profile/pages/announcement-detail/announcement-detail?id=${encodeURIComponent(id)}`;
   }
 
   static async listPublic(params: { page?: number; limit?: number }) {

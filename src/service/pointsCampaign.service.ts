@@ -295,7 +295,7 @@ export class PointsCampaignService {
 
   private static async generateCampaignCodes(campaignId: string) {
     const token = await getWeChatAccessToken();
-    const page = "pages/points-campaign/points-campaign";
+    const page = "packages/me-insights/pages/points-campaign/points-campaign";
     const scene = `cid=${campaignId}`.slice(0, 32);
     const miniCodeRes = await withProxyEnvDisabled(() =>
       axios.post(
