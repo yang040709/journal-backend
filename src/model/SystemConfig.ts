@@ -1,4 +1,5 @@
 import { Schema, model, Document } from "mongoose";
+import type { ReadingThemeCatalog } from "../utils/readingThemeCatalog";
 
 export const SYSTEM_CONFIG_COVERS_KEY = "system_covers";
 export const SYSTEM_CONFIG_NOTE_PRESET_TAGS_KEY = "note_preset_tags";
@@ -14,6 +15,11 @@ export const SYSTEM_CONFIG_EXPORT_SETTINGS_KEY = "export_settings";
 export const SYSTEM_CONFIG_BROWSE_BANNERS_KEY = "browse_banners";
 /** 反馈审批快捷回复（仅 configKey=feedback_quick_replies 使用） */
 export const SYSTEM_CONFIG_FEEDBACK_QUICK_REPLIES_KEY = "feedback_quick_replies";
+/** C 端阅读主题系统级可见目录（仅 configKey=reading_theme_catalog 使用） */
+export const SYSTEM_CONFIG_READING_THEME_CATALOG_KEY = "reading_theme_catalog";
+
+/** 上次保存系统 catalog 时的 manifest 快照，用于识别发版新增 theme.id */
+export type ReadingThemeManifestSnapshot = Record<string, string[]>;
 
 export type FeedbackQuickReplyConfigItem = {
   id: string;
@@ -79,6 +85,10 @@ export interface ISystemConfig extends Document {
   browseBanners?: BrowseBannerItem[];
   /** 仅 configKey=feedback_quick_replies 使用 */
   feedbackQuickReplies?: FeedbackQuickReplyConfigItem[];
+  /** 仅 configKey=reading_theme_catalog 使用 */
+  readingThemeCatalog?: ReadingThemeCatalog | null;
+  /** 与 readingThemeCatalog 配套：保存时的 manifest 快照（策略 A 识别发版新增 id） */
+  readingThemeManifestSnapshot?: ReadingThemeManifestSnapshot | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -166,6 +176,12 @@ const systemConfigSchema = new Schema(
         },
       ],
       default: [],
+    },
+    readingThemeCatalog: {
+      type: Schema.Types.Mixed,
+    },
+    readingThemeManifestSnapshot: {
+      type: Schema.Types.Mixed,
     },
   },
   { timestamps: true },

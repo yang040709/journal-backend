@@ -7,7 +7,11 @@ import { z } from "zod";
 import { AlertMetricService } from "../service/alertMetric.service";
 import User from "../model/User";
 import logger from "../utils/logger";
-import { READING_STYLE_KEYS } from "../constant/noteReadingTheme";
+import {
+  updateDefaultReadingThemeSchema,
+  readingThemeCatalogPutSchema,
+} from "../schemas/readingTheme.schema";
+import { ReadingThemeCatalogValidationError } from "../utils/readingThemeCatalog";
 
 const router = new Router({
   prefix: "/auth",
@@ -32,12 +36,6 @@ const updateMeProfileSchema = z
   .refine((data) => Object.keys(data).length > 0, {
     message: "至少更新一个字段",
   });
-
-const updateDefaultReadingThemeSchema = z.object({
-  defaultReadingStyleKey: z.enum(READING_STYLE_KEYS).nullable().optional(),
-  defaultReadingThemeId: z.string().trim().max(64).nullable().optional(),
-  readingThemeApplyScope: z.enum(["global", "note"]).optional(),
-});
 
 /**
  * @swagger
@@ -302,8 +300,34 @@ router.put("/me/reading-theme", authMiddleware, async (ctx: AuthContext) => {
       error(ctx, err.issues[0]?.message || "参数验证失败", ErrorCodes.PARAM_ERROR, 400);
       return;
     }
+    if (err instanceof ReadingThemeCatalogValidationError) {
+      error(ctx, err.message, ErrorCodes.PARAM_ERROR, 400);
+      return;
+    }
     console.error("更新全局阅读主题失败:", err);
     error(ctx, err.message || "更新全局阅读主题失败", ErrorCodes.INTERNAL_ERROR, 500);
+  }
+});
+
+router.put("/me/reading-theme-catalog", authMiddleware, async (ctx: AuthContext) => {
+  try {
+    const body = readingThemeCatalogPutSchema.parse(ctx.request.body || {});
+    const data = await UserService.updateReadingThemeCatalog(
+      ctx.user!.userId,
+      body,
+    );
+    success(ctx, data, "更新主题列表成功");
+  } catch (err) {
+    if (err instanceof z.ZodError) {
+      error(ctx, err.issues[0]?.message || "参数验证失败", ErrorCodes.PARAM_ERROR, 400);
+      return;
+    }
+    if (err instanceof ReadingThemeCatalogValidationError) {
+      error(ctx, err.message, ErrorCodes.PARAM_ERROR, 400);
+      return;
+    }
+    console.error("更新主题列表失败:", err);
+    error(ctx, err.message || "更新主题列表失败", ErrorCodes.INTERNAL_ERROR, 500);
   }
 });
 

@@ -29,8 +29,6 @@ export interface INote extends Document {
   readingStyleKey?: string | null;
   /** 详情页阅读主题色 id（与导出 preset theme.id 一致）；null 时用该风格默认主题 */
   readingThemeId?: string | null;
-  /** 阅读主题作用范围：note=仅该手帐，global=跟随用户全局默认 */
-  readingThemeScope?: "note" | "global";
   createdAt: Date;
   updatedAt: Date;
 }
@@ -203,11 +201,6 @@ const noteSchema = new Schema(
       default: null,
       trim: true,
       maxlength: 64,
-    },
-    readingThemeScope: {
-      type: String,
-      enum: ["note", "global"],
-      default: "note",
     },
   },
   {

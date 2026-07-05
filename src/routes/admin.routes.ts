@@ -50,6 +50,9 @@ import { NotePresetTagService } from "../service/notePresetTag.service";
 import { UserNoteCustomTagService } from "../service/userNoteCustomTag.service";
 import { QuotaBaseLimitsService } from "../service/quotaBaseLimits.service";
 import { NoteExportSettingsService } from "../service/noteExportSettings.service";
+import { ReadingThemeCatalogConfigService } from "../service/readingThemeCatalogConfig.service";
+import { ReadingThemeCatalogValidationError } from "../utils/readingThemeCatalog";
+import { readingThemeCatalogPutSchema } from "../schemas/readingTheme.schema";
 import NoteExportLog from "../model/NoteExportLog";
 import { AiStyleService } from "../service/aiStyle.service";
 import { AiNoteService } from "../service/aiNote.service";
@@ -2960,6 +2963,67 @@ authed.put(
       error(
         ctx,
         e instanceof Error ? e.message : "保存失败",
+        ErrorCodes.PARAM_ERROR,
+      );
+    }
+  },
+);
+
+authed.get(
+  "/reading-theme-catalog",
+  requireSuperAdmin(),
+  async (ctx) => {
+    try {
+      const data = await ReadingThemeCatalogConfigService.getForAdmin();
+      success(ctx, data);
+    } catch (e) {
+      error(
+        ctx,
+        e instanceof Error ? e.message : "加载失败",
+        ErrorCodes.INTERNAL_ERROR,
+        500,
+      );
+    }
+  },
+);
+
+authed.put(
+  "/reading-theme-catalog",
+  requireSuperAdmin(),
+  async (ctx) => {
+    try {
+      const body = readingThemeCatalogPutSchema.parse(ctx.request.body);
+      const data = await ReadingThemeCatalogConfigService.updateFromAdmin(body);
+      success(ctx, data);
+    } catch (e) {
+      if (e instanceof z.ZodError) {
+        error(ctx, "参数验证失败", ErrorCodes.PARAM_ERROR, 400);
+        return;
+      }
+      if (e instanceof ReadingThemeCatalogValidationError) {
+        error(ctx, e.message, ErrorCodes.PARAM_ERROR, 400);
+        return;
+      }
+      error(
+        ctx,
+        e instanceof Error ? e.message : "保存失败",
+        ErrorCodes.PARAM_ERROR,
+      );
+    }
+  },
+);
+
+authed.post(
+  "/reading-theme-catalog/reset-default",
+  requireSuperAdmin(),
+  async (ctx) => {
+    try {
+      const data = await ReadingThemeCatalogConfigService.resetToDefault();
+      success(ctx, data);
+    } catch (e) {
+      error(
+        ctx,
+        e instanceof Error ? e.message : "重置失败",
         ErrorCodes.PARAM_ERROR,
       );
     }

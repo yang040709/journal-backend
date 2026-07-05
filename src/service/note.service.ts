@@ -11,6 +11,10 @@ import {
   formatInstantAsDateKey,
   getDateKeyByTimezone,
 } from "../utils/dateKey";
+import { ReadingThemeCatalogConfigService } from "./readingThemeCatalogConfig.service";
+import {
+  assertReadingThemeSelectionAllowed,
+} from "../utils/readingThemeCatalog";
 
 export interface CreateNoteData {
   noteBookId: string;
@@ -33,7 +37,6 @@ export interface UpdateNoteData {
   isPinned?: boolean;
   readingStyleKey?: string | null;
   readingThemeId?: string | null;
-  readingThemeScope?: "note" | "global";
 }
 
 export interface PaginationParams {
@@ -506,8 +509,15 @@ export class NoteService {
           : data.readingThemeId;
     }
 
-    if (data.readingThemeScope !== undefined) {
-      note.readingThemeScope = data.readingThemeScope;
+    const effectiveStyleKey = note.readingStyleKey;
+    const effectiveThemeId = note.readingThemeId;
+    if (data.readingStyleKey !== undefined || data.readingThemeId !== undefined) {
+      const systemCatalog = await ReadingThemeCatalogConfigService.getSystemCatalog();
+      assertReadingThemeSelectionAllowed(
+        effectiveStyleKey,
+        effectiveThemeId,
+        systemCatalog,
+      );
     }
 
     const shouldBumpUpdatedAt =

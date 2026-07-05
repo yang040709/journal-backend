@@ -15,6 +15,14 @@ import { InitialUserNoteSeedConfigService } from "./initialUserNoteSeedConfig.se
 import { nanoid } from "nanoid";
 import { getWeChatAppId, getWeChatSecret } from "../config/wechatEnv";
 import { Types } from "mongoose";
+import {
+  type ReadingThemeCatalog,
+  parseReadingThemeCatalogFromUser,
+  validateReadingThemeCatalogInput,
+  validateCatalogAgainstSystem,
+  assertReadingThemeSelectionAllowed,
+} from "../utils/readingThemeCatalog";
+import { ReadingThemeCatalogConfigService } from "./readingThemeCatalogConfig.service";
 
 export interface LoginResult {
   token: string;
@@ -30,6 +38,8 @@ export interface MePageProfile {
   defaultReadingStyleKey: string | null;
   defaultReadingThemeId: string | null;
   readingThemeApplyScope: "global" | "note";
+  readingThemeCatalog: ReadingThemeCatalog | null;
+  systemReadingThemeCatalog: ReadingThemeCatalog;
 }
 
 export interface MePageStats {
@@ -50,6 +60,11 @@ export interface UpdateDefaultReadingThemeInput {
   readingThemeApplyScope?: "global" | "note";
 }
 
+export interface UpdateReadingThemeCatalogInput {
+  styleKeys: (string | null)[];
+  themeIdsByStyle: Record<string, string[]>;
+}
+
 export class UserService {
   private static buildDefaultNickname(userId: string): string {
     const normalized = String(userId || "").trim();
@@ -64,7 +79,10 @@ export class UserService {
 
   private static parseReadingThemeFields(user: any): Pick<
     MePageProfile,
-    "defaultReadingStyleKey" | "defaultReadingThemeId" | "readingThemeApplyScope"
+    | "defaultReadingStyleKey"
+    | "defaultReadingThemeId"
+    | "readingThemeApplyScope"
+    | "readingThemeCatalog"
   > {
     return {
       defaultReadingStyleKey:
@@ -79,6 +97,9 @@ export class UserService {
           : String(user.defaultReadingThemeId),
       readingThemeApplyScope: UserService.parseReadingThemeApplyScope(
         user?.readingThemeApplyScope,
+      ),
+      readingThemeCatalog: parseReadingThemeCatalogFromUser(
+        user?.readingThemeCatalog,
       ),
     };
   }
@@ -325,6 +346,9 @@ export class UserService {
       throw new Error("用户不存在");
     }
 
+    const systemReadingThemeCatalog =
+      await ReadingThemeCatalogConfigService.getSystemCatalog();
+
     return {
       userId: user.userId,
       nickname:
@@ -334,6 +358,7 @@ export class UserService {
       bio: String((user as any).bio || "").trim() || "手帐记录生活点滴",
       membershipText: String((user as any).membershipText || "").trim(),
       ...UserService.parseReadingThemeFields(user),
+      systemReadingThemeCatalog,
     };
   }
 
@@ -453,6 +478,44 @@ export class UserService {
       };
     }
 
+    const systemCatalog = await ReadingThemeCatalogConfigService.getSystemCatalog();
+
+    let effectiveStyleKey =
+      updatePayload.defaultReadingStyleKey !== undefined
+        ? updatePayload.defaultReadingStyleKey
+        : null;
+    let effectiveThemeId =
+      updatePayload.defaultReadingThemeId !== undefined
+        ? updatePayload.defaultReadingThemeId
+        : null;
+
+    if (
+      updatePayload.defaultReadingStyleKey === undefined ||
+      updatePayload.defaultReadingThemeId === undefined
+    ) {
+      const current = await User.findOne({ userId })
+        .select("defaultReadingStyleKey defaultReadingThemeId")
+        .lean();
+      if (updatePayload.defaultReadingStyleKey === undefined) {
+        effectiveStyleKey = current?.defaultReadingStyleKey ?? null;
+      }
+      if (updatePayload.defaultReadingThemeId === undefined) {
+        effectiveThemeId = current?.defaultReadingThemeId ?? null;
+      }
+    }
+
+    const shouldValidateTheme =
+      updatePayload.defaultReadingStyleKey !== undefined ||
+      updatePayload.defaultReadingThemeId !== undefined;
+
+    if (shouldValidateTheme) {
+      assertReadingThemeSelectionAllowed(
+        effectiveStyleKey,
+        effectiveThemeId,
+        systemCatalog,
+      );
+    }
+
     const user = await User.findOneAndUpdate(
       { userId },
       { $set: updatePayload },
@@ -464,6 +527,27 @@ export class UserService {
     }
 
     return UserService.parseReadingThemeFields(user);
+  }
+
+  static async updateReadingThemeCatalog(
+    userId: string,
+    input: UpdateReadingThemeCatalogInput,
+  ): Promise<ReadingThemeCatalog> {
+    const systemCatalog = await ReadingThemeCatalogConfigService.getSystemCatalog();
+    const catalog = validateReadingThemeCatalogInput(input);
+    validateCatalogAgainstSystem(catalog, systemCatalog);
+
+    const user = await User.findOneAndUpdate(
+      { userId },
+      { $set: { readingThemeCatalog: catalog } },
+      { new: true },
+    ).lean();
+
+    if (!user) {
+      throw new Error("用户不存在");
+    }
+
+    return catalog;
   }
 
   /**

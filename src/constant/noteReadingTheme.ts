@@ -9,7 +9,3 @@ export const READING_STYLE_KEYS = [
 ] as const;
 
 export type ReadingStyleKey = (typeof READING_STYLE_KEYS)[number];
-
-export const READING_THEME_SCOPES = ["note", "global"] as const;
-
-export type ReadingThemeScope = (typeof READING_THEME_SCOPES)[number];

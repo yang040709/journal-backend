@@ -12,6 +12,7 @@ import { AiNoteService } from "../service/aiNote.service";
 import { AiStyleService } from "../service/aiStyle.service";
 import { z } from "zod";
 import { READING_STYLE_KEYS } from "../constant/noteReadingTheme";
+import { ReadingThemeCatalogValidationError } from "../utils/readingThemeCatalog";
 import { NotePresetTagService } from "../service/notePresetTag.service";
 import { UserNoteCustomTagService } from "../service/userNoteCustomTag.service";
 import {
@@ -305,7 +306,6 @@ const updateNoteSchema = z.object({
     .nullable()
     .optional(),
   readingThemeId: z.string().trim().max(64).nullable().optional(),
-  readingThemeScope: z.enum(["note", "global"]).optional(),
 });
 
 function parseFavoriteOnlyQuery(
@@ -1283,6 +1283,8 @@ router.put("/:id", async (ctx: AuthContext) => {
       error(ctx, "参数验证失败", ErrorCodes.PARAM_ERROR, 400);
     } else if (err instanceof NotePinLimitExceededError) {
       error(ctx, err.message, ErrorCodes.NOTE_PIN_LIMIT_EXCEEDED, 400);
+    } else if (err instanceof ReadingThemeCatalogValidationError) {
+      error(ctx, err.message, ErrorCodes.PARAM_ERROR, 400);
     } else if (err instanceof Error && err.message === "目标手帐本不存在或无权访问") {
       error(ctx, err.message, ErrorCodes.NOTEBOOK_NOT_FOUND, 404);
     } else {

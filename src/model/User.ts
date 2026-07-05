@@ -34,6 +34,11 @@ export interface IUser extends Document {
   defaultReadingThemeId?: string | null;
   /** 阅读主题作用范围：global=全局默认，note=各手帐独立 */
   readingThemeApplyScope?: "global" | "note";
+  /** 阅读主题选择器可见列表与排序；null 表示使用系统默认 */
+  readingThemeCatalog?: {
+    styleKeys: (string | null)[];
+    themeIdsByStyle: Record<string, string[]>;
+  } | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -148,6 +153,22 @@ const userSchema = new Schema(
       type: String,
       enum: ["global", "note"],
       default: "note",
+    },
+    readingThemeCatalog: {
+      type: new Schema(
+        {
+          styleKeys: {
+            type: [Schema.Types.Mixed],
+            default: undefined,
+          },
+          themeIdsByStyle: {
+            type: Schema.Types.Mixed,
+            default: undefined,
+          },
+        },
+        { _id: false },
+      ),
+      default: null,
     },
   },
   {
