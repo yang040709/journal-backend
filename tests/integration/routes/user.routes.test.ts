@@ -10,12 +10,14 @@ import {
 } from "vitest";
 import { createTestAgent } from "../../helpers/appFactory";
 import { authHeader, createAuthUser } from "../../helpers/authFactory";
+import { adminAuthHeader, seedAdmin } from "../../helpers/adminFactory";
 import {
   clearTestDb,
   connectTestDb,
 } from "../../helpers/db";
 import { signToken } from "../../../src/utils/jwt";
 import { ErrorCodes } from "../../../src/utils/response";
+import { buildDefaultReadingThemeCatalog } from "../../../src/utils/readingThemeCatalog";
 
 vi.mock("axios", () => ({
   default: vi.fn(),
@@ -187,5 +189,166 @@ describe("integration: /auth", () => {
       .expect(400);
 
     expect(res.body.code).toBe(ErrorCodes.PARAM_ERROR);
+  });
+
+  it("GET /auth/me-profile 返回 readingThemeCatalog 默认为 null", async () => {
+    const { token } = await createAuthUser({ userId: "catalog-default-user" });
+
+    const res = await agent
+      .get("/auth/me-profile")
+      .set(authHeader(token))
+      .expect(200);
+
+    expect(res.body.data.readingThemeCatalog).toBeNull();
+  });
+
+  it("GET /auth/me-profile 返回 systemReadingThemeCatalog", async () => {
+    const { token } = await createAuthUser({ userId: "system-catalog-user" });
+
+    const res = await agent
+      .get("/auth/me-profile")
+      .set(authHeader(token))
+      .expect(200);
+
+    expect(res.body.data.systemReadingThemeCatalog).toBeTruthy();
+    expect(res.body.data.systemReadingThemeCatalog.styleKeys[0]).toBeNull();
+    expect(res.body.data.systemReadingThemeCatalog.styleKeys.length).toBeGreaterThan(1);
+  });
+
+  async function hideVintageRoseFromSystemCatalog() {
+    const { token } = await seedAdmin();
+    const defaults = buildDefaultReadingThemeCatalog();
+    await agent
+      .put("/admin/reading-theme-catalog")
+      .set(adminAuthHeader(token))
+      .send({
+        styleKeys: [null, "vintageJournal"],
+        themeIdsByStyle: {
+          vintageJournal: defaults.themeIdsByStyle.vintageJournal.filter(
+            (id) => id !== "vintage-rose",
+          ),
+        },
+      })
+      .expect(200);
+  }
+
+  it("PUT /auth/me/reading-theme-catalog 可写入并回读", async () => {
+    const { token } = await createAuthUser({ userId: "catalog-user" });
+    const defaults = buildDefaultReadingThemeCatalog();
+    const payload = {
+      styleKeys: [null, "journal", "minimalNordic"],
+      themeIdsByStyle: {
+        journal: defaults.themeIdsByStyle.journal.slice(0, 2),
+        minimalNordic: defaults.themeIdsByStyle.minimalNordic,
+      },
+    };
+
+    const putRes = await agent
+      .put("/auth/me/reading-theme-catalog")
+      .set(authHeader(token))
+      .send(payload)
+      .expect(200);
+
+    expect(putRes.body.data.styleKeys).toEqual(payload.styleKeys);
+    expect(putRes.body.data.themeIdsByStyle.journal).toEqual(
+      payload.themeIdsByStyle.journal,
+    );
+
+    const getRes = await agent
+      .get("/auth/me-profile")
+      .set(authHeader(token))
+      .expect(200);
+
+    expect(getRes.body.data.readingThemeCatalog.styleKeys).toEqual(payload.styleKeys);
+  });
+
+  it("PUT /auth/me/reading-theme-catalog 缺少标准阅读返回 400", async () => {
+    const { token } = await createAuthUser({ userId: "catalog-no-standard" });
+    const defaults = buildDefaultReadingThemeCatalog();
+
+    const res = await agent
+      .put("/auth/me/reading-theme-catalog")
+      .set(authHeader(token))
+      .send({
+        styleKeys: ["journal"],
+        themeIdsByStyle: {
+          journal: defaults.themeIdsByStyle.journal.slice(0, 1),
+        },
+      })
+      .expect(400);
+
+    expect(res.body.code).toBe(ErrorCodes.PARAM_ERROR);
+  });
+
+  it("PUT /auth/me/reading-theme-catalog 风格至少保留 1 个主题色", async () => {
+    const { token } = await createAuthUser({ userId: "catalog-empty-themes" });
+
+    const res = await agent
+      .put("/auth/me/reading-theme-catalog")
+      .set(authHeader(token))
+      .send({
+        styleKeys: [null, "journal"],
+        themeIdsByStyle: { journal: [] },
+      })
+      .expect(400);
+
+    expect(res.body.code).toBe(ErrorCodes.PARAM_ERROR);
+  });
+
+  it("PUT /auth/me/reading-theme-catalog 系统已隐藏的主题色返回 400", async () => {
+    await hideVintageRoseFromSystemCatalog();
+    const { token } = await createAuthUser({ userId: "catalog-hidden-theme" });
+    const defaults = buildDefaultReadingThemeCatalog();
+
+    const res = await agent
+      .put("/auth/me/reading-theme-catalog")
+      .set(authHeader(token))
+      .send({
+        styleKeys: [null, "vintageJournal"],
+        themeIdsByStyle: {
+          vintageJournal: defaults.themeIdsByStyle.vintageJournal,
+        },
+      })
+      .expect(400);
+
+    expect(res.body.code).toBe(ErrorCodes.PARAM_ERROR);
+  });
+
+  it("PUT /auth/me/reading-theme 系统已隐藏的主题色返回 400", async () => {
+    await hideVintageRoseFromSystemCatalog();
+    const { token } = await createAuthUser({ userId: "reading-theme-hidden" });
+
+    const res = await agent
+      .put("/auth/me/reading-theme")
+      .set(authHeader(token))
+      .send({
+        defaultReadingStyleKey: "vintageJournal",
+        defaultReadingThemeId: "vintage-rose",
+      })
+      .expect(400);
+
+    expect(res.body.code).toBe(ErrorCodes.PARAM_ERROR);
+  });
+
+  it("PUT /auth/me/reading-theme 仅切换 scope 不因 DB 中失效 themeId 返回 400", async () => {
+    await hideVintageRoseFromSystemCatalog();
+    const { token } = await createAuthUser({ userId: "reading-theme-scope-only" });
+
+    await agent
+      .put("/auth/me/reading-theme")
+      .set(authHeader(token))
+      .send({
+        defaultReadingStyleKey: "vintageJournal",
+        defaultReadingThemeId: "vintage-rose",
+      })
+      .expect(400);
+
+    const res = await agent
+      .put("/auth/me/reading-theme")
+      .set(authHeader(token))
+      .send({ readingThemeApplyScope: "note" })
+      .expect(200);
+
+    expect(res.body.data.readingThemeApplyScope).toBe("note");
   });
 });

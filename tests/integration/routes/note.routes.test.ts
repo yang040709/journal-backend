@@ -7,10 +7,12 @@ import {
 } from "vitest";
 import { createTestAgent } from "../../helpers/appFactory";
 import { authHeader, createAuthUser } from "../../helpers/authFactory";
+import { adminAuthHeader, seedAdmin } from "../../helpers/adminFactory";
 import { clearTestDb, connectTestDb } from "../../helpers/db";
 import { seedNote } from "../../helpers/seed/note.seed";
 import { seedNoteBook } from "../../helpers/seed/notebook.seed";
 import { ErrorCodes } from "../../../src/utils/response";
+import { buildDefaultReadingThemeCatalog } from "../../../src/utils/readingThemeCatalog";
 
 describe("integration: /notes", () => {
   const agent = createTestAgent();
@@ -176,7 +178,7 @@ describe("integration: /notes", () => {
     expect(res.body.code).toBe(0);
     expect(res.body.data.readingStyleKey).toBeNull();
     expect(res.body.data.readingThemeId).toBeNull();
-    expect(res.body.data.readingThemeScope).toBe("note");
+    expect(res.body.data.readingThemeScope).toBeUndefined();
   });
 
   it("PUT /notes/:id 可写入合法 readingStyleKey 并回读", async () => {
@@ -309,25 +311,36 @@ describe("integration: /notes", () => {
     expect(res.body.data.readingThemeId).toBeNull();
   });
 
-  it("PUT /notes/:id 可写入 readingThemeScope global", async () => {
+  it("PUT /notes/:id 系统已隐藏 readingThemeId 返回 400", async () => {
+    const { token: adminToken } = await seedAdmin();
+    const defaults = buildDefaultReadingThemeCatalog();
+    await agent
+      .put("/admin/reading-theme-catalog")
+      .set(adminAuthHeader(adminToken))
+      .send({
+        styleKeys: [null, "vintageJournal"],
+        themeIdsByStyle: {
+          vintageJournal: defaults.themeIdsByStyle.vintageJournal.filter(
+            (id) => id !== "vintage-rose",
+          ),
+        },
+      })
+      .expect(200);
+
     const { token, userId } = await createAuthUser();
     const book = await seedNoteBook(userId);
     const note = await seedNote({ userId, noteBookId: book.id });
 
-    const putRes = await agent
+    const res = await agent
       .put(`/notes/${note.id}`)
       .set(authHeader(token))
-      .send({ readingThemeScope: "global" })
-      .expect(200);
+      .send({
+        readingStyleKey: "vintageJournal",
+        readingThemeId: "vintage-rose",
+      })
+      .expect(400);
 
-    expect(putRes.body.data.readingThemeScope).toBe("global");
-
-    const getRes = await agent
-      .get(`/notes/${note.id}`)
-      .set(authHeader(token))
-      .expect(200);
-
-    expect(getRes.body.data.readingThemeScope).toBe("global");
+    expect(res.body.code).toBe(ErrorCodes.PARAM_ERROR);
   });
 
   it("GET /notes/search/page 分页深度超限返回 400", async () => {
