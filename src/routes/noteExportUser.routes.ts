@@ -21,6 +21,28 @@ const exchangeBodySchema = z.object({
   times: z.coerce.number().int().min(1).max(20).optional().default(1),
 });
 
+/**
+ * @openapi
+ * /user/export-quota:
+ *   get:
+ *     tags:
+ *       - noteExport
+ *     summary: 获取导出额度与配置
+ *     description: 获取当前用户的导出配额、积分、本周免费次数及导出相关系统配置
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: 获取导出额度成功
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/SuccessObject'
+ *       401:
+ *         description: 未授权访问
+ *       500:
+ *         description: 服务器内部错误
+ */
 router.get("/export-quota", async (ctx: AuthContext) => {
   try {
     const userId = ctx.user!.userId;
@@ -67,6 +89,43 @@ router.get("/export-quota", async (ctx: AuthContext) => {
   }
 });
 
+/**
+ * @openapi
+ * /user/export-quota/exchange:
+ *   post:
+ *     tags:
+ *       - noteExport
+ *     summary: 积分兑换额外导出次数
+ *     description: 使用积分兑换额外手帐导出次数
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: false
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               times:
+ *                 type: integer
+ *                 minimum: 1
+ *                 maximum: 20
+ *                 default: 1
+ *                 description: 兑换次数
+ *     responses:
+ *       200:
+ *         description: 兑换成功
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/SuccessObject'
+ *       400:
+ *         description: 参数验证失败、积分不足或兑换无效
+ *       401:
+ *         description: 未授权访问
+ *       500:
+ *         description: 服务器内部错误
+ */
 router.post("/export-quota/exchange", async (ctx: AuthContext) => {
   const userId = ctx.user!.userId;
   try {

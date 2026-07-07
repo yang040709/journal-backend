@@ -13,7 +13,10 @@ git show HEAD:src/routes/user.routes.ts
 # 在仓库根目录搜消费方
 rg "readingThemeScope|/auth/me-profile" client/src admin/src
 
-# 对比 backend manifest 与 client preset（示例）
+# 校验 reading theme manifest 是否与 client preset 同步
+cd backend; pnpm generated:reading-theme-manifest:check
+
+# 或对比 backend manifest id 列表（示例）
 cd backend; npx tsx -e "import { getManifestThemeIdsByStyle } from './src/constant/readingThemeManifest.ts'; console.log(JSON.stringify(getManifestThemeIdsByStyle()))"
 cd client; node -e "import { getThemesByStyleKey } from './src/components/export-image-preview/style-theme-presets.js'; ..."
 ```

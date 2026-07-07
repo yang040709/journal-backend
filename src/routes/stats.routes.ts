@@ -11,8 +11,26 @@ const router = new Router({
 router.use(authMiddleware);
 
 /**
- * @route GET /stats/user
- * @desc 获取用户统计信息
+ * @openapi
+ * /stats/user:
+ *   get:
+ *     tags:
+ *       - stats
+ *     summary: 获取用户统计信息
+ *     description: 获取当前用户的手帐本数量与手帐数量
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: 获取用户统计成功
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/SuccessObject'
+ *       401:
+ *         description: 未授权访问
+ *       500:
+ *         description: 服务器内部错误
  */
 router.get("/user", async (ctx: AuthContext) => {
   try {
@@ -28,8 +46,26 @@ router.get("/user", async (ctx: AuthContext) => {
 });
 
 /**
- * @route GET /stats/tags
- * @desc 获取标签统计信息
+ * @openapi
+ * /stats/tags:
+ *   get:
+ *     tags:
+ *       - stats
+ *     summary: 获取标签统计信息
+ *     description: 获取当前用户手帐标签使用次数排行（最多 50 条）
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: 获取标签统计成功
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/SuccessArray'
+ *       401:
+ *         description: 未授权访问
+ *       500:
+ *         description: 服务器内部错误
  */
 router.get("/tags", async (ctx: AuthContext) => {
   try {
@@ -45,8 +81,35 @@ router.get("/tags", async (ctx: AuthContext) => {
 });
 
 /**
- * @route GET /stats/activity
- * @desc 获取用户活动时间线
+ * @openapi
+ * /stats/activity:
+ *   get:
+ *     tags:
+ *       - stats
+ *     summary: 获取用户活动时间线
+ *     description: 获取当前用户最近的手帐创建与编辑活动记录
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: limit
+ *         schema:
+ *           type: integer
+ *           default: 20
+ *           minimum: 1
+ *           maximum: 100
+ *         description: 返回条数上限
+ *     responses:
+ *       200:
+ *         description: 获取活动时间线成功
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/SuccessArray'
+ *       401:
+ *         description: 未授权访问
+ *       500:
+ *         description: 服务器内部错误
  */
 router.get("/activity", async (ctx: AuthContext) => {
   try {
@@ -68,8 +131,26 @@ router.get("/activity", async (ctx: AuthContext) => {
 });
 
 /**
- * @route GET /stats/note-book-usage
- * @desc 获取手帐本使用统计
+ * @openapi
+ * /stats/note-book-usage:
+ *   get:
+ *     tags:
+ *       - stats
+ *     summary: 获取手帐本使用统计
+ *     description: 获取各手帐本下的手帐数量分布
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: 获取手帐本使用统计成功
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/SuccessObject'
+ *       401:
+ *         description: 未授权访问
+ *       500:
+ *         description: 服务器内部错误
  */
 router.get("/note-book-usage", async (ctx: AuthContext) => {
   try {
@@ -85,8 +166,26 @@ router.get("/note-book-usage", async (ctx: AuthContext) => {
 });
 
 /**
- * @route GET /stats/overview
- * @desc 获取统计概览
+ * @openapi
+ * /stats/overview:
+ *   get:
+ *     tags:
+ *       - stats
+ *     summary: 获取统计概览
+ *     description: 获取手帐本总数、手帐总数、近 7/30 日新增及最近编辑时间等概览数据
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: 获取统计概览成功
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/SuccessObject'
+ *       401:
+ *         description: 未授权访问
+ *       500:
+ *         description: 服务器内部错误
  */
 router.get("/overview", async (ctx: AuthContext) => {
   try {
@@ -100,8 +199,34 @@ router.get("/overview", async (ctx: AuthContext) => {
 });
 
 /**
- * @route GET /stats/creation-trend
- * @desc 获取内容创作趋势
+ * @openapi
+ * /stats/creation-trend:
+ *   get:
+ *     tags:
+ *       - stats
+ *     summary: 获取内容创作趋势
+ *     description: 按日统计近 7 天或 30 天的手帐创建数量
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: range
+ *         schema:
+ *           type: integer
+ *           enum: [7, 30]
+ *           default: 7
+ *         description: 统计天数范围
+ *     responses:
+ *       200:
+ *         description: 获取内容创作趋势成功
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/SuccessObject'
+ *       401:
+ *         description: 未授权访问
+ *       500:
+ *         description: 服务器内部错误
  */
 router.get("/creation-trend", async (ctx: AuthContext) => {
   try {
@@ -117,8 +242,26 @@ router.get("/creation-trend", async (ctx: AuthContext) => {
 });
 
 /**
- * @route GET /stats/tag-quality
- * @desc 获取标签质量统计
+ * @openapi
+ * /stats/tag-quality:
+ *   get:
+ *     tags:
+ *       - stats
+ *     summary: 获取标签质量统计
+ *     description: 分析标签使用频率、重复度与覆盖率等质量指标
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: 获取标签质量统计成功
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/SuccessObject'
+ *       401:
+ *         description: 未授权访问
+ *       500:
+ *         description: 服务器内部错误
  */
 router.get("/tag-quality", async (ctx: AuthContext) => {
   try {
@@ -132,8 +275,26 @@ router.get("/tag-quality", async (ctx: AuthContext) => {
 });
 
 /**
- * @route GET /stats/notebook-health
- * @desc 获取手帐本健康度统计
+ * @openapi
+ * /stats/notebook-health:
+ *   get:
+ *     tags:
+ *       - stats
+ *     summary: 获取手帐本健康度统计
+ *     description: 评估各手帐本的活跃度、空本比例等健康度指标
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: 获取手帐本健康度统计成功
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/SuccessObject'
+ *       401:
+ *         description: 未授权访问
+ *       500:
+ *         description: 服务器内部错误
  */
 router.get("/notebook-health", async (ctx: AuthContext) => {
   try {
@@ -147,8 +308,26 @@ router.get("/notebook-health", async (ctx: AuthContext) => {
 });
 
 /**
- * @route GET /stats/image-assets
- * @desc 获取图片资产统计
+ * @openapi
+ * /stats/image-assets:
+ *   get:
+ *     tags:
+ *       - stats
+ *     summary: 获取图片资产统计
+ *     description: 统计用户手帐与封面中的图片数量、容量等指标
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: 获取图片资产统计成功
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/SuccessObject'
+ *       401:
+ *         description: 未授权访问
+ *       500:
+ *         description: 服务器内部错误
  */
 router.get("/image-assets", async (ctx: AuthContext) => {
   try {
@@ -162,8 +341,26 @@ router.get("/image-assets", async (ctx: AuthContext) => {
 });
 
 /**
- * @route GET /stats/reminder-performance
- * @desc 获取提醒执行统计
+ * @openapi
+ * /stats/reminder-performance:
+ *   get:
+ *     tags:
+ *       - stats
+ *     summary: 获取提醒执行统计
+ *     description: 统计提醒的订阅、发送成功与失败情况
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: 获取提醒执行统计成功
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/SuccessObject'
+ *       401:
+ *         description: 未授权访问
+ *       500:
+ *         description: 服务器内部错误
  */
 router.get("/reminder-performance", async (ctx: AuthContext) => {
   try {
@@ -177,8 +374,26 @@ router.get("/reminder-performance", async (ctx: AuthContext) => {
 });
 
 /**
- * @route GET /stats/template-usage
- * @desc 获取模板使用统计
+ * @openapi
+ * /stats/template-usage:
+ *   get:
+ *     tags:
+ *       - stats
+ *     summary: 获取模板使用统计
+ *     description: 统计系统模板与自定义模板的使用次数
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: 获取模板使用统计成功
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/SuccessObject'
+ *       401:
+ *         description: 未授权访问
+ *       500:
+ *         description: 服务器内部错误
  */
 router.get("/template-usage", async (ctx: AuthContext) => {
   try {

@@ -49,6 +49,28 @@ const campaignIdSchema = z.object({
   id: z.string().trim().min(1),
 });
 
+/**
+ * @openapi
+ * /points/summary:
+ *   get:
+ *     tags:
+ *       - points
+ *     summary: 获取积分摘要
+ *     description: 返回当前积分余额、今日广告奖励次数及兑换规则
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: 获取积分摘要成功
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/SuccessObject'
+ *       401:
+ *         description: 未授权访问
+ *       500:
+ *         description: 服务器内部错误
+ */
 router.get("/summary", async (ctx: AuthContext) => {
   const userId = ctx.user!.userId;
   const requestId = ctx.state.requestId || "unknown";
@@ -62,6 +84,60 @@ router.get("/summary", async (ctx: AuthContext) => {
   }
 });
 
+/**
+ * @openapi
+ * /points/ad-reward:
+ *   post:
+ *     tags:
+ *       - points
+ *     summary: 领取广告积分奖励
+ *     description: 观看激励视频后提交奖励凭证领取积分
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - adProvider
+ *               - adUnitId
+ *               - rewardToken
+ *             properties:
+ *               adProvider:
+ *                 type: string
+ *                 minLength: 1
+ *                 maxLength: 100
+ *                 description: 广告平台标识
+ *               adUnitId:
+ *                 type: string
+ *                 minLength: 1
+ *                 maxLength: 200
+ *                 description: 广告位 ID
+ *               rewardToken:
+ *                 type: string
+ *                 minLength: 1
+ *                 maxLength: 255
+ *                 description: 广告 SDK 返回的奖励凭证
+ *               requestId:
+ *                 type: string
+ *                 maxLength: 255
+ *                 description: 客户端请求 ID（可选，默认使用服务端 requestId）
+ *     responses:
+ *       200:
+ *         description: 领取奖励成功（含重复领取时 duplicated=true）
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/SuccessObject'
+ *       400:
+ *         description: 参数验证失败、凭证无效（4201）或今日次数已达上限（4202）
+ *       401:
+ *         description: 未授权访问
+ *       500:
+ *         description: 服务器内部错误
+ */
 router.post("/ad-reward", async (ctx: AuthContext) => {
   const userId = ctx.user!.userId;
   const requestId = ctx.state.requestId || "unknown";
@@ -101,6 +177,43 @@ router.post("/ad-reward", async (ctx: AuthContext) => {
   }
 });
 
+/**
+ * @openapi
+ * /points/exchange:
+ *   post:
+ *     tags:
+ *       - points
+ *     summary: 积分兑换额度
+ *     description: 使用积分兑换图片上传额度或 AI 次数
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - kind
+ *             properties:
+ *               kind:
+ *                 type: string
+ *                 enum: [upload, ai]
+ *                 description: 兑换类型
+ *     responses:
+ *       200:
+ *         description: 兑换成功
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/SuccessObject'
+ *       400:
+ *         description: 参数验证失败、功能维护中（4203）、积分不足（4204）或配置无效（4205）
+ *       401:
+ *         description: 未授权访问
+ *       500:
+ *         description: 服务器内部错误
+ */
 router.post("/exchange", async (ctx: AuthContext) => {
   const userId = ctx.user!.userId;
   const requestId = ctx.state.requestId || "unknown";
@@ -131,6 +244,51 @@ router.post("/exchange", async (ctx: AuthContext) => {
   }
 });
 
+/**
+ * @openapi
+ * /points/transactions:
+ *   get:
+ *     tags:
+ *       - points
+ *     summary: 获取积分流水
+ *     description: 分页查询当前用户的积分变动记录
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: page
+ *         schema:
+ *           type: integer
+ *           default: 1
+ *         description: 页码
+ *       - in: query
+ *         name: pageSize
+ *         schema:
+ *           type: integer
+ *           default: 20
+ *           maximum: 50
+ *         description: 每页数量
+ *       - in: query
+ *         name: flowType
+ *         schema:
+ *           type: string
+ *           enum: [all, income, expense]
+ *           default: all
+ *         description: 流水类型筛选
+ *     responses:
+ *       200:
+ *         description: 获取积分流水成功
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/SuccessGeneric'
+ *       400:
+ *         description: 参数验证失败或分页深度超限
+ *       401:
+ *         description: 未授权访问
+ *       500:
+ *         description: 服务器内部错误
+ */
 router.get("/transactions", async (ctx: AuthContext) => {
   const userId = ctx.user!.userId;
   const requestId = ctx.state.requestId || "unknown";
@@ -149,6 +307,39 @@ router.get("/transactions", async (ctx: AuthContext) => {
   }
 });
 
+/**
+ * @openapi
+ * /points/campaigns/{id}:
+ *   get:
+ *     tags:
+ *       - points
+ *     summary: 获取积分活动详情
+ *     description: 返回指定积分活动的展示信息与当前用户领取状态
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: 活动 ID
+ *     responses:
+ *       200:
+ *         description: 获取活动详情成功
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/SuccessObject'
+ *       400:
+ *         description: 参数验证失败
+ *       401:
+ *         description: 未授权访问
+ *       404:
+ *         description: 活动不存在（4210）
+ *       500:
+ *         description: 服务器内部错误
+ */
 router.get("/campaigns/:id", async (ctx: AuthContext) => {
   try {
     const p = campaignIdSchema.parse(ctx.params);
@@ -172,6 +363,39 @@ router.get("/campaigns/:id", async (ctx: AuthContext) => {
   }
 });
 
+/**
+ * @openapi
+ * /points/campaigns/{id}/claim:
+ *   post:
+ *     tags:
+ *       - points
+ *     summary: 领取积分活动奖励
+ *     description: 领取指定积分活动的积分奖励，受活动状态与配额限制
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: 活动 ID
+ *     responses:
+ *       200:
+ *         description: 领取成功
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/SuccessObject'
+ *       400:
+ *         description: 活动未发布（4211）、未开始（4212）、已结束（4213）、已领完（4214）或已领取（4215）
+ *       401:
+ *         description: 未授权访问
+ *       404:
+ *         description: 活动不存在（4210）
+ *       500:
+ *         description: 服务器内部错误
+ */
 router.post("/campaigns/:id/claim", pointsCampaignClaimRateLimit, async (ctx: AuthContext) => {
   try {
     const p = campaignIdSchema.parse(ctx.params);

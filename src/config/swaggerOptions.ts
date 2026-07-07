@@ -1,4 +1,6 @@
-// config/swaggerOptions.js
+// config/swaggerOptions.ts
+import { openapiSchemas } from "./openapiSchemas";
+
 export default {
   definition: {
     openapi: "3.0.0",
@@ -13,7 +15,7 @@ export default {
     },
     servers: [
       {
-        url: "http://localhost:3000", // 对应 docker-compose 映射的端口
+        url: "http://localhost:3000",
         description: "开发环境",
       },
     ],
@@ -26,8 +28,8 @@ export default {
           description: "请输入 JWT Token (不带 Bearer 前缀)",
         },
       },
+      schemas: openapiSchemas,
     },
   },
-  // 指定包含注释的文件路径 glob 模式
-  apis: ["./src/routes/*.ts"],
+  apis: ["./src/routes/**/*.ts"],
 };

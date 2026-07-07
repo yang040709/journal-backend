@@ -66,9 +66,33 @@ const importOptionsSchema = z.object({
 });
 
 router.use(authMiddleware);
+
 /**
- * @route GET /export/data
- * @desc 导出用户数据
+ * @openapi
+ * /export/data:
+ *   get:
+ *     tags:
+ *       - export
+ *     summary: 导出用户数据
+ *     description: 导出当前用户的全部手帐本与手帐数据，响应为 JSON 附件
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: 导出成功
+ *         headers:
+ *           Content-Disposition:
+ *             schema:
+ *               type: string
+ *             description: 附件文件名（UTF-8 编码）
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/SuccessObject'
+ *       401:
+ *         description: 未授权访问
+ *       500:
+ *         description: 服务器内部错误
  */
 router.get("/data", async (ctx) => {
   try {
@@ -104,8 +128,79 @@ router.get("/data", async (ctx) => {
 });
 
 /**
- * @route POST /export/import
- * @desc 导入用户数据
+ * @openapi
+ * /export/import:
+ *   post:
+ *     tags:
+ *       - export
+ *     summary: 导入用户数据
+ *     description: 从备份 JSON 导入手帐本与手帐数据，支持 replace/merge 模式
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: mode
+ *         schema:
+ *           type: string
+ *           enum: [replace, merge]
+ *           default: replace
+ *         description: 导入模式
+ *       - in: query
+ *         name: conflictStrategy
+ *         schema:
+ *           type: string
+ *           enum: [skip, overwrite]
+ *           default: overwrite
+ *         description: 冲突处理策略
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - data
+ *             properties:
+ *               data:
+ *                 type: object
+ *                 required:
+ *                   - noteBooks
+ *                   - notes
+ *                 properties:
+ *                   noteBooks:
+ *                     type: array
+ *                     items:
+ *                       type: object
+ *                   notes:
+ *                     type: array
+ *                     items:
+ *                       type: object
+ *               version:
+ *                 type: string
+ *               exportTime:
+ *                 type: string
+ *               appName:
+ *                 type: string
+ *               statistics:
+ *                 type: object
+ *                 properties:
+ *                   noteBookCount:
+ *                     type: integer
+ *                   noteCount:
+ *                     type: integer
+ *     responses:
+ *       200:
+ *         description: 导入成功
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/SuccessObject'
+ *       400:
+ *         description: 参数验证失败或导入业务错误
+ *       401:
+ *         description: 未授权访问
+ *       500:
+ *         description: 服务器内部错误
  */
 router.post("/import", async (ctx) => {
   try {

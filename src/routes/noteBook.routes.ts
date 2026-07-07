@@ -40,11 +40,11 @@ const paginationSchema = z.object({
 });
 
 /**
- * @swagger
+ * @openapi
  * /note-books:
  *   get:
  *     tags:
- *       - 手帐本管理
+ *       - noteBook
  *     summary: 获取手帐本列表
  *     description: 获取当前用户的手帐本列表，支持分页和排序
  *     security:
@@ -83,21 +83,7 @@ const paginationSchema = z.object({
  *         content:
  *           application/json:
  *             schema:
- *               type: object
- *               properties:
- *                 data:
- *                   type: array
- *                   items:
- *                     $ref: '#/components/schemas/NoteBook'
- *                 total:
- *                   type: integer
- *                   description: 总记录数
- *                 page:
- *                   type: integer
- *                   description: 当前页码
- *                 limit:
- *                   type: integer
- *                   description: 每页数量
+ *               $ref: '#/components/schemas/SuccessPaginatedNoteBookList'
  *       401:
  *         description: 未授权访问
  *       500:
@@ -125,11 +111,11 @@ router.get("/", async (ctx: AuthContext) => {
 });
 
 /**
- * @swagger
+ * @openapi
  * /note-books/{id}:
  *   get:
  *     tags:
- *       - 手帐本管理
+ *       - noteBook
  *     summary: 获取单个手帐本
  *     description: 根据ID获取单个手帐本的详细信息
  *     security:
@@ -147,7 +133,7 @@ router.get("/", async (ctx: AuthContext) => {
  *         content:
  *           application/json:
  *             schema:
- *               $ref: '#/components/schemas/NoteBook'
+ *               $ref: '#/components/schemas/SuccessNoteBook'
  *       401:
  *         description: 未授权访问
  *       404:
@@ -173,11 +159,11 @@ router.get("/:id", async (ctx: AuthContext) => {
 });
 
 /**
- * @swagger
+ * @openapi
  * /note-books:
  *   post:
  *     tags:
- *       - 手帐本管理
+ *       - noteBook
  *     summary: 创建手帐本
  *     description: 创建一个新的手帐本
  *     security:
@@ -207,7 +193,7 @@ router.get("/:id", async (ctx: AuthContext) => {
  *         content:
  *           application/json:
  *             schema:
- *               $ref: '#/components/schemas/NoteBook'
+ *               $ref: '#/components/schemas/SuccessNoteBook'
  *       400:
  *         description: 参数验证失败
  *       401:
@@ -238,11 +224,11 @@ router.post("/", async (ctx: AuthContext) => {
 });
 
 /**
- * @swagger
+ * @openapi
  * /note-books/{id}:
  *   put:
  *     tags:
- *       - 手帐本管理
+ *       - noteBook
  *     summary: 更新手帐本
  *     description: 根据ID更新手帐本信息
  *     security:
@@ -277,7 +263,7 @@ router.post("/", async (ctx: AuthContext) => {
  *         content:
  *           application/json:
  *             schema:
- *               $ref: '#/components/schemas/NoteBook'
+ *               $ref: '#/components/schemas/SuccessNoteBook'
  *       400:
  *         description: 参数验证失败
  *       401:
@@ -311,11 +297,11 @@ router.put("/:id", async (ctx: AuthContext) => {
 });
 
 /**
- * @swagger
+ * @openapi
  * /note-books/{id}:
  *   delete:
  *     tags:
- *       - 手帐本管理
+ *       - noteBook
  *     summary: 删除手帐本
  *     description: 根据ID删除手帐本
  *     security:
@@ -333,11 +319,7 @@ router.put("/:id", async (ctx: AuthContext) => {
  *         content:
  *           application/json:
  *             schema:
- *               type: object
- *               properties:
- *                 deleted:
- *                   type: boolean
- *                   example: true
+ *               $ref: '#/components/schemas/SuccessObject'
  *       401:
  *         description: 未授权访问
  *       404:
@@ -364,11 +346,11 @@ router.delete("/:id", async (ctx: AuthContext) => {
 });
 
 /**
- * @swagger
+ * @openapi
  * /note-books/{id}/stats:
  *   get:
  *     tags:
- *       - 手帐本管理
+ *       - noteBook
  *     summary: 获取手帐本统计
  *     description: 获取手帐本的统计信息，如笔记数量、最近更新等
  *     security:
@@ -386,19 +368,7 @@ router.delete("/:id", async (ctx: AuthContext) => {
  *         content:
  *           application/json:
  *             schema:
- *               type: object
- *               properties:
- *                 noteCount:
- *                   type: integer
- *                   description: 笔记数量
- *                 lastUpdated:
- *                   type: string
- *                   format: date-time
- *                   description: 最后更新时间
- *                 createdAt:
- *                   type: string
- *                   format: date-time
- *                   description: 创建时间
+ *               $ref: '#/components/schemas/SuccessObject'
  *       401:
  *         description: 未授权访问
  *       404:

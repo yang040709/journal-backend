@@ -1,5 +1,7 @@
 # 手帐应用后端 API
 
+> **主 SSOT 已迁移至 OpenAPI**：运行时 [http://localhost:3000/docs](http://localhost:3000/docs) 与静态 spec [`docs/spec/openapi/openapi.json`](../docs/spec/openapi/openapi.json)。开发者入口见 [`docs/guides/API文档.md`](../docs/guides/API文档.md)。下文手工表格仅作历史参考，不再扩展。
+
 基于 Koa + TypeScript + MongoDB 的手帐应用后端服务。
 
 ## 功能特性

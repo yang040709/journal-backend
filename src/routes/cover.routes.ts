@@ -29,8 +29,26 @@ const updateCustomCoverSchema = z.object({
 });
 
 /**
- * @route GET /covers/system
- * @desc 获取系统默认封面列表
+ * @openapi
+ * /covers/system:
+ *   get:
+ *     tags:
+ *       - cover
+ *     summary: 获取系统默认封面列表
+ *     description: 返回系统配置的默认封面 URL 列表
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: 获取系统封面成功
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/SuccessArray'
+ *       401:
+ *         description: 未授权访问
+ *       500:
+ *         description: 服务器内部错误
  */
 router.get("/system", async (ctx: AuthContext) => {
   try {
@@ -43,8 +61,26 @@ router.get("/system", async (ctx: AuthContext) => {
 });
 
 /**
- * @route GET /covers/quick
- * @desc 获取用户快捷封面列表
+ * @openapi
+ * /covers/quick:
+ *   get:
+ *     tags:
+ *       - cover
+ *     summary: 获取用户快捷封面列表
+ *     description: 返回当前用户的快捷封面 URL 列表；未设置时返回系统默认前 11 个
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: 获取用户快捷封面成功
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/SuccessArray'
+ *       401:
+ *         description: 未授权访问或用户不存在
+ *       500:
+ *         description: 服务器内部错误
  */
 router.get("/quick", async (ctx: AuthContext) => {
   try {
@@ -65,8 +101,44 @@ router.get("/quick", async (ctx: AuthContext) => {
 });
 
 /**
- * @route PUT /covers/quick
- * @desc 更新用户快捷封面列表
+ * @openapi
+ * /covers/quick:
+ *   put:
+ *     tags:
+ *       - cover
+ *     summary: 更新用户快捷封面列表
+ *     description: 设置用户快捷封面，数量 1–11，URL 须为系统封面或用户自定义封面
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - covers
+ *             properties:
+ *               covers:
+ *                 type: array
+ *                 minItems: 1
+ *                 maxItems: 11
+ *                 items:
+ *                   type: string
+ *                 description: 封面 URL 数组
+ *     responses:
+ *       200:
+ *         description: 更新用户快捷封面成功
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/SuccessObject'
+ *       400:
+ *         description: 参数验证失败或封面地址无效
+ *       401:
+ *         description: 未授权访问
+ *       500:
+ *         description: 服务器内部错误
  */
 router.put("/quick", async (ctx: AuthContext) => {
   try {
@@ -93,8 +165,26 @@ router.put("/quick", async (ctx: AuthContext) => {
 });
 
 /**
- * @route POST /covers/quick/init
- * @desc 初始化用户快捷封面（用于旧用户迁移）
+ * @openapi
+ * /covers/quick/init:
+ *   post:
+ *     tags:
+ *       - cover
+ *     summary: 初始化用户快捷封面
+ *     description: 将用户快捷封面重置为系统默认前 11 个，用于旧用户迁移
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: 初始化用户快捷封面成功
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/SuccessGeneric'
+ *       401:
+ *         description: 未授权访问
+ *       500:
+ *         description: 服务器内部错误
  */
 router.post("/quick/init", async (ctx: AuthContext) => {
   try {
@@ -107,6 +197,28 @@ router.post("/quick/init", async (ctx: AuthContext) => {
   }
 });
 
+/**
+ * @openapi
+ * /covers/custom:
+ *   get:
+ *     tags:
+ *       - cover
+ *     summary: 获取用户自定义封面列表
+ *     description: 返回当前用户上传的自定义封面列表
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: 获取用户自定义封面成功
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/SuccessArray'
+ *       401:
+ *         description: 未授权访问
+ *       500:
+ *         description: 服务器内部错误
+ */
 router.get("/custom", async (ctx: AuthContext) => {
   try {
     const userId = ctx.user!.userId;
@@ -118,6 +230,51 @@ router.get("/custom", async (ctx: AuthContext) => {
   }
 });
 
+/**
+ * @openapi
+ * /covers/custom:
+ *   post:
+ *     tags:
+ *       - cover
+ *     summary: 新增用户自定义封面
+ *     description: 上传并添加一条自定义封面，返回更新后的完整列表
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - coverUrl
+ *             properties:
+ *               coverUrl:
+ *                 type: string
+ *                 minLength: 1
+ *                 maxLength: 500
+ *                 description: 封面主图 URL
+ *               thumbUrl:
+ *                 type: string
+ *                 format: uri
+ *                 description: 缩略图 URL（可选）
+ *               thumbKey:
+ *                 type: string
+ *                 description: 缩略图 COS Key（可选）
+ *     responses:
+ *       200:
+ *         description: 新增自定义封面成功
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/SuccessArray'
+ *       400:
+ *         description: 参数验证失败或超出数量上限
+ *       401:
+ *         description: 未授权访问
+ *       500:
+ *         description: 服务器内部错误
+ */
 router.post("/custom", async (ctx: AuthContext) => {
   try {
     const userId = ctx.user!.userId;
@@ -144,6 +301,58 @@ router.post("/custom", async (ctx: AuthContext) => {
   }
 });
 
+/**
+ * @openapi
+ * /covers/custom/{coverId}:
+ *   put:
+ *     tags:
+ *       - cover
+ *     summary: 更新用户自定义封面
+ *     description: 修改指定自定义封面的 URL 或缩略图，返回更新后的完整列表
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: coverId
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: 自定义封面 ID
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - coverUrl
+ *             properties:
+ *               coverUrl:
+ *                 type: string
+ *                 minLength: 1
+ *                 maxLength: 500
+ *                 description: 封面主图 URL
+ *               thumbUrl:
+ *                 type: string
+ *                 format: uri
+ *                 description: 缩略图 URL，传空字符串可清除
+ *               thumbKey:
+ *                 type: string
+ *                 description: 缩略图 COS Key，传空字符串可清除
+ *     responses:
+ *       200:
+ *         description: 更新自定义封面成功
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/SuccessArray'
+ *       400:
+ *         description: 参数验证失败或封面不存在
+ *       401:
+ *         description: 未授权访问
+ *       500:
+ *         description: 服务器内部错误
+ */
 router.put("/custom/:coverId", async (ctx: AuthContext) => {
   try {
     const userId = ctx.user!.userId;
@@ -171,6 +380,37 @@ router.put("/custom/:coverId", async (ctx: AuthContext) => {
   }
 });
 
+/**
+ * @openapi
+ * /covers/custom/{coverId}:
+ *   delete:
+ *     tags:
+ *       - cover
+ *     summary: 删除用户自定义封面
+ *     description: 删除指定自定义封面，返回更新后的完整列表
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: coverId
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: 自定义封面 ID
+ *     responses:
+ *       200:
+ *         description: 删除自定义封面成功
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/SuccessArray'
+ *       400:
+ *         description: 封面不存在
+ *       401:
+ *         description: 未授权访问
+ *       500:
+ *         description: 服务器内部错误
+ */
 router.delete("/custom/:coverId", async (ctx: AuthContext) => {
   try {
     const userId = ctx.user!.userId;

@@ -112,7 +112,7 @@ rg "字段名|路由片段" client/src admin/src docs/spec
 
 - 阅读主题：scope 在 User（`readingThemeApplyScope`），Note 上 `readingThemeScope` 移除即 breaking；catalog 白名单校验在 Admin 收窄后才与旧版分叉。
 - 小程序路径：主包 `pages/...` 与分包 `packages/<root>/pages/...` 须与 `client/src/pages.json` 一致；backend 路径变更早于 client 分包上线会导致跳转/扫码失败。
-- Theme id 列表：backend `readingThemeManifest.ts` 与 client `style-theme-presets.js` 应对齐；不对齐时标注「client 有、server 不认」风险。
+- Theme id 列表：client preset 为 SSOT；改 preset 后须 `pnpm generated:reading-theme-manifest`；不对齐时跑 `generated:reading-theme-manifest:check` 或比对 [`shared/reading-theme-manifest.json`](../../../shared/reading-theme-manifest.json)。
 - Koa 路由前缀：C 端 `/auth/*`、`/notes/*`；Admin `/admin/*`；公告公开 `/announcements/*`。
 
 ## 进阶清单
