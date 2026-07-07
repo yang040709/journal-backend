@@ -103,6 +103,8 @@ export const paginatedSuccess = <T = any>(
 
 /**
  * 错误码常量
+ * C 端镜像：client/src/constant/errorCodes.js
+ * 前端 toast 默认读 message，特殊 UX 见 client/src/utils/apiError.js
  */
 export const ErrorCodes = {
   // 通用错误
@@ -163,6 +165,7 @@ export const ErrorCodes = {
   CAMPAIGN_ALREADY_CLAIMED: 4215,
   TOO_MANY_REQUESTS: 4216,
   FEEDBACK_RATE_LIMIT: 4301,
+  ADMIN_LOGIN_CAPTCHA_ERROR: 4401,
 
   // 服务器错误
   INTERNAL_ERROR: 9999,

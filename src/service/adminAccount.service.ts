@@ -10,21 +10,6 @@ import {
   AdminState,
 } from "../middlewares/adminAuth.middleware";
 
-const LOGIN_WINDOW_MS = 60_000;
-const LOGIN_MAX_ATTEMPTS = 30;
-const loginBuckets = new Map<string, { count: number; windowStart: number }>();
-
-function consumeLoginAttempt(key: string): boolean {
-  const now = Date.now();
-  let b = loginBuckets.get(key);
-  if (!b || now - b.windowStart > LOGIN_WINDOW_MS) {
-    b = { count: 0, windowStart: now };
-    loginBuckets.set(key, b);
-  }
-  b.count += 1;
-  return b.count <= LOGIN_MAX_ATTEMPTS;
-}
-
 function normalizeAssignablePages(pages: string[]): string[] {
   const set = new Set<string>();
   for (const p of pages) {
@@ -39,13 +24,7 @@ export class AdminAccountService {
   static async login(
     username: string,
     password: string,
-    clientKey: string,
   ): Promise<{ token: string; admin: ReturnType<typeof AdminAccountService.toPublicAdmin> }> {
-    const rateKey = `${clientKey}:${username}`;
-    if (!consumeLoginAttempt(rateKey)) {
-      throw new Error("登录尝试过于频繁，请稍后再试");
-    }
-
     const doc = await Admin.findOne({
       username: username.trim(),
     });
