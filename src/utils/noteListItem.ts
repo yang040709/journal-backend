@@ -7,12 +7,15 @@ import { logger } from "./logger";
 type NoteListSource = FlattenMaps<Record<string, unknown>>;
 
 function resolveContentPreview(doc: NoteListSource): string {
+  const stored = String(doc.contentPreview ?? "").trim();
+  if (stored) return stored;
+
   const content = String(doc.content ?? "");
   if (content.trim()) {
     return buildNoteContentPreview(content);
   }
 
-  return String(doc.contentPreview ?? "").trim();
+  return "";
 }
 
 /**
@@ -32,9 +35,17 @@ export function toLeanNoteListItems(docs: NoteListSource[]): LeanNote[] {
 export function queueContentPreviewBackfill(docs: NoteListSource[]): void {
   const ops = docs
     .map((doc) => {
-      const preview = resolveContentPreview(doc);
+      if (!doc._id) return null;
+
       const current = String(doc.contentPreview ?? "").trim();
-      if (!preview || preview === current || !doc._id) return null;
+      if (current) return null;
+
+      const content = String(doc.content ?? "");
+      if (!content.trim()) return null;
+
+      const preview = buildNoteContentPreview(content);
+      if (!preview) return null;
+
       return {
         updateOne: {
           filter: { _id: doc._id },
@@ -46,7 +57,7 @@ export function queueContentPreviewBackfill(docs: NoteListSource[]): void {
 
   if (ops.length === 0) return;
 
-  void Note.bulkWrite(ops as never[]).catch((err) => {
+  void Note.bulkWrite(ops as never[], { timestamps: false }).catch((err) => {
     logger.warn("contentPreview lazy backfill failed", { err });
   });
 }

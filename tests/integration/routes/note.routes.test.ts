@@ -11,6 +11,7 @@ import { adminAuthHeader, seedAdmin } from "../../helpers/adminFactory";
 import { clearTestDb, connectTestDb } from "../../helpers/db";
 import { seedNote } from "../../helpers/seed/note.seed";
 import { seedNoteBook } from "../../helpers/seed/notebook.seed";
+import Note from "../../../src/model/Note";
 import { ErrorCodes } from "../../../src/utils/response";
 import { buildDefaultReadingThemeCatalog } from "../../../src/utils/readingThemeCatalog";
 
@@ -103,6 +104,87 @@ describe("integration: /notes", () => {
     const item = res.body.data.items[0];
     expect(item.contentPreview).toContain("今天天气很好");
     expect(item.content).toBeUndefined();
+  });
+
+  it("GET /notes 补全缺失 contentPreview 时不更新 updatedAt", async () => {
+    const { token, userId } = await createAuthUser();
+    const book = await seedNoteBook(userId);
+    const past = new Date("2020-01-15T08:00:00.000Z");
+
+    const doc = await Note.create({
+      userId,
+      noteBookId: book.id,
+      title: "旧数据",
+      content: "这是存量手帐正文",
+      tags: [],
+      images: [],
+      isShare: false,
+      shareId: "testshare1234",
+      shareVersion: 0,
+      isDeleted: false,
+      createdAt: past,
+      updatedAt: past,
+    });
+    await Note.updateOne(
+      { _id: doc._id },
+      { $set: { contentPreview: "" } },
+      { timestamps: false },
+    );
+
+    await agent
+      .get("/notes")
+      .query({ page: 1, limit: 10, noteBookId: book.id })
+      .set(authHeader(token))
+      .expect(200);
+
+    await new Promise((resolve) => setTimeout(resolve, 150));
+
+    const refreshed = await Note.findById(doc._id).lean();
+    expect(refreshed?.contentPreview).toContain("这是存量手帐正文");
+    expect(refreshed?.updatedAt?.toISOString()).toBe(past.toISOString());
+  });
+
+  it("GET /notes 重复请求不刷新已有 contentPreview 手帐的 updatedAt", async () => {
+    const { token, userId } = await createAuthUser();
+    const book = await seedNoteBook(userId);
+    const past = new Date("2020-01-15T08:00:00.000Z");
+
+    const doc = await Note.create({
+      userId,
+      noteBookId: book.id,
+      title: "已有摘要",
+      content: "第一行\n第二行",
+      tags: [],
+      images: [],
+      isShare: false,
+      shareId: "testshare5678",
+      shareVersion: 0,
+      isDeleted: false,
+      createdAt: past,
+      updatedAt: past,
+    });
+    await Note.updateOne(
+      { _id: doc._id },
+      { $set: { contentPreview: "旧摘要" } },
+      { timestamps: false },
+    );
+
+    await agent
+      .get("/notes")
+      .query({ page: 1, limit: 10, noteBookId: book.id })
+      .set(authHeader(token))
+      .expect(200);
+    await agent
+      .get("/notes")
+      .query({ page: 1, limit: 10, noteBookId: book.id })
+      .set(authHeader(token))
+      .expect(200);
+
+    await new Promise((resolve) => setTimeout(resolve, 150));
+
+    const refreshed = await Note.findById(doc._id).lean();
+    expect(refreshed?.contentPreview).toBe("旧摘要");
+    expect(refreshed?.updatedAt?.toISOString()).toBe(past.toISOString());
   });
 
   it("POST /notes 创建时写入 contentPreview", async () => {
