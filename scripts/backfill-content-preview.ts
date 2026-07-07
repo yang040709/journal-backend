@@ -42,7 +42,9 @@ async function main() {
       .filter(Boolean);
 
     if (ops.length > 0) {
-      const result = await Note.bulkWrite(ops as never[]);
+      const result = await Note.bulkWrite(ops as never[], {
+        timestamps: false,
+      });
       modified += result.modifiedCount;
     }
 

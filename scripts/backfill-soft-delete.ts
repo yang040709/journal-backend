@@ -19,6 +19,7 @@ async function main() {
           deleteExpireAt: null,
         },
       },
+      { timestamps: false },
     ),
     NoteBook.updateMany(
       { isDeleted: { $exists: false } },
@@ -29,6 +30,7 @@ async function main() {
           deleteExpireAt: null,
         },
       },
+      { timestamps: false },
     ),
   ]);
 

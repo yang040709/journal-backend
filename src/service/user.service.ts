@@ -302,6 +302,7 @@ export class UserService {
             },
           ];
         }),
+        { timestamps: false },
       );
       console.log(`✅ 为用户 ${userId} 创建了 ${notesToInsert.length} 篇初始手帐`);
     } catch (error) {

@@ -361,13 +361,20 @@ export class ImportService {
   private static async updateNoteBookCounts(userId: string): Promise<void> {
     const noteBooks = await NoteBook.find({ userId });
 
-    for (const noteBook of noteBooks) {
-      const count = await Note.countDocuments({
-        noteBookId: noteBook._id,
-        userId,
-      });
-      noteBook.count = count;
-      await noteBook.save();
-    }
+    await Promise.all(
+      noteBooks.map(async (noteBook) => {
+        const count = await Note.countDocuments({
+          noteBookId: noteBook._id,
+          userId,
+          isDeleted: { $ne: true },
+        });
+        if (count === noteBook.count) return;
+        await NoteBook.updateOne(
+          { _id: noteBook._id },
+          { $set: { count } },
+          { timestamps: false },
+        );
+      }),
+    );
   }
 }

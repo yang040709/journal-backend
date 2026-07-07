@@ -375,7 +375,11 @@ export class AdminNoteService {
       ...(key ? { appliedSystemTemplateKey: key.slice(0, 120) } : {}),
     });
     await note.save();
-    await NoteBook.updateOne({ _id: data.noteBookId }, { $inc: { count: 1 } });
+    await NoteBook.updateOne(
+      { _id: data.noteBookId },
+      { $inc: { count: 1 } },
+      { timestamps: false },
+    );
     return note;
   }
 
@@ -419,8 +423,16 @@ export class AdminNoteService {
         throw new Error("目标手帐本不存在或无权访问");
       }
       await Promise.all([
-        NoteBook.updateOne({ _id: note.noteBookId }, { $inc: { count: -1 } }),
-        NoteBook.updateOne({ _id: data.noteBookId }, { $inc: { count: 1 } }),
+        NoteBook.updateOne(
+          { _id: note.noteBookId },
+          { $inc: { count: -1 } },
+          { timestamps: false },
+        ),
+        NoteBook.updateOne(
+          { _id: data.noteBookId },
+          { $inc: { count: 1 } },
+          { timestamps: false },
+        ),
       ]);
       note.noteBookId = data.noteBookId;
       note.isPinned = false;
@@ -489,7 +501,18 @@ export class AdminNoteService {
       }
     }
 
-    await note.save();
+    const shouldBumpUpdatedAt =
+      data.title !== undefined ||
+      data.content !== undefined ||
+      data.tags !== undefined ||
+      data.images !== undefined ||
+      data.noteBookId !== undefined;
+
+    if (shouldBumpUpdatedAt) {
+      await note.save();
+    } else {
+      await note.save({ timestamps: false });
+    }
     return note;
   }
 
@@ -499,7 +522,11 @@ export class AdminNoteService {
       return false;
     }
     await Note.deleteOne({ _id: id });
-    await NoteBook.updateOne({ _id: note.noteBookId }, { $inc: { count: -1 } });
+    await NoteBook.updateOne(
+      { _id: note.noteBookId },
+      { $inc: { count: -1 } },
+      { timestamps: false },
+    );
     return true;
   }
 

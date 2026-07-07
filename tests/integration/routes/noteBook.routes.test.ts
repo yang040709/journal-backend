@@ -9,6 +9,9 @@ import { createTestAgent } from "../../helpers/appFactory";
 import { authHeader, createAuthUser } from "../../helpers/authFactory";
 import { clearTestDb, connectTestDb } from "../../helpers/db";
 import { seedNoteBook } from "../../helpers/seed/notebook.seed";
+import { seedNote } from "../../helpers/seed/note.seed";
+import NoteBook from "../../../src/model/NoteBook";
+import Note from "../../../src/model/Note";
 import { ErrorCodes } from "../../../src/utils/response";
 
 describe("integration: /note-books", () => {
@@ -107,5 +110,49 @@ describe("integration: /note-books", () => {
 
     expect(res.body.code).toBe(0);
     expect(res.body.data.title).toBe("可读本");
+  });
+
+  it("GET /note-books/:id/stats 修正 count 时不刷新手帐本 updatedAt", async () => {
+    const { token, userId } = await createAuthUser();
+    const book = await seedNoteBook(userId, "统计本");
+    const past = new Date("2020-01-15T08:00:00.000Z");
+
+    await NoteBook.updateOne(
+      { _id: book.id },
+      { $set: { count: 0, updatedAt: past } },
+      { timestamps: false },
+    );
+    await seedNote({ userId, noteBookId: book.id, title: "一篇" });
+
+    await agent
+      .get(`/note-books/${book.id}/stats`)
+      .set(authHeader(token))
+      .expect(200);
+
+    const refreshed = await NoteBook.findById(book.id).lean();
+    expect(refreshed?.count).toBe(1);
+    expect(refreshed?.updatedAt?.toISOString()).toBe(past.toISOString());
+  });
+
+  it("DELETE /note-books/:id 软删手帐本时不刷新下属手帐 updatedAt", async () => {
+    const { token, userId } = await createAuthUser();
+    const book = await seedNoteBook(userId, "待删本");
+    const past = new Date("2020-01-15T08:00:00.000Z");
+    const note = await seedNote({ userId, noteBookId: book.id, title: "下属手帐" });
+
+    await Note.updateOne(
+      { _id: note.id },
+      { $set: { updatedAt: past } },
+      { timestamps: false },
+    );
+
+    await agent
+      .delete(`/note-books/${book.id}`)
+      .set(authHeader(token))
+      .expect(200);
+
+    const refreshed = await Note.findById(note.id).lean();
+    expect(refreshed?.isDeleted).toBe(true);
+    expect(refreshed?.updatedAt?.toISOString()).toBe(past.toISOString());
   });
 });

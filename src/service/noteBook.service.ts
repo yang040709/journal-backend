@@ -162,6 +162,7 @@ export class NoteBookService {
     await NoteBook.updateOne(
       { _id: id, userId, isDeleted: { $ne: true } },
       { $set: { isDeleted: true, deletedAt, deleteExpireAt, count: 0 } },
+      { timestamps: false },
     );
     await Note.updateMany(
       { noteBookId: id, userId, isDeleted: { $ne: true } },
@@ -173,6 +174,7 @@ export class NoteBookService {
           isShare: false,
         },
       },
+      { timestamps: false },
     );
 
     // 记录活动
@@ -211,9 +213,13 @@ export class NoteBookService {
       userId,
       isDeleted: { $ne: true },
     });
-    // 如果数量不一致，更新手帐本的数量
+    // 如果数量不一致，更新手帐本的数量（不刷新手帐本 updatedAt）
     if (noteCount !== noteBook.count) {
-      await NoteBook.updateOne({ _id: id }, { count: noteCount });
+      await NoteBook.updateOne(
+        { _id: id },
+        { count: noteCount },
+        { timestamps: false },
+      );
     }
     return { noteCount };
   }

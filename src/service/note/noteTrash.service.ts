@@ -62,8 +62,12 @@ export class NoteTrashService {
     note.isDeleted = false;
     note.deletedAt = null;
     note.deleteExpireAt = null;
-    await note.save();
-    await NoteBook.updateOne({ _id: noteBookId }, { $inc: { count: 1 } });
+    await note.save({ timestamps: false });
+    await NoteBook.updateOne(
+      { _id: noteBookId },
+      { $inc: { count: 1 } },
+      { timestamps: false },
+    );
 
     return {
       note,

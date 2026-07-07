@@ -58,8 +58,12 @@ export class NoteCrudService {
 
     await note.save();
 
-    // 更新手帐本的手帐数量
-    await NoteBook.updateOne({ _id: data.noteBookId }, { $inc: { count: 1 } });
+    // 更新手帐本的手帐数量（不刷新手帐本 updatedAt）
+    await NoteBook.updateOne(
+      { _id: data.noteBookId },
+      { $inc: { count: 1 } },
+      { timestamps: false },
+    );
 
     // 记录活动
     void ActivityLogger.record(
@@ -182,10 +186,18 @@ export class NoteCrudService {
         throw new Error("目标手帐本不存在或无权访问");
       }
 
-      // 更新手帐本计数
+      // 更新手帐本计数（不刷新手帐本 updatedAt）
       await Promise.all([
-        NoteBook.updateOne({ _id: oldNoteBookId }, { $inc: { count: -1 } }),
-        NoteBook.updateOne({ _id: newNoteBookId }, { $inc: { count: 1 } }),
+        NoteBook.updateOne(
+          { _id: oldNoteBookId },
+          { $inc: { count: -1 } },
+          { timestamps: false },
+        ),
+        NoteBook.updateOne(
+          { _id: newNoteBookId },
+          { $inc: { count: 1 } },
+          { timestamps: false },
+        ),
       ]);
 
       note.noteBookId = newNoteBookId;

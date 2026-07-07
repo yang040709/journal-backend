@@ -248,6 +248,7 @@ export class MediaReferenceService {
       const pullResult = await Note.updateMany(
         { userId, "images.key": key },
         { $pull: { images: { key } } },
+        { timestamps: false },
       );
       notesUpdated = pullResult.modifiedCount ?? 0;
 

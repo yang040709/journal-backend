@@ -10,6 +10,7 @@ import { authHeader, createAuthUser } from "../../helpers/authFactory";
 import { clearTestDb, connectTestDb } from "../../helpers/db";
 import { seedNote } from "../../helpers/seed/note.seed";
 import { seedNoteBook } from "../../helpers/seed/notebook.seed";
+import Note from "../../../src/model/Note";
 import { ErrorCodes } from "../../../src/utils/response";
 
 describe("integration: /notes/trash", () => {
@@ -144,6 +145,31 @@ describe("integration: /notes/trash", () => {
     expect(res.body.data.restoredToNoteBookId).toBe(targetBook.id);
     expect(res.body.data.restoredToNoteBookTitle).toBe("目标本");
     expect(res.body.data.note.noteBookId).toBe(targetBook.id);
+  });
+
+  it("POST /notes/:id/restore 不刷新手帐 updatedAt", async () => {
+    const { token, userId } = await createAuthUser();
+    const book = await seedNoteBook(userId);
+    const past = new Date("2020-01-15T08:00:00.000Z");
+    const note = await seedNote({ userId, noteBookId: book.id });
+
+    await Note.updateOne(
+      { _id: note.id },
+      { $set: { updatedAt: past } },
+      { timestamps: false },
+    );
+
+    await agent.delete(`/notes/${note.id}`).set(authHeader(token));
+
+    await agent
+      .post(`/notes/${note.id}/restore`)
+      .set(authHeader(token))
+      .send({})
+      .expect(200);
+
+    const refreshed = await Note.findById(note.id).lean();
+    expect(refreshed?.isDeleted).toBe(false);
+    expect(refreshed?.updatedAt?.toISOString()).toBe(past.toISOString());
   });
 
   it("POST /notes/:id/restore 指定已删手帐本返回 404", async () => {
