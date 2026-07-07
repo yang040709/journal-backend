@@ -2,6 +2,7 @@ import AlertEvent from "../model/AlertEvent";
 import AlertRule, { IAlertRule } from "../model/AlertRule";
 import { logger } from "../utils/logger";
 import { AlertMetricService } from "./alertMetric.service";
+import { AlertNotifyService } from "./alertNotify.service";
 
 type EvaluationResult = {
   breached: boolean;
@@ -72,7 +73,7 @@ export class AlertEngineService {
           unresolved.metricSnapshot = result.snapshot;
           await unresolved.save();
         } else {
-          await AlertEvent.create({
+          const event = await AlertEvent.create({
             eventId: makeEventId(rule.ruleKey),
             ruleKey: rule.ruleKey,
             ruleName: rule.name,
@@ -85,6 +86,7 @@ export class AlertEngineService {
             metricSnapshot: result.snapshot,
             occurrenceCount: 1,
           });
+          void AlertNotifyService.notifyNewEvent(event);
         }
         stats.lastTriggeredAt = now;
       }
