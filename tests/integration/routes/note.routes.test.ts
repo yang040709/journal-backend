@@ -84,6 +84,45 @@ describe("integration: /notes", () => {
     expect(res.body.data.items).toHaveLength(2);
   });
 
+  it("GET /notes 列表返回 contentPreview 且不返回 content", async () => {
+    const { token, userId } = await createAuthUser();
+    const book = await seedNoteBook(userId);
+    await seedNote({
+      userId,
+      noteBookId: book.id,
+      title: "我是小羊",
+      content: "今天天气很好，和小羊一起去公园玩",
+    });
+
+    const res = await agent
+      .get("/notes")
+      .query({ page: 1, limit: 10, noteBookId: book.id })
+      .set(authHeader(token))
+      .expect(200);
+
+    const item = res.body.data.items[0];
+    expect(item.contentPreview).toContain("今天天气很好");
+    expect(item.content).toBeUndefined();
+  });
+
+  it("POST /notes 创建时写入 contentPreview", async () => {
+    const { token, userId } = await createAuthUser();
+    const book = await seedNoteBook(userId);
+
+    const res = await agent
+      .post("/notes")
+      .set(authHeader(token))
+      .send({
+        noteBookId: book.id,
+        title: "今日心情",
+        content: "阳光很好，适合写手帐",
+        tags: [],
+      })
+      .expect(200);
+
+    expect(res.body.data.contentPreview).toContain("阳光很好");
+  });
+
   it("DELETE /notes/:id 软删后 trash 可见", async () => {
     const { token, userId } = await createAuthUser();
     const book = await seedNoteBook(userId);

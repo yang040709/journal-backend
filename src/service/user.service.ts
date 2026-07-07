@@ -12,6 +12,7 @@ import { ActivityLogger } from "../utils/ActivityLogger";
 import { CoverService } from "./cover.service";
 import { InitialUserNotebookConfigService } from "./initialUserNotebookConfig.service";
 import { InitialUserNoteSeedConfigService } from "./initialUserNoteSeedConfig.service";
+import { buildNoteContentPreview } from "../utils/noteContentPreview";
 import { nanoid } from "nanoid";
 import { getWeChatAppId, getWeChatSecret } from "../config/wechatEnv";
 import { Types } from "mongoose";
@@ -262,6 +263,7 @@ export class UserService {
             noteBookId,
             title: t.title,
             content: t.content || "",
+            contentPreview: buildNoteContentPreview(t.content || ""),
             tags: Array.isArray(t.tags) ? t.tags : [],
             images: [],
             userId,

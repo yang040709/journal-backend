@@ -1,10 +1,13 @@
 import { Schema, model, Document } from "mongoose";
 import { LeanNote } from "../types/mongoose";
+import { buildNoteContentPreview } from "../utils/noteContentPreview";
 
 export interface INote extends Document {
   noteBookId: string;
   title: string;
   content: string;
+  /** 列表/相册封面用正文摘要（不含完整 content） */
+  contentPreview: string;
   tags: string[];
   images: INoteImage[];
   userId: string;
@@ -111,6 +114,11 @@ const noteSchema = new Schema(
     content: {
       type: String,
       default: "",
+    },
+    contentPreview: {
+      type: String,
+      default: "",
+      maxlength: 120,
     },
     tags: {
       type: [String],
@@ -232,6 +240,13 @@ noteSchema.index({ userId: 1, "images.key": 1 });
 // 添加虚拟字段id
 noteSchema.virtual("id").get(function (this: any) {
   return this._id.toString();
+});
+
+noteSchema.pre("save", function (next) {
+  if (this.isModified("content")) {
+    this.contentPreview = buildNoteContentPreview(this.content ?? "");
+  }
+  next();
 });
 
 export default model<INote>("Note", noteSchema);

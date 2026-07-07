@@ -13,6 +13,7 @@ import UserMigrationTask, {
   UserMigrationTaskStatus,
 } from "../model/UserMigrationTask";
 import UserUploadQuotaDaily from "../model/UserUploadQuotaDaily";
+import { buildNoteContentPreview } from "../utils/noteContentPreview";
 
 type ModuleRunResult = {
   moduleResult: IUserMigrationModuleResult;
@@ -461,11 +462,13 @@ export class UserMigrationService {
             const next = cloneWithoutId(doc as unknown as Record<string, unknown>);
             const oldBookId = String(doc.noteBookId || "");
             const mappedNoteBookId = noteBookIdMap.get(oldBookId) || oldBookId;
+            const content = String(next.content ?? "");
             return {
               ...next,
               _id: new mongoose.Types.ObjectId(),
               userId: targetOpenid,
               noteBookId: mappedNoteBookId,
+              contentPreview: buildNoteContentPreview(content),
               // shareId 在全表唯一；复制迁徙时需重置为未分享态，避免与旧账号冲突
               isShare: false,
               shareId: undefined,
