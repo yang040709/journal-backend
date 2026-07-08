@@ -39,6 +39,16 @@ export interface IUser extends Document {
     styleKeys: (string | null)[];
     themeIdsByStyle: Record<string, string[]>;
   } | null;
+  /** 手帐详情是否显示字数统计 */
+  showNoteWordCount?: boolean;
+  /** 阅读主题时间是否显示到时分秒 */
+  showReadingThemeClockTime?: boolean;
+  /** 列表是否使用旧版 note-item 布局 */
+  useLegacyNoteItem?: boolean;
+  /** 相册模式无图封面是否使用较高饱和渐变 */
+  albumCoverHighSaturation?: boolean;
+  /** 无图封面样式 */
+  albumCoverNoImageStyle?: "dateTeaser" | "watermark" | "excerpt";
   createdAt: Date;
   updatedAt: Date;
 }
@@ -169,6 +179,27 @@ const userSchema = new Schema(
         { _id: false },
       ),
       default: null,
+    },
+    showNoteWordCount: {
+      type: Boolean,
+      default: false,
+    },
+    showReadingThemeClockTime: {
+      type: Boolean,
+      default: false,
+    },
+    useLegacyNoteItem: {
+      type: Boolean,
+      default: false,
+    },
+    albumCoverHighSaturation: {
+      type: Boolean,
+      default: false,
+    },
+    albumCoverNoImageStyle: {
+      type: String,
+      enum: ["dateTeaser", "watermark", "excerpt"],
+      default: "dateTeaser",
     },
   },
   {

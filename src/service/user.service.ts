@@ -24,6 +24,20 @@ import {
   assertReadingThemeSelectionAllowed,
 } from "../utils/readingThemeCatalog";
 import { ReadingThemeCatalogConfigService } from "./readingThemeCatalogConfig.service";
+import {
+  ALBUM_COVER_NO_IMAGE_STYLE_VALUES,
+  type UpdateDisplayPreferenceInput,
+} from "../schemas/displayPreference.schema";
+import { DisplayPreferenceChangeLogService } from "./displayPreferenceChangeLog.service";
+import { ReadingThemeChangeLogService } from "./readingThemeChangeLog.service";
+
+export interface DisplayPrefs {
+  showNoteWordCount: boolean;
+  showReadingThemeClockTime: boolean;
+  useLegacyNoteItem: boolean;
+  albumCoverHighSaturation: boolean;
+  albumCoverNoImageStyle: (typeof ALBUM_COVER_NO_IMAGE_STYLE_VALUES)[number];
+}
 
 export interface LoginResult {
   token: string;
@@ -41,6 +55,7 @@ export interface MePageProfile {
   readingThemeApplyScope: "global" | "note";
   readingThemeCatalog: ReadingThemeCatalog | null;
   systemReadingThemeCatalog: ReadingThemeCatalog;
+  displayPrefs: DisplayPrefs;
 }
 
 export interface MePageStats {
@@ -76,6 +91,22 @@ export class UserService {
 
   private static parseReadingThemeApplyScope(value: unknown): "global" | "note" {
     return value === "global" ? "global" : "note";
+  }
+
+  private static parseDisplayPrefsFields(user: any): DisplayPrefs {
+    const validNoImageStyles = new Set<string>(ALBUM_COVER_NO_IMAGE_STYLE_VALUES);
+    const rawStyle = String(user?.albumCoverNoImageStyle || "").trim();
+    const albumCoverNoImageStyle = validNoImageStyles.has(rawStyle)
+      ? (rawStyle as DisplayPrefs["albumCoverNoImageStyle"])
+      : "dateTeaser";
+
+    return {
+      showNoteWordCount: Boolean(user?.showNoteWordCount),
+      showReadingThemeClockTime: Boolean(user?.showReadingThemeClockTime),
+      useLegacyNoteItem: Boolean(user?.useLegacyNoteItem),
+      albumCoverHighSaturation: Boolean(user?.albumCoverHighSaturation),
+      albumCoverNoImageStyle,
+    };
   }
 
   private static parseReadingThemeFields(user: any): Pick<
@@ -362,6 +393,7 @@ export class UserService {
       membershipText: String((user as any).membershipText || "").trim(),
       ...UserService.parseReadingThemeFields(user),
       systemReadingThemeCatalog,
+      displayPrefs: UserService.parseDisplayPrefsFields(user),
     };
   }
 
@@ -492,26 +524,38 @@ export class UserService {
         ? updatePayload.defaultReadingThemeId
         : null;
 
+    const themeFieldsChanging =
+      updatePayload.defaultReadingStyleKey !== undefined ||
+      updatePayload.defaultReadingThemeId !== undefined;
+
+    let beforeThemeSelection:
+      | { readingStyleKey: string | null; readingThemeId: string | null }
+      | null = null;
+
     if (
+      themeFieldsChanging ||
       updatePayload.defaultReadingStyleKey === undefined ||
       updatePayload.defaultReadingThemeId === undefined
     ) {
       const current = await User.findOne({ userId })
         .select("defaultReadingStyleKey defaultReadingThemeId")
         .lean();
+
       if (updatePayload.defaultReadingStyleKey === undefined) {
         effectiveStyleKey = current?.defaultReadingStyleKey ?? null;
       }
       if (updatePayload.defaultReadingThemeId === undefined) {
         effectiveThemeId = current?.defaultReadingThemeId ?? null;
       }
+      if (themeFieldsChanging) {
+        beforeThemeSelection = {
+          readingStyleKey: current?.defaultReadingStyleKey ?? null,
+          readingThemeId: current?.defaultReadingThemeId ?? null,
+        };
+      }
     }
 
-    const shouldValidateTheme =
-      updatePayload.defaultReadingStyleKey !== undefined ||
-      updatePayload.defaultReadingThemeId !== undefined;
-
-    if (shouldValidateTheme) {
+    if (themeFieldsChanging) {
       assertReadingThemeSelectionAllowed(
         effectiveStyleKey,
         effectiveThemeId,
@@ -529,7 +573,65 @@ export class UserService {
       throw new Error("用户不存在");
     }
 
+    if (beforeThemeSelection) {
+      await ReadingThemeChangeLogService.recordChange(
+        userId,
+        "global",
+        beforeThemeSelection,
+        {
+          readingStyleKey: user.defaultReadingStyleKey ?? null,
+          readingThemeId: user.defaultReadingThemeId ?? null,
+        },
+      );
+    }
+
     return UserService.parseReadingThemeFields(user);
+  }
+
+  static async updateDisplayPreference(
+    userId: string,
+    input: UpdateDisplayPreferenceInput,
+  ): Promise<DisplayPrefs> {
+    const updatePayload: UpdateDisplayPreferenceInput = {};
+
+    if (input.showNoteWordCount !== undefined) {
+      updatePayload.showNoteWordCount = Boolean(input.showNoteWordCount);
+    }
+    if (input.showReadingThemeClockTime !== undefined) {
+      updatePayload.showReadingThemeClockTime = Boolean(
+        input.showReadingThemeClockTime,
+      );
+    }
+    if (input.useLegacyNoteItem !== undefined) {
+      updatePayload.useLegacyNoteItem = Boolean(input.useLegacyNoteItem);
+    }
+    if (input.albumCoverHighSaturation !== undefined) {
+      updatePayload.albumCoverHighSaturation = Boolean(
+        input.albumCoverHighSaturation,
+      );
+    }
+    if (input.albumCoverNoImageStyle !== undefined) {
+      updatePayload.albumCoverNoImageStyle = input.albumCoverNoImageStyle;
+    }
+
+    if (Object.keys(updatePayload).length === 0) {
+      const profile = await UserService.getMeProfile(userId);
+      return profile.displayPrefs;
+    }
+
+    const user = await User.findOneAndUpdate(
+      { userId },
+      { $set: updatePayload },
+      { new: true },
+    ).lean();
+
+    if (!user) {
+      throw new Error("用户不存在");
+    }
+
+    await DisplayPreferenceChangeLogService.recordChanges(userId, updatePayload);
+
+    return UserService.parseDisplayPrefsFields(user);
   }
 
   static async updateReadingThemeCatalog(

@@ -351,4 +351,79 @@ describe("integration: /auth", () => {
 
     expect(res.body.data.readingThemeApplyScope).toBe("note");
   });
+
+  it("GET /auth/me-profile 返回 displayPrefs 默认值", async () => {
+    const { token } = await createAuthUser({ userId: "display-prefs-default" });
+
+    const res = await agent
+      .get("/auth/me-profile")
+      .set(authHeader(token))
+      .expect(200);
+
+    expect(res.body.data.displayPrefs).toEqual({
+      showNoteWordCount: false,
+      showReadingThemeClockTime: false,
+      useLegacyNoteItem: false,
+      albumCoverHighSaturation: false,
+      albumCoverNoImageStyle: "dateTeaser",
+    });
+  });
+
+  it("PUT /auth/me/display-preference 可部分更新", async () => {
+    const { token } = await createAuthUser({ userId: "display-prefs-update" });
+
+    const putRes = await agent
+      .put("/auth/me/display-preference")
+      .set(authHeader(token))
+      .send({
+        showNoteWordCount: true,
+        albumCoverNoImageStyle: "watermark",
+      })
+      .expect(200);
+
+    expect(putRes.body.data.showNoteWordCount).toBe(true);
+    expect(putRes.body.data.albumCoverNoImageStyle).toBe("watermark");
+    expect(putRes.body.data.useLegacyNoteItem).toBe(false);
+
+    const getRes = await agent
+      .get("/auth/me-profile")
+      .set(authHeader(token))
+      .expect(200);
+
+    expect(getRes.body.data.displayPrefs.showNoteWordCount).toBe(true);
+    expect(getRes.body.data.displayPrefs.albumCoverNoImageStyle).toBe("watermark");
+  });
+
+  it("PUT /auth/me/display-preference 空 body 返回 400", async () => {
+    const { token } = await createAuthUser({ userId: "display-prefs-empty" });
+
+    const res = await agent
+      .put("/auth/me/display-preference")
+      .set(authHeader(token))
+      .send({})
+      .expect(400);
+
+    expect(res.body.code).toBe(ErrorCodes.PARAM_ERROR);
+  });
+
+  it("PUT /auth/me/display-preference 非法 albumCoverNoImageStyle 返回 400", async () => {
+    const { token } = await createAuthUser({ userId: "display-prefs-invalid" });
+
+    const res = await agent
+      .put("/auth/me/display-preference")
+      .set(authHeader(token))
+      .send({ albumCoverNoImageStyle: "invalid" })
+      .expect(400);
+
+    expect(res.body.code).toBe(ErrorCodes.PARAM_ERROR);
+  });
+
+  it("PUT /auth/me/display-preference 无 token 返回 401", async () => {
+    const res = await agent
+      .put("/auth/me/display-preference")
+      .send({ showNoteWordCount: true })
+      .expect(401);
+
+    expect(res.body.code).toBe(1002);
+  });
 });

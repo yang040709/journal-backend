@@ -11,6 +11,7 @@ import {
   updateDefaultReadingThemeSchema,
   readingThemeCatalogPutSchema,
 } from "../schemas/readingTheme.schema";
+import { updateDisplayPreferenceSchema } from "../schemas/displayPreference.schema";
 import { ReadingThemeCatalogValidationError } from "../utils/readingThemeCatalog";
 
 const router = new Router({
@@ -475,6 +476,62 @@ router.put("/me/reading-theme-catalog", authMiddleware, async (ctx: AuthContext)
     }
     console.error("更新主题列表失败:", err);
     error(ctx, err.message || "更新主题列表失败", ErrorCodes.INTERNAL_ERROR, 500);
+  }
+});
+
+/**
+ * @openapi
+ * /auth/me/display-preference:
+ *   put:
+ *     tags: [user]
+ *     summary: 更新显示偏好
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               showNoteWordCount:
+ *                 type: boolean
+ *               showReadingThemeClockTime:
+ *                 type: boolean
+ *               useLegacyNoteItem:
+ *                 type: boolean
+ *               albumCoverHighSaturation:
+ *                 type: boolean
+ *               albumCoverNoImageStyle:
+ *                 type: string
+ *                 enum: [dateTeaser, watermark, excerpt]
+ *     responses:
+ *       '200':
+ *         description: 成功
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/SuccessObject'
+ *       '400':
+ *         description: 参数验证失败
+ *       '401':
+ *         description: 未授权
+ */
+router.put("/me/display-preference", authMiddleware, async (ctx: AuthContext) => {
+  try {
+    const body = updateDisplayPreferenceSchema.parse(ctx.request.body || {});
+    const data = await UserService.updateDisplayPreference(
+      ctx.user!.userId,
+      body,
+    );
+    success(ctx, data, "更新显示偏好成功");
+  } catch (err) {
+    if (err instanceof z.ZodError) {
+      error(ctx, err.issues[0]?.message || "参数验证失败", ErrorCodes.PARAM_ERROR, 400);
+      return;
+    }
+    console.error("更新显示偏好失败:", err);
+    error(ctx, err.message || "更新显示偏好失败", ErrorCodes.INTERNAL_ERROR, 500);
   }
 });
 

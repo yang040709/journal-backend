@@ -11,6 +11,7 @@ import { recordFromNoteImages } from "../userImageAsset.service";
 import { MediaReferenceService } from "../mediaReference.service";
 import { ReadingThemeCatalogConfigService } from "../readingThemeCatalogConfig.service";
 import { assertReadingThemeSelectionAllowed } from "../../utils/readingThemeCatalog";
+import { ReadingThemeChangeLogService } from "../readingThemeChangeLog.service";
 import {
   CreateNoteData,
   UpdateNoteData,
@@ -242,28 +243,44 @@ export class NoteCrudService {
       }
     }
 
-    if (data.readingStyleKey !== undefined) {
-      note.readingStyleKey = data.readingStyleKey;
-      if (data.readingStyleKey === null) {
-        note.readingThemeId = null;
-      }
-    }
-
-    if (data.readingThemeId !== undefined) {
-      note.readingThemeId =
-        note.readingStyleKey === null || note.readingStyleKey === undefined
-          ? null
-          : data.readingThemeId;
-    }
-
-    const effectiveStyleKey = note.readingStyleKey;
-    const effectiveThemeId = note.readingThemeId;
     if (data.readingStyleKey !== undefined || data.readingThemeId !== undefined) {
+      const beforeThemeSelection = {
+        readingStyleKey: note.readingStyleKey ?? null,
+        readingThemeId: note.readingThemeId ?? null,
+      };
+
+      if (data.readingStyleKey !== undefined) {
+        note.readingStyleKey = data.readingStyleKey;
+        if (data.readingStyleKey === null) {
+          note.readingThemeId = null;
+        }
+      }
+
+      if (data.readingThemeId !== undefined) {
+        note.readingThemeId =
+          note.readingStyleKey === null || note.readingStyleKey === undefined
+            ? null
+            : data.readingThemeId;
+      }
+
+      const effectiveStyleKey = note.readingStyleKey;
+      const effectiveThemeId = note.readingThemeId;
       const systemCatalog = await ReadingThemeCatalogConfigService.getSystemCatalog();
       assertReadingThemeSelectionAllowed(
         effectiveStyleKey,
         effectiveThemeId,
         systemCatalog,
+      );
+
+      await ReadingThemeChangeLogService.recordChange(
+        userId,
+        "note",
+        beforeThemeSelection,
+        {
+          readingStyleKey: note.readingStyleKey ?? null,
+          readingThemeId: note.readingThemeId ?? null,
+        },
+        String(note._id),
       );
     }
 
