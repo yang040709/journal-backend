@@ -41,6 +41,24 @@ export const CACHE_CONFIG = {
       10,
       7200,
     ),
+    displayPreferenceStatsTtlSeconds: readNumberEnv(
+      "CACHE_ADMIN_DISPLAY_PREFERENCE_STATS_TTL_SECONDS",
+      300,
+      10,
+      7200,
+    ),
+    clientEventStatsTtlSeconds: readNumberEnv(
+      "CACHE_ADMIN_CLIENT_EVENT_STATS_TTL_SECONDS",
+      120,
+      10,
+      7200,
+    ),
+    readingThemeStatsTtlSeconds: readNumberEnv(
+      "CACHE_ADMIN_READING_THEME_STATS_TTL_SECONDS",
+      120,
+      10,
+      7200,
+    ),
   },
 } as const;
 

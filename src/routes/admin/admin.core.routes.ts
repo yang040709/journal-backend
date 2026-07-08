@@ -34,6 +34,10 @@ import { AdminTemplateService } from "../../service/adminTemplate.service";
 import { AdminReminderService } from "../../service/adminReminder.service";
 import { AdminUserCoverService } from "../../service/adminUserCover.service";
 import { AdminStatsService } from "../../service/adminStats.service";
+import { AdminDisplayPreferenceStatsService } from "../../service/adminDisplayPreferenceStats.service";
+import { AdminClientEventStatsService } from "../../service/adminClientEventStats.service";
+import { ClientEventConfigService } from "../../service/clientEventConfig.service";
+import { AdminReadingThemeStatsService } from "../../service/adminReadingThemeStats.service";
 import {
   AdminOperationsReportService,
   MAX_RANGE_DAYS,
@@ -98,6 +102,9 @@ const {
   quotaDailyListQuerySchema,
   aiConsumptionLogListQuerySchema,
   operationsReportQuerySchema,
+  clientEventStatsQuerySchema,
+  clientEventConfigUpdateSchema,
+  readingThemeStatsQuerySchema,
   alertRuleUpdateSchema,
   alertRuleToggleSchema,
   alertEventListQuerySchema,
@@ -228,6 +235,189 @@ router.get(
   requireSuperAdmin(),
   async (ctx) => {
     const data = await AdminStatsService.getOverview();
+    success(ctx, data);
+  },
+);
+
+/**
+ * @openapi
+ * /admin/stats/display-preferences:
+ *   get:
+ *     tags: [adminCore]
+ *     summary: 显示偏好设置统计（仅超级管理员）
+ *     description: 统计各显示偏好项的设置人数、变更次数与选项分布
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       '200':
+ *         description: 成功
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/SuccessObject'
+ *       '401':
+ *         description: 未授权
+ */
+router.get(
+  "/stats/display-preferences",
+  requireSuperAdmin(),
+  async (ctx) => {
+    const data = await AdminDisplayPreferenceStatsService.getReport();
+    success(ctx, data);
+  },
+);
+
+/**
+ * @openapi
+ * /admin/stats/client-events:
+ *   get:
+ *     tags: [adminCore]
+ *     summary: 客户端埋点统计（仅超级管理员）
+ *     description: 按事件类型、action、日期与平台聚合 client_events
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: days
+ *         schema:
+ *           type: integer
+ *           minimum: 1
+ *           maximum: 90
+ *           default: 7
+ *       - in: query
+ *         name: eventName
+ *         schema:
+ *           type: string
+ *     responses:
+ *       '200':
+ *         description: 成功
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/SuccessObject'
+ *       '401':
+ *         description: 未授权
+ */
+router.get(
+  "/stats/client-events",
+  requireSuperAdmin(),
+  async (ctx) => {
+    const q = clientEventStatsQuerySchema.parse(ctx.query);
+    const data = await AdminClientEventStatsService.getReport({
+      days: q.days,
+      eventName: q.eventName,
+    });
+    success(ctx, data);
+  },
+);
+
+/**
+ * @openapi
+ * /admin/client-event-config:
+ *   get:
+ *     tags: [adminCore]
+ *     summary: 客户端埋点开关配置（仅超级管理员）
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       '200':
+ *         description: 成功
+ *       '401':
+ *         description: 未授权
+ */
+router.get(
+  "/client-event-config",
+  requireSuperAdmin(),
+  async (ctx) => {
+    const data = await ClientEventConfigService.getForAdmin();
+    success(ctx, data);
+  },
+);
+
+/**
+ * @openapi
+ * /admin/client-event-config:
+ *   put:
+ *     tags: [adminCore]
+ *     summary: 更新客户端埋点开关配置（仅超级管理员）
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [enabled, events]
+ *             properties:
+ *               enabled:
+ *                 type: boolean
+ *               events:
+ *                 type: object
+ *     responses:
+ *       '200':
+ *         description: 成功
+ *       '400':
+ *         description: 参数错误
+ *       '401':
+ *         description: 未授权
+ */
+router.put(
+  "/client-event-config",
+  requireSuperAdmin(),
+  async (ctx) => {
+    try {
+      const parsed = clientEventConfigUpdateSchema.safeParse(ctx.request.body);
+      if (!parsed.success) {
+        error(ctx, "参数错误", ErrorCodes.PARAM_ERROR, 400);
+        return;
+      }
+      const data = await ClientEventConfigService.setForAdmin(parsed.data);
+      success(ctx, data);
+    } catch (e) {
+      error(
+        ctx,
+        e instanceof Error ? e.message : "更新失败",
+        ErrorCodes.INTERNAL_ERROR,
+        500,
+      );
+    }
+  },
+);
+
+/**
+ * @openapi
+ * /admin/stats/reading-themes:
+ *   get:
+ *     tags: [adminCore]
+ *     summary: 阅读主题使用统计（仅超级管理员）
+ *     description: 统计全局默认分布与阅读主题变更次数、去重用户数
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: days
+ *         schema:
+ *           type: integer
+ *           minimum: 1
+ *           maximum: 90
+ *           default: 30
+ *     responses:
+ *       '200':
+ *         description: 成功
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/SuccessObject'
+ *       '401':
+ *         description: 未授权
+ */
+router.get(
+  "/stats/reading-themes",
+  requireSuperAdmin(),
+  async (ctx) => {
+    const q = readingThemeStatsQuerySchema.parse(ctx.query);
+    const data = await AdminReadingThemeStatsService.getReport({ days: q.days });
     success(ctx, data);
   },
 );
