@@ -17,6 +17,8 @@ export const SYSTEM_CONFIG_BROWSE_BANNERS_KEY = "browse_banners";
 export const SYSTEM_CONFIG_FEEDBACK_QUICK_REPLIES_KEY = "feedback_quick_replies";
 /** C 端阅读主题系统级可见目录（仅 configKey=reading_theme_catalog 使用） */
 export const SYSTEM_CONFIG_READING_THEME_CATALOG_KEY = "reading_theme_catalog";
+/** C 端埋点开关（JSON 存于 clientEventSettings） */
+export const SYSTEM_CONFIG_CLIENT_EVENT_SETTINGS_KEY = "client_event_settings";
 
 /** 上次保存系统 catalog 时的 manifest 快照，用于识别发版新增 theme.id */
 export type ReadingThemeManifestSnapshot = Record<string, string[]>;
@@ -89,6 +91,8 @@ export interface ISystemConfig extends Document {
   readingThemeCatalog?: ReadingThemeCatalog | null;
   /** 与 readingThemeCatalog 配套：保存时的 manifest 快照（策略 A 识别发版新增 id） */
   readingThemeManifestSnapshot?: ReadingThemeManifestSnapshot | null;
+  /** 仅 configKey=client_event_settings 使用：C 端埋点开关 */
+  clientEventSettings?: Record<string, unknown> | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -181,6 +185,9 @@ const systemConfigSchema = new Schema(
       type: Schema.Types.Mixed,
     },
     readingThemeManifestSnapshot: {
+      type: Schema.Types.Mixed,
+    },
+    clientEventSettings: {
       type: Schema.Types.Mixed,
     },
   },

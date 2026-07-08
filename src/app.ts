@@ -23,6 +23,7 @@ import FeedbackRouter from "./routes/feedback.routes";
 import ReviewRouter from "./routes/review.routes";
 import BrowseBannerRouter from "./routes/browseBanner.routes";
 import AnnouncementRouter from "./routes/announcement.routes";
+import EventsRouter from "./routes/events.routes";
 import AdminRouter from "./routes/admin.routes";
 import { adminCorsMiddleware } from "./middlewares/adminCors.middleware";
 import { staticFilesMiddleware } from "./middlewares/staticFiles.middleware";
@@ -112,6 +113,7 @@ app.use(BrowseBannerRouter.routes()).use(BrowseBannerRouter.allowedMethods());
 app.use(AnnouncementRouter.routes()).use(AnnouncementRouter.allowedMethods());
 app.use(UploadRouter.routes()).use(UploadRouter.allowedMethods());
 app.use(PointsRouter.routes()).use(PointsRouter.allowedMethods());
+app.use(EventsRouter.routes()).use(EventsRouter.allowedMethods());
 
 // 注意：404处理现在由 errorMiddleware 自动处理
 // 当没有匹配的路由时，errorMiddleware 会捕获并返回 404 响应
