@@ -27,6 +27,7 @@ import {
 } from "../../utils/response";
 import { AdminAccountService } from "../../service/adminAccount.service";
 import { AdminNoteService } from "../../service/adminNote.service";
+import { AdminNoteTrashService } from "../../service/adminNoteTrash.service";
 import { AdminNoteBookService } from "../../service/adminNoteBook.service";
 import { AdminNotebookMigrationService } from "../../service/adminNotebookMigration.service";
 import { AdminUserService } from "../../service/adminUser.service";
@@ -78,6 +79,7 @@ import { AlertMetricService } from "../../service/alertMetric.service";
 import { AlertRuleService } from "../../service/alertRule.service";
 import AlertEvent from "../../model/AlertEvent";
 import { UserReviewService } from "../../service/userReview.service";
+import { WechatMpNotifyService } from "../../service/wechatMpNotify.service";
 import * as adminSchemas from "./admin.schemas";
 import { ADMIN_EXPORT_LIMIT, daySpanInclusive } from "./admin.shared";
 
@@ -86,6 +88,8 @@ const {
   paginationSchema,
   noteListQuerySchema,
   riskNoteListQuerySchema,
+  trashNoteListQuerySchema,
+  adminRestoreTrashNoteSchema,
   userListQuerySchema,
   userActivityQuerySchema,
   activityListQuerySchema,
@@ -364,6 +368,190 @@ router.get(
 
 /**
  * @openapi
+ * /admin/notes/trash:
+ *   get:
+ *     tags: [adminNotes]
+ *     summary: 废纸篓手帐列表（全站，分页）
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       '200':
+ *         description: 成功
+ */
+router.get(
+  "/notes/trash",
+  requireAdminPage(ADMIN_PAGE_NOTES),
+  async (ctx) => {
+    try {
+      const q = trashNoteListQuerySchema.parse(ctx.query);
+      const { items, total } = await AdminNoteTrashService.listTrashNotes({
+        page: q.page,
+        limit: q.limit,
+        userId: q.userId,
+        noteBookId: q.noteBookId,
+        keyword: q.keyword,
+        deletedStartTime: q.deletedStartTime,
+        deletedEndTime: q.deletedEndTime,
+        includeExpired: q.includeExpired,
+      });
+      paginatedSuccess(ctx, items, total, q.page, q.limit);
+    } catch (e) {
+      error(
+        ctx,
+        e instanceof Error ? e.message : "参数错误",
+        ErrorCodes.PARAM_ERROR,
+      );
+    }
+  },
+);
+
+/**
+ * @openapi
+ * /admin/notes/trash/expired-count:
+ *   get:
+ *     tags: [adminNotes]
+ *     summary: 已过期废纸篓手帐数量（超管）
+ */
+router.get(
+  "/notes/trash/expired-count",
+  requireSuperAdmin(),
+  async (ctx) => {
+    const count = await AdminNoteTrashService.countExpiredTrashNotes();
+    success(ctx, { count });
+  },
+);
+
+/**
+ * @openapi
+ * /admin/notes/trash/purge-expired:
+ *   post:
+ *     tags: [adminNotes]
+ *     summary: 一键永久删除已过期废纸篓手帐（超管）
+ */
+router.post(
+  "/notes/trash/purge-expired",
+  requireSuperAdmin(),
+  async (ctx) => {
+    const result = await AdminNoteTrashService.purgeExpiredTrashNotes();
+    if (result.purged > 0) {
+      void WechatMpNotifyService.notifyHighRiskOp({
+        opType: "废纸篓批量永久删除",
+        operator: ctx.state.admin?.username || "unknown",
+        target: "expired-trash-notes",
+        summary: `已删除 ${result.purged}/${result.total} 条已过期手帐`,
+      });
+    }
+    success(ctx, result, "批量删除完成");
+  },
+);
+
+/**
+ * @openapi
+ * /admin/notes/trash/{id}:
+ *   get:
+ *     tags: [adminNotes]
+ *     summary: 废纸篓手帐详情
+ *     security:
+ *       - bearerAuth: []
+ */
+router.get(
+  "/notes/trash/:id",
+  requireAdminPage(ADMIN_PAGE_NOTES),
+  async (ctx) => {
+    try {
+      const q = trashNoteListQuerySchema
+        .pick({ includeExpired: true })
+        .parse(ctx.query);
+      const note = await AdminNoteTrashService.getTrashNoteById(ctx.params.id, {
+        includeExpired: q.includeExpired,
+      });
+      if (!note) {
+        error(ctx, "手帐不存在", ErrorCodes.NOTE_NOT_FOUND, 404);
+        return;
+      }
+      success(ctx, note);
+    } catch (e) {
+      error(
+        ctx,
+        e instanceof Error ? e.message : "参数错误",
+        ErrorCodes.PARAM_ERROR,
+      );
+    }
+  },
+);
+
+/**
+ * @openapi
+ * /admin/notes/trash/{id}/restore:
+ *   post:
+ *     tags: [adminNotes]
+ *     summary: 从废纸篓恢复手帐
+ *     security:
+ *       - bearerAuth: []
+ */
+router.post(
+  "/notes/trash/:id/restore",
+  requireAdminPage(ADMIN_PAGE_NOTES),
+  async (ctx) => {
+    try {
+      const body = adminRestoreTrashNoteSchema.parse(ctx.request.body || {});
+      const restored = await AdminNoteTrashService.restoreNote(
+        ctx.params.id,
+        body.targetNoteBookId,
+      );
+      if (!restored) {
+        error(ctx, "手帐不存在", ErrorCodes.NOTE_NOT_FOUND, 404);
+        return;
+      }
+      success(ctx, restored, "恢复手帐成功");
+    } catch (e) {
+      if (e instanceof z.ZodError) {
+        error(ctx, "参数验证失败", ErrorCodes.PARAM_ERROR, 400);
+        return;
+      }
+      if (e instanceof Error && e.message === "目标手帐本不存在或已删除") {
+        error(ctx, e.message, ErrorCodes.NOTEBOOK_NOT_FOUND, 404);
+        return;
+      }
+      error(
+        ctx,
+        e instanceof Error ? e.message : "恢复失败",
+        ErrorCodes.PARAM_ERROR,
+      );
+    }
+  },
+);
+
+/**
+ * @openapi
+ * /admin/notes/trash/{id}/purge:
+ *   delete:
+ *     tags: [adminNotes]
+ *     summary: 永久删除废纸篓手帐（超管）
+ *     security:
+ *       - bearerAuth: []
+ */
+router.delete(
+  "/notes/trash/:id/purge",
+  requireSuperAdmin(),
+  async (ctx) => {
+    const result = await AdminNoteTrashService.purgeNote(ctx.params.id);
+    if (!result.ok) {
+      error(ctx, "手帐不存在", ErrorCodes.NOTE_NOT_FOUND, 404);
+      return;
+    }
+    void WechatMpNotifyService.notifyHighRiskOp({
+      opType: "废纸篓永久删除",
+      operator: ctx.state.admin?.username || "unknown",
+      target: `noteId=${ctx.params.id}`,
+      summary: `userId=${result.userId || "—"} · ${result.title || "—"}`,
+    });
+    success(ctx, { deleted: true }, "彻底删除成功");
+  },
+);
+
+/**
+ * @openapi
  * /admin/notes/{id}:
  *   get:
  *     tags: [adminNotes]
@@ -511,12 +699,20 @@ router.delete(
   "/notes/:id",
   requireAdminPage(ADMIN_PAGE_NOTES),
   async (ctx) => {
-    const ok = await AdminNoteService.deleteNote(ctx.params.id);
-    if (!ok) {
-      error(ctx, "手帐不存在", ErrorCodes.NOTE_NOT_FOUND, 404);
-      return;
+    try {
+      const ok = await AdminNoteService.deleteNote(ctx.params.id);
+      if (!ok) {
+        error(ctx, "手帐不存在", ErrorCodes.NOTE_NOT_FOUND, 404);
+        return;
+      }
+      success(ctx, { deleted: true });
+    } catch (e) {
+      error(
+        ctx,
+        e instanceof Error ? e.message : "删除失败",
+        ErrorCodes.PARAM_ERROR,
+      );
     }
-    success(ctx, { deleted: true });
   },
 );
 

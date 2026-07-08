@@ -179,6 +179,7 @@ export class AdminNoteService {
       : params;
     const query: Record<string, unknown> = {
       ...buildAdminNoteListQuery(queryParams),
+      isDeleted: { $ne: true },
     };
     if (textQ) {
       query.$text = { $search: textQ };
@@ -346,7 +347,7 @@ export class AdminNoteService {
   }
 
   static async getNoteById(id: string): Promise<AdminNoteListItem | null> {
-    const note = await Note.findById(id).lean();
+    const note = await Note.findOne({ _id: id, isDeleted: { $ne: true } }).lean();
     if (!note) {
       return null;
     }
@@ -410,6 +411,9 @@ export class AdminNoteService {
     const note = await Note.findById(id);
     if (!note) {
       return null;
+    }
+    if (note.isDeleted) {
+      throw new Error("手帐已在废纸篓，请使用废纸篓巡查恢复或永久删除");
     }
 
     const prevIsShare = note.isShare;
@@ -520,6 +524,9 @@ export class AdminNoteService {
     const note = await Note.findById(id);
     if (!note) {
       return false;
+    }
+    if (note.isDeleted) {
+      throw new Error("手帐已在废纸篓，请使用废纸篓巡查永久删除");
     }
     await Note.deleteOne({ _id: id });
     await NoteBook.updateOne(

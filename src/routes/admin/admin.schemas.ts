@@ -1,4 +1,7 @@
 import { z } from "zod";
+import { CLIENT_EVENT_NAMES } from "../../constant/clientEvent";
+import { MAX_CLIENT_EVENT_STATS_DAYS } from "../../service/adminClientEventStats.service";
+import { MAX_READING_THEME_STATS_DAYS } from "../../service/adminReadingThemeStats.service";
 import { MAX_RANGE_DAYS } from "../../service/adminOperationsReport.service";
 import { MAX_INITIAL_NOTEBOOK_TEMPLATES } from "../../service/initialUserNotebookConfig.service";
 import { optionalNoteImagesSchema } from "../../schemas/noteImage.schema";
@@ -83,6 +86,24 @@ export const riskNoteListQuerySchema = z.object({
   path: ["page"],
 });
 
+export const trashNoteListQuerySchema = z.object({
+  page: z.coerce.number().int().positive().optional().default(1),
+  limit: z.coerce.number().int().min(1).max(100).optional().default(20),
+  userId: z.string().optional(),
+  noteBookId: z.string().optional(),
+  keyword: optionalKeywordSchema(100),
+  deletedStartTime: z.coerce.number().optional(),
+  deletedEndTime: z.coerce.number().optional(),
+  includeExpired: booleanQueryParam,
+}).refine((val) => val.page * val.limit <= MAX_PAGE_DEPTH, {
+  message: `分页深度超过限制（page*limit <= ${MAX_PAGE_DEPTH}）`,
+  path: ["page"],
+});
+
+export const adminRestoreTrashNoteSchema = z.object({
+  targetNoteBookId: z.string().optional(),
+});
+
 export const userListQuerySchema = z.object({
   page: z.coerce.number().int().positive().optional().default(1),
   limit: z.coerce.number().int().min(1).max(100).optional().default(20),
@@ -118,14 +139,30 @@ export const userActivityQuerySchema = z.object({
   path: ["page"],
 });
 
+const activityUserIdQueryPreprocess = z.preprocess((v) => {
+  if (v === undefined || v === null || v === "") return undefined;
+  const s = String(v).trim();
+  return s.length ? s : undefined;
+}, z.string().max(128).optional());
+
 /** 全站 Activity 分页；可选 userId 为业务用户 id（与 Activity.userId 一致） */
 export const activityListQuerySchema = userActivityQuerySchema.safeExtend({
-  userId: z.preprocess((v) => {
-    if (v === undefined || v === null || v === "") return undefined;
-    const s = String(v).trim();
-    return s.length ? s : undefined;
-  }, z.string().max(128).optional()),
+  userId: activityUserIdQueryPreprocess,
 });
+
+/** 全站 Activity 类型聚合摘要；days 仅支持 7 或 30 */
+export const activitySummaryQuerySchema = z
+  .object({
+    days: z.coerce.number().int().min(1).max(90).optional().default(7),
+    userId: activityUserIdQueryPreprocess,
+    target: z
+      .enum(["noteBook", "note", "reminder", "template", "cover", "user"])
+      .optional(),
+  })
+  .refine((val) => val.days === 7 || val.days === 30, {
+    message: "days 仅支持 7 或 30",
+    path: ["days"],
+  });
 
 export const quotaDailyListQuerySchema = z.object({
   page: z.coerce.number().int().positive().optional().default(1),
@@ -170,6 +207,40 @@ export const operationsReportQuerySchema = z.object({
 }).refine((val) => daySpanInclusive(val.startDate, val.endDate) <= MAX_RANGE_DAYS, {
   message: `时间跨度不能超过 ${MAX_RANGE_DAYS} 天`,
   path: ["endDate"],
+});
+
+export const clientEventStatsQuerySchema = z.object({
+  days: z.coerce
+    .number()
+    .int()
+    .min(1)
+    .max(MAX_CLIENT_EVENT_STATS_DAYS)
+    .optional()
+    .default(7),
+  eventName: z
+    .enum(CLIENT_EVENT_NAMES)
+    .optional(),
+});
+
+const clientEventConfigEventsSchema = z.object(
+  Object.fromEntries(
+    CLIENT_EVENT_NAMES.map((name) => [name, z.boolean()]),
+  ) as Record<(typeof CLIENT_EVENT_NAMES)[number], z.ZodBoolean>,
+);
+
+export const clientEventConfigUpdateSchema = z.object({
+  enabled: z.boolean(),
+  events: clientEventConfigEventsSchema,
+});
+
+export const readingThemeStatsQuerySchema = z.object({
+  days: z.coerce
+    .number()
+    .int()
+    .min(1)
+    .max(MAX_READING_THEME_STATS_DAYS)
+    .optional()
+    .default(30),
 });
 
 export const alertRuleUpdateSchema = z.object({
