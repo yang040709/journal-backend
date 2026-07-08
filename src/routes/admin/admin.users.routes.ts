@@ -89,6 +89,7 @@ const {
   userListQuerySchema,
   userActivityQuerySchema,
   activityListQuerySchema,
+  activitySummaryQuerySchema,
   quotaDailyListQuerySchema,
   aiConsumptionLogListQuerySchema,
   operationsReportQuerySchema,
@@ -209,6 +210,76 @@ router.get(
         e instanceof Error ? e.message : "参数错误",
         ErrorCodes.PARAM_ERROR,
       );
+    }
+  },
+);
+
+/**
+ * GET /admin/activity/summary
+ * 全站 Activity 类型聚合摘要（create/update/delete）；可选 query：userId、target、days（7|30）
+ */
+/**
+ * @openapi
+ * /admin/activity/summary:
+ *   get:
+ *     tags: [adminUsers]
+ *     summary: 全站活动类型聚合摘要
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: days
+ *         schema:
+ *           type: integer
+ *           enum: [7, 30]
+ *           default: 7
+ *       - in: query
+ *         name: userId
+ *         schema:
+ *           type: string
+ *       - in: query
+ *         name: target
+ *         schema:
+ *           type: string
+ *     responses:
+ *       '200':
+ *         description: 成功
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/SuccessObject'
+ *       '400':
+ *         description: 参数错误
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ *       '401':
+ *         description: 未授权
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ */
+router.get(
+  "/activity/summary",
+  requireAdminPage(ADMIN_PAGE_USERS),
+  async (ctx) => {
+    try {
+      const q = activitySummaryQuerySchema.parse(ctx.query);
+      const data = await AdminUserService.getActivityTypeSummary({
+        days: q.days as 7 | 30,
+        userId: q.userId,
+        target: q.target,
+      });
+      success(ctx, data, "获取活动类型摘要成功");
+    } catch (e) {
+      if (e instanceof z.ZodError) {
+        error(ctx, "参数验证失败", ErrorCodes.PARAM_ERROR, 400);
+        return;
+      }
+      console.error("admin /activity/summary:", e);
+      error(ctx, "获取活动类型摘要失败", ErrorCodes.INTERNAL_ERROR, 500);
     }
   },
 );

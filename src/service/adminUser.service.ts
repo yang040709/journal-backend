@@ -330,7 +330,57 @@ export class AdminUserService {
     };
   }
 
-  /** 管理端分页查询全站 Activity；可选按业务 userId / type / target 缩小范围 */
+  /** 管理端 Activity 类型聚合摘要（create/update/delete） */
+  static async getActivityTypeSummary(params: {
+    days: 7 | 30;
+    userId?: string;
+    target?: IActivity["target"];
+  }): Promise<{
+    days: 7 | 30;
+    rangeStart: string;
+    rangeEnd: string;
+    counts: { create: number; update: number; delete: number };
+    total: number;
+  }> {
+    const days = params.days === 30 ? 30 : 7;
+    const rangeEnd = new Date();
+    const rangeStart = new Date(rangeEnd.getTime() - days * 24 * 60 * 60 * 1000);
+
+    const match: Record<string, unknown> = {
+      createdAt: { $gte: rangeStart, $lte: rangeEnd },
+      type: { $in: ["create", "update", "delete"] },
+    };
+    const uid = params.userId?.trim();
+    if (uid) {
+      match.userId = uid;
+    }
+    if (params.target) {
+      match.target = params.target;
+    }
+
+    const rows = await Activity.aggregate<{ _id: string; count: number }>([
+      { $match: match },
+      { $group: { _id: "$type", count: { $sum: 1 } } },
+    ]);
+
+    const counts = { create: 0, update: 0, delete: 0 };
+    for (const row of rows) {
+      if (row._id === "create" || row._id === "update" || row._id === "delete") {
+        counts[row._id] = Math.max(0, Math.floor(Number(row.count || 0)));
+      }
+    }
+    const total = counts.create + counts.update + counts.delete;
+
+    return {
+      days,
+      rangeStart: rangeStart.toISOString(),
+      rangeEnd: rangeEnd.toISOString(),
+      counts,
+      total,
+    };
+  }
+
+  /** 管理端分页查询全站 Activity；可选按 business userId / type / target 缩小范围 */
   static async listAllActivities(params: {
     page: number;
     limit: number;
