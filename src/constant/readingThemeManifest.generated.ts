@@ -4,7 +4,7 @@
 //   cd backend; pnpm generated:reading-theme-manifest
 // Drift check runs automatically only before `cd backend; pnpm test` (pretest).
 
-export const READING_STYLE_KEYS = ["journal", "minimalNordic", "vintageJournal", "watercolorSketch", "dreamyCinematic", "productMemo"] as const;
+export const READING_STYLE_KEYS = ["journal", "minimalNordic", "vintageJournal", "watercolorSketch", "dreamyCinematic", "productMemo", "filmTravel"] as const;
 
 export type GeneratedReadingStyleKey = (typeof READING_STYLE_KEYS)[number];
 
@@ -16,6 +16,7 @@ export const READING_STYLE_LABELS: Record<string, string> = {
   watercolorSketch: "手绘水彩风",
   dreamyCinematic: "梦境电影风",
   productMemo: "清简备忘风",
+  filmTravel: "胶片旅行风",
 };
 
 /** journal 风格主题色 id（与 client color-presets.js 同源） */
@@ -29,12 +30,17 @@ export const THEME_IDS_BY_STYLE: Record<string, readonly string[]> = {
   watercolorSketch: ["watercolor-mistSage", "watercolor-grassland", "watercolor-ashLavender", "watercolor-peachCloud", "watercolor-skyPowder"],
   dreamyCinematic: ["mistBlueStory", "dustyRoseCinema", "pearlBlueCinema", "lilacHazeCinema", "cinematic-creamLilac"],
   productMemo: ["memo-ivory", "memo-ice", "memo-oatLatte", "memo-mintCream", "memo-charcoal"],
+  filmTravel: ["film-default", "film-golden", "film-mintTrail", "film-sakuraPass"],
 };
 
 /** theme.id → 展示元数据（与 client preset 发版同步） */
 export const THEME_DISPLAY_META: Record<string, { name: string; backgroundColor: string; cardColor: string }> = {
   "cinematic-creamLilac": { name: "暮光奶油", backgroundColor: "#F0E4D0", cardColor: "#FFFBF5" },
   dustyRoseCinema: { name: "灰粉幕间", backgroundColor: "#ECD8DC", cardColor: "#FFF8FA" },
+  "film-default": { name: "银盐胶片", backgroundColor: "#F6F1E8", cardColor: "#FFFCF6" },
+  "film-golden": { name: "日落金调", backgroundColor: "#F2E8D6", cardColor: "#FFFBF2" },
+  "film-mintTrail": { name: "薄荷旅途", backgroundColor: "#DDECE4", cardColor: "#F4FFF9" },
+  "film-sakuraPass": { name: "暮樱印记", backgroundColor: "#EDE0E6", cardColor: "#FFF8FA" },
   journal_morning_milk: { name: "晨雾暖白", backgroundColor: "#EDE8DF", cardColor: "#FFFDF9" },
   lilacHazeCinema: { name: "丁香晨霭", backgroundColor: "#DCD4E8", cardColor: "#FEFAFF" },
   mandy_blue: { name: "静雾蓝", backgroundColor: "#C8D4DC", cardColor: "#EDF2F5" },

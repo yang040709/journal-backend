@@ -380,8 +380,24 @@ export class UserService {
       throw new Error("用户不存在");
     }
 
-    const systemReadingThemeCatalog =
-      await ReadingThemeCatalogConfigService.getSystemCatalog();
+    const { catalog: systemReadingThemeCatalog, snapshot: systemManifestSnapshot } =
+      await ReadingThemeCatalogConfigService.getSystemCatalogWithSnapshot();
+
+    const { catalog: migratedReadingThemeCatalog, changed: readingThemeCatalogChanged } =
+      await ReadingThemeCatalogConfigService.migrateUserReadingThemeCatalog(
+        user.readingThemeCatalog,
+        systemReadingThemeCatalog,
+        systemManifestSnapshot,
+      );
+
+    if (readingThemeCatalogChanged && migratedReadingThemeCatalog) {
+      await User.updateOne(
+        { userId },
+        { $set: { readingThemeCatalog: migratedReadingThemeCatalog } },
+      );
+    }
+
+    const readingThemeFields = UserService.parseReadingThemeFields(user);
 
     return {
       userId: user.userId,
@@ -391,7 +407,9 @@ export class UserService {
       avatarUrl: String((user as any).avatarUrl || "").trim(),
       bio: String((user as any).bio || "").trim() || "手帐记录生活点滴",
       membershipText: String((user as any).membershipText || "").trim(),
-      ...UserService.parseReadingThemeFields(user),
+      ...readingThemeFields,
+      readingThemeCatalog:
+        migratedReadingThemeCatalog ?? readingThemeFields.readingThemeCatalog,
       systemReadingThemeCatalog,
       displayPrefs: UserService.parseDisplayPrefsFields(user),
     };

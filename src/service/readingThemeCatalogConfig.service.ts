@@ -11,6 +11,8 @@ import {
   buildDefaultReadingThemeCatalog,
   mergeSystemCatalogWithManifest,
   parseReadingThemeCatalogFromUser,
+  appendNewManifestStylesToUserCatalog,
+  readingThemeCatalogsEqual,
   validateReadingThemeCatalogInput,
   type ReadingThemeCatalog,
 } from "../utils/readingThemeCatalog";
@@ -77,22 +79,114 @@ export class ReadingThemeCatalogConfigService {
     );
   }
 
+  private static snapshotNeedsManifestSync(
+    snapshot: Record<string, readonly string[]> | null,
+    manifestIds: Record<string, readonly string[]>,
+  ): boolean {
+    if (!snapshot) return true;
+    for (const styleKey of Object.keys(manifestIds)) {
+      if (!Object.prototype.hasOwnProperty.call(snapshot, styleKey)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  private static async persistSystemCatalogIfNeeded(
+    stored: ReadingThemeCatalog | null,
+    merged: ReadingThemeCatalog,
+    snapshot: Record<string, readonly string[]> | null,
+    manifestIds: Record<string, readonly string[]>,
+  ): Promise<ReadingThemeCatalog> {
+    const catalogChanged = !readingThemeCatalogsEqual(stored, merged);
+    const snapshotNeedsSync =
+      ReadingThemeCatalogConfigService.snapshotNeedsManifestSync(snapshot, manifestIds);
+
+    if (!catalogChanged && !snapshotNeedsSync) {
+      return merged;
+    }
+
+    await SystemConfig.findOneAndUpdate(
+      { configKey: SYSTEM_CONFIG_READING_THEME_CATALOG_KEY },
+      {
+        $set: {
+          readingThemeCatalog: merged,
+          readingThemeManifestSnapshot: manifestIds,
+        },
+      },
+    );
+
+    return merged;
+  }
+
   static async getSystemCatalog(): Promise<ReadingThemeCatalog> {
+    const { catalog } = await ReadingThemeCatalogConfigService.getSystemCatalogWithSnapshot();
+    return catalog;
+  }
+
+  static async getSystemCatalogWithSnapshot(): Promise<{
+    catalog: ReadingThemeCatalog;
+    snapshot: Record<string, readonly string[]> | null;
+  }> {
     const doc = await ReadingThemeCatalogConfigService.loadConfigDoc();
-    return ReadingThemeCatalogConfigService.buildMergedCatalog(
-      doc?.readingThemeCatalog,
+    const stored = parseReadingThemeCatalogFromUser(doc?.readingThemeCatalog);
+    const snapshot = ReadingThemeCatalogConfigService.parseManifestSnapshot(
+      doc?.readingThemeManifestSnapshot,
+    );
+    const manifestIds = getManifestThemeIdsByStyle();
+    const merged = mergeSystemCatalogWithManifest(stored, manifestIds, snapshot);
+    const catalog = await ReadingThemeCatalogConfigService.persistSystemCatalogIfNeeded(
+      stored,
+      merged,
+      snapshot,
+      manifestIds,
+    );
+
+    return {
+      catalog,
+      snapshot,
+    };
+  }
+
+  static async getManifestSnapshot(): Promise<Record<string, readonly string[]> | null> {
+    const doc = await ReadingThemeCatalogConfigService.loadConfigDoc();
+    return ReadingThemeCatalogConfigService.parseManifestSnapshot(
       doc?.readingThemeManifestSnapshot,
     );
   }
 
-  static async getForAdmin(): Promise<AdminReadingThemeCatalogResponse> {
-    const doc = await ReadingThemeCatalogConfigService.loadConfigDoc();
+  static async migrateUserReadingThemeCatalog(
+    userCatalogRaw: unknown,
+    systemCatalog: ReadingThemeCatalog,
+    manifestSnapshotByStyle?: Record<string, readonly string[]> | null,
+  ): Promise<{ catalog: ReadingThemeCatalog | null; changed: boolean }> {
+    const snapshot =
+      manifestSnapshotByStyle !== undefined
+        ? manifestSnapshotByStyle
+        : await ReadingThemeCatalogConfigService.getManifestSnapshot();
+    const userCatalog = parseReadingThemeCatalogFromUser(userCatalogRaw);
+    const migrated = appendNewManifestStylesToUserCatalog(
+      userCatalog,
+      systemCatalog,
+      snapshot,
+    );
+
+    if (!migrated) {
+      return { catalog: null, changed: false };
+    }
 
     return {
-      catalog: ReadingThemeCatalogConfigService.buildMergedCatalog(
-        doc?.readingThemeCatalog,
-        doc?.readingThemeManifestSnapshot,
-      ),
+      catalog: migrated,
+      changed: !readingThemeCatalogsEqual(userCatalog, migrated),
+    };
+  }
+
+  static async getForAdmin(): Promise<AdminReadingThemeCatalogResponse> {
+    const doc = await ReadingThemeCatalogConfigService.loadConfigDoc();
+    const catalog = await ReadingThemeCatalogConfigService.getSystemCatalog();
+
+    return {
+      catalog,
       manifest: buildReadingThemeManifest(),
       updatedAt: doc?.updatedAt ? new Date(doc.updatedAt).toISOString() : null,
     };

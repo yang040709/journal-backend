@@ -83,36 +83,40 @@ function normalizeThemeIdsByStyle(
 }
 
 /**
- * 策略 A：将 manifest 中**发版后新增**的 theme id 追加到已存系统 catalog 可见列表末尾；
- * 运营已隐藏（快照中已有但 stored 未含）的 id 不会恢复。
+ * 策略 A：将 manifest 中**发版后新增**的 theme id / 风格 key 追加到已存系统 catalog 可见列表末尾；
+ * 运营已隐藏（快照中已有但 stored 未含）的项不会恢复。
  */
 export function mergeSystemCatalogWithManifest(
   stored: ReadingThemeCatalog | null | undefined,
   manifestIdsByStyle: Record<string, readonly string[]> = getManifestThemeIdsByStyle(),
   manifestSnapshotByStyle: Record<string, readonly string[]> | null | undefined = null,
 ): ReadingThemeCatalog {
-  const base = stored
-    ? {
-        styleKeys: [...stored.styleKeys],
-        themeIdsByStyle: { ...stored.themeIdsByStyle },
-      }
-    : buildDefaultReadingThemeCatalog();
+  if (!stored) {
+    return buildDefaultReadingThemeCatalog();
+  }
+
+  const base = {
+    styleKeys: [...stored.styleKeys],
+    themeIdsByStyle: { ...stored.themeIdsByStyle },
+  };
 
   const normalizedStyles = normalizeStyleKeys(base.styleKeys);
   const styleKeys: (string | null)[] = normalizedStyles.includes(null)
-    ? normalizedStyles
+    ? [...normalizedStyles]
     : [null, ...normalizedStyles];
 
-  const visibleStyles = styleKeys.filter((key): key is string => key !== null);
   const themeIdsByStyle: Record<string, string[]> = {};
-  const snapshot =
-    manifestSnapshotByStyle ??
-    manifestIdsByStyle;
+  const hasPersistedSnapshot = manifestSnapshotByStyle != null;
+  const themeSnapshot = manifestSnapshotByStyle ?? manifestIdsByStyle;
+  const styleSnapshot = hasPersistedSnapshot ? manifestSnapshotByStyle! : {};
+
+  const visibleStyles = styleKeys.filter((key): key is string => key !== null);
+  const storedVisibleSet = new Set(visibleStyles);
 
   for (const styleKey of visibleStyles) {
     const manifestIds = [...(manifestIdsByStyle[styleKey] || [])];
     const manifestSet = new Set(manifestIds);
-    const snapshotSet = new Set(snapshot[styleKey] || []);
+    const snapshotSet = new Set(themeSnapshot[styleKey] || []);
     const storedIds = normalizeThemeIdsByStyle(
       { [styleKey]: base.themeIdsByStyle[styleKey] || [] },
       manifestIdsByStyle,
@@ -137,8 +141,100 @@ export function mergeSystemCatalogWithManifest(
     themeIdsByStyle[styleKey] = merged.length > 0 ? merged : [...manifestIds];
   }
 
+  for (const styleKey of READING_STYLE_KEYS) {
+    if (storedVisibleSet.has(styleKey)) continue;
+    const manifestIds = manifestIdsByStyle[styleKey];
+    if (!manifestIds?.length) continue;
+
+    if (
+      hasPersistedSnapshot &&
+      Object.prototype.hasOwnProperty.call(styleSnapshot, styleKey)
+    ) {
+      continue;
+    }
+
+    styleKeys.push(styleKey);
+    storedVisibleSet.add(styleKey);
+    themeIdsByStyle[styleKey] = [...manifestIds];
+  }
+
   return { styleKeys, themeIdsByStyle };
 }
+
+function readingThemeCatalogsEqual(
+  left: ReadingThemeCatalog | null | undefined,
+  right: ReadingThemeCatalog | null | undefined,
+): boolean {
+  return JSON.stringify(left ?? null) === JSON.stringify(right ?? null);
+}
+
+/**
+ * 将 manifest 新增的阅读风格默认并入用户 catalog（不覆盖用户已隐藏的旧风格）。
+ */
+export function appendNewManifestStylesToUserCatalog(
+  userCatalog: ReadingThemeCatalog | null | undefined,
+  systemCatalog: ReadingThemeCatalog,
+  manifestSnapshotByStyle: Record<string, readonly string[]> | null | undefined,
+): ReadingThemeCatalog | null {
+  if (!userCatalog) return null;
+
+  const hasPersistedSnapshot = manifestSnapshotByStyle != null;
+  const styleSnapshot = hasPersistedSnapshot ? manifestSnapshotByStyle! : {};
+
+  const styleKeys = normalizeStyleKeys(userCatalog.styleKeys);
+  const normalizedStyleKeys: (string | null)[] = styleKeys.includes(null)
+    ? [...styleKeys]
+    : [null, ...styleKeys];
+  const themeIdsByStyle = normalizeThemeIdsByStyle(
+    userCatalog.themeIdsByStyle,
+    getManifestThemeIdsByStyle(),
+  );
+  const userStyleSet = new Set(
+    normalizedStyleKeys.filter((key): key is string => key !== null),
+  );
+
+  for (const styleKey of systemCatalog.styleKeys) {
+    if (!styleKey || userStyleSet.has(styleKey)) continue;
+
+    if (
+      hasPersistedSnapshot &&
+      Object.prototype.hasOwnProperty.call(styleSnapshot, styleKey)
+    ) {
+      continue;
+    }
+
+    normalizedStyleKeys.push(styleKey);
+    userStyleSet.add(styleKey);
+    themeIdsByStyle[styleKey] = [...(systemCatalog.themeIdsByStyle[styleKey] || [])];
+  }
+
+  const themeSnapshot = manifestSnapshotByStyle ?? getManifestThemeIdsByStyle();
+
+  for (const styleKey of normalizedStyleKeys) {
+    if (!styleKey || !userStyleSet.has(styleKey)) continue;
+
+    const systemIds = systemCatalog.themeIdsByStyle[styleKey] || [];
+    const snapshotSet = new Set(themeSnapshot[styleKey] || []);
+    const currentIds = themeIdsByStyle[styleKey] || [];
+    const merged = [...currentIds];
+    const seen = new Set(currentIds);
+
+    for (const id of systemIds) {
+      if (seen.has(id)) continue;
+      if (snapshotSet.has(id)) continue;
+      seen.add(id);
+      merged.push(id);
+    }
+
+    if (merged.length !== currentIds.length) {
+      themeIdsByStyle[styleKey] = merged;
+    }
+  }
+
+  return { styleKeys: normalizedStyleKeys, themeIdsByStyle };
+}
+
+export { readingThemeCatalogsEqual };
 
 export function parseReadingThemeCatalogFromUser(
   raw: unknown,

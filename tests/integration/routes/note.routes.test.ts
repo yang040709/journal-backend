@@ -369,18 +369,30 @@ describe("integration: /notes", () => {
     expect(res.body.code).toBe(ErrorCodes.PARAM_ERROR);
   });
 
-  it("PUT /notes/:id 导出专用 readingStyleKey 返回 400", async () => {
+  it("PUT /notes/:id 可写入 filmTravel readingStyleKey 并回读", async () => {
     const { token, userId } = await createAuthUser();
     const book = await seedNoteBook(userId);
     const note = await seedNote({ userId, noteBookId: book.id });
 
-    const res = await agent
+    const putRes = await agent
       .put(`/notes/${note.id}`)
       .set(authHeader(token))
-      .send({ readingStyleKey: "filmTravel" })
-      .expect(400);
+      .send({
+        readingStyleKey: "filmTravel",
+        readingThemeId: "film-default",
+      })
+      .expect(200);
 
-    expect(res.body.code).toBe(ErrorCodes.PARAM_ERROR);
+    expect(putRes.body.data.readingStyleKey).toBe("filmTravel");
+    expect(putRes.body.data.readingThemeId).toBe("film-default");
+
+    const getRes = await agent
+      .get(`/notes/${note.id}`)
+      .set(authHeader(token))
+      .expect(200);
+
+    expect(getRes.body.data.readingStyleKey).toBe("filmTravel");
+    expect(getRes.body.data.readingThemeId).toBe("film-default");
   });
 
   it("PUT /notes/:id 可写入 readingThemeId 并回读", async () => {

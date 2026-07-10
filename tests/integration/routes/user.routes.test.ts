@@ -185,10 +185,26 @@ describe("integration: /auth", () => {
     const res = await agent
       .put("/auth/me/reading-theme")
       .set(authHeader(token))
-      .send({ defaultReadingStyleKey: "filmTravel" })
+      .send({ defaultReadingStyleKey: "invalid-style" })
       .expect(400);
 
     expect(res.body.code).toBe(ErrorCodes.PARAM_ERROR);
+  });
+
+  it("PUT /auth/me/reading-theme 可写入 filmTravel 全局默认", async () => {
+    const { token } = await createAuthUser({ userId: "reading-theme-film-travel" });
+
+    const res = await agent
+      .put("/auth/me/reading-theme")
+      .set(authHeader(token))
+      .send({
+        defaultReadingStyleKey: "filmTravel",
+        defaultReadingThemeId: "film-default",
+      })
+      .expect(200);
+
+    expect(res.body.data.defaultReadingStyleKey).toBe("filmTravel");
+    expect(res.body.data.defaultReadingThemeId).toBe("film-default");
   });
 
   it("GET /auth/me-profile 返回 readingThemeCatalog 默认为 null", async () => {
