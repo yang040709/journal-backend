@@ -37,7 +37,7 @@ export const THEME_IDS_BY_STYLE: Record<string, readonly string[]> = {
 export const THEME_DISPLAY_META: Record<string, { name: string; backgroundColor: string; cardColor: string }> = {
   "cinematic-creamLilac": { name: "暮光奶油", backgroundColor: "#F0E4D0", cardColor: "#FFFBF5" },
   dustyRoseCinema: { name: "灰粉幕间", backgroundColor: "#ECD8DC", cardColor: "#FFF8FA" },
-  "film-default": { name: "银盐胶片", backgroundColor: "#F6F1E8", cardColor: "#FFFCF6" },
+  "film-default": { name: "银盐胶片", backgroundColor: "#C8D2DC", cardColor: "#FAFBFC" },
   "film-golden": { name: "日落金调", backgroundColor: "#F2E8D6", cardColor: "#FFFBF2" },
   "film-mintTrail": { name: "薄荷旅途", backgroundColor: "#DDECE4", cardColor: "#F4FFF9" },
   "film-sakuraPass": { name: "暮樱印记", backgroundColor: "#EDE0E6", cardColor: "#FFF8FA" },
