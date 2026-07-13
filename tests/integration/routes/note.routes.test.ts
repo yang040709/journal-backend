@@ -12,6 +12,7 @@ import { clearTestDb, connectTestDb } from "../../helpers/db";
 import { seedNote } from "../../helpers/seed/note.seed";
 import { seedNoteBook } from "../../helpers/seed/notebook.seed";
 import Note from "../../../src/model/Note";
+import NoteBook from "../../../src/model/NoteBook";
 import { ErrorCodes } from "../../../src/utils/response";
 import { buildDefaultReadingThemeCatalog } from "../../../src/utils/readingThemeCatalog";
 
@@ -498,5 +499,131 @@ describe("integration: /notes", () => {
       .expect(400);
 
     expect(res.body.code).toBe(ErrorCodes.PARAM_ERROR);
+  });
+
+  describe("手帐活动刷新所属手帐本 updatedAt", () => {
+    it("POST /notes 创建手帐后刷新手帐本 updatedAt 并增加 count", async () => {
+      const { token, userId } = await createAuthUser();
+      const book = await seedNoteBook(userId);
+      const past = new Date("2020-01-15T08:00:00.000Z");
+
+      await NoteBook.updateOne(
+        { _id: book.id },
+        { $set: { updatedAt: past, count: 0 } },
+        { timestamps: false },
+      );
+
+      await agent
+        .post("/notes")
+        .set(authHeader(token))
+        .send({
+          noteBookId: book.id,
+          title: "今日心情",
+          content: "阳光很好",
+          tags: [],
+        })
+        .expect(200);
+
+      const refreshed = await NoteBook.findById(book.id).lean();
+      expect(refreshed?.count).toBe(1);
+      expect(refreshed?.updatedAt?.getTime()).toBeGreaterThan(past.getTime());
+    });
+
+    it("PUT /notes/:id 编辑内容后刷新手帐本 updatedAt", async () => {
+      const { token, userId } = await createAuthUser();
+      const book = await seedNoteBook(userId);
+      const past = new Date("2020-01-15T08:00:00.000Z");
+      const note = await seedNote({ userId, noteBookId: book.id, title: "原标题" });
+
+      await NoteBook.updateOne(
+        { _id: book.id },
+        { $set: { updatedAt: past } },
+        { timestamps: false },
+      );
+
+      await agent
+        .put(`/notes/${note.id}`)
+        .set(authHeader(token))
+        .send({ content: "更新后的正文" })
+        .expect(200);
+
+      const refreshed = await NoteBook.findById(book.id).lean();
+      expect(refreshed?.updatedAt?.getTime()).toBeGreaterThan(past.getTime());
+    });
+
+    it("PUT /notes/:id 仅置顶不刷新手帐本 updatedAt", async () => {
+      const { token, userId } = await createAuthUser();
+      const book = await seedNoteBook(userId);
+      const past = new Date("2020-01-15T08:00:00.000Z");
+      const note = await seedNote({ userId, noteBookId: book.id });
+
+      await NoteBook.updateOne(
+        { _id: book.id },
+        { $set: { updatedAt: past } },
+        { timestamps: false },
+      );
+
+      await agent
+        .put(`/notes/${note.id}`)
+        .set(authHeader(token))
+        .send({ isPinned: true })
+        .expect(200);
+
+      const refreshed = await NoteBook.findById(book.id).lean();
+      expect(refreshed?.updatedAt?.toISOString()).toBe(past.toISOString());
+    });
+
+    it("PUT /notes/:id 换本后目标手帐本 updatedAt 新于源手帐本", async () => {
+      const { token, userId } = await createAuthUser();
+      const sourceBook = await seedNoteBook(userId, "源本");
+      const targetBook = await seedNoteBook(userId, "目标本");
+      const past = new Date("2020-01-15T08:00:00.000Z");
+      const note = await seedNote({ userId, noteBookId: sourceBook.id });
+
+      await NoteBook.updateMany(
+        { _id: { $in: [sourceBook.id, targetBook.id] } },
+        { $set: { updatedAt: past, count: 1 } },
+        { timestamps: false },
+      );
+      await NoteBook.updateOne(
+        { _id: targetBook.id },
+        { $set: { count: 0 } },
+        { timestamps: false },
+      );
+
+      await agent
+        .put(`/notes/${note.id}`)
+        .set(authHeader(token))
+        .send({ noteBookId: targetBook.id })
+        .expect(200);
+
+      const source = await NoteBook.findById(sourceBook.id).lean();
+      const target = await NoteBook.findById(targetBook.id).lean();
+      expect(source?.count).toBe(0);
+      expect(target?.count).toBe(1);
+      expect(source?.updatedAt?.getTime()).toBeGreaterThan(past.getTime());
+      expect(target?.updatedAt?.getTime()).toBeGreaterThan(
+        source?.updatedAt?.getTime() || 0,
+      );
+    });
+
+    it("DELETE /notes/:id 软删后刷新手帐本 updatedAt 并减少 count", async () => {
+      const { token, userId } = await createAuthUser();
+      const book = await seedNoteBook(userId);
+      const past = new Date("2020-01-15T08:00:00.000Z");
+      const note = await seedNote({ userId, noteBookId: book.id });
+
+      await NoteBook.updateOne(
+        { _id: book.id },
+        { $set: { updatedAt: past, count: 1 } },
+        { timestamps: false },
+      );
+
+      await agent.delete(`/notes/${note.id}`).set(authHeader(token)).expect(200);
+
+      const refreshed = await NoteBook.findById(book.id).lean();
+      expect(refreshed?.count).toBe(0);
+      expect(refreshed?.updatedAt?.getTime()).toBeGreaterThan(past.getTime());
+    });
   });
 });

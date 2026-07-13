@@ -3,6 +3,7 @@ import NoteBook from "../../model/NoteBook";
 import { toLeanNote, toLeanNoteArray } from "../../utils/typeUtils";
 import { MediaReferenceService } from "../mediaReference.service";
 import { PaginationParams, MAX_PAGE_DEPTH } from "./note.shared";
+import { touchNoteBookAfterNoteActivity } from "./noteBookActivity";
 
 export class NoteTrashService {
   static async getTrashNoteById(
@@ -63,11 +64,7 @@ export class NoteTrashService {
     note.deletedAt = null;
     note.deleteExpireAt = null;
     await note.save({ timestamps: false });
-    await NoteBook.updateOne(
-      { _id: noteBookId },
-      { $inc: { count: 1 } },
-      { timestamps: false },
-    );
+    await touchNoteBookAfterNoteActivity(noteBookId, 1);
 
     return {
       note,

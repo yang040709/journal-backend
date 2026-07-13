@@ -23,6 +23,7 @@ import {
   NotePinLimitExceededError,
   getTrashExpireAt,
 } from "./note.shared";
+import { touchNoteBookAfterNoteActivity } from "./noteBookActivity";
 
 export class NoteCrudService {
   /**
@@ -59,12 +60,7 @@ export class NoteCrudService {
 
     await note.save();
 
-    // 更新手帐本的手帐数量（不刷新手帐本 updatedAt）
-    await NoteBook.updateOne(
-      { _id: data.noteBookId },
-      { $inc: { count: 1 } },
-      { timestamps: false },
-    );
+    await touchNoteBookAfterNoteActivity(data.noteBookId, 1);
 
     // 记录活动
     void ActivityLogger.record(
@@ -172,7 +168,9 @@ export class NoteCrudService {
       return null;
     }
 
-    // 如果更换手帐本，需要更新两个手帐本的计数
+    let notebookMoved = false;
+
+    // 如果更换手帐本，需要更新两个手帐本的计数与最近更新时间
     if (data.noteBookId && data.noteBookId !== note.noteBookId) {
       const oldNoteBookId = note.noteBookId;
       const newNoteBookId = data.noteBookId;
@@ -187,23 +185,13 @@ export class NoteCrudService {
         throw new Error("目标手帐本不存在或无权访问");
       }
 
-      // 更新手帐本计数（不刷新手帐本 updatedAt）
-      await Promise.all([
-        NoteBook.updateOne(
-          { _id: oldNoteBookId },
-          { $inc: { count: -1 } },
-          { timestamps: false },
-        ),
-        NoteBook.updateOne(
-          { _id: newNoteBookId },
-          { $inc: { count: 1 } },
-          { timestamps: false },
-        ),
-      ]);
+      await touchNoteBookAfterNoteActivity(String(oldNoteBookId), -1);
+      await touchNoteBookAfterNoteActivity(String(newNoteBookId), 1);
 
       note.noteBookId = newNoteBookId;
       note.isPinned = false;
       note.pinnedAt = null;
+      notebookMoved = true;
     }
 
     if (data.title !== undefined) note.title = data.title;
@@ -297,6 +285,10 @@ export class NoteCrudService {
       await note.save({ timestamps: false });
     }
 
+    if (shouldBumpUpdatedAt && !notebookMoved) {
+      await touchNoteBookAfterNoteActivity(String(note.noteBookId));
+    }
+
     // 记录活动
     void ActivityLogger.record(
       {
@@ -345,12 +337,7 @@ export class NoteCrudService {
       { timestamps: false },
     );
 
-    // 更新手帐本的手帐数量
-    await NoteBook.updateOne(
-      { _id: note.noteBookId },
-      { $inc: { count: -1 } },
-      { timestamps: false },
-    );
+    await touchNoteBookAfterNoteActivity(String(note.noteBookId), -1);
 
     // 记录活动
     void ActivityLogger.record(
@@ -410,16 +397,11 @@ export class NoteCrudService {
       { timestamps: false },
     );
 
-    // 更新手帐本计数
-    const updatePromises = Object.entries(noteBookCounts).map(
-      ([noteBookId, count]) =>
-        NoteBook.updateOne(
-          { _id: noteBookId },
-          { $inc: { count: -count } },
-          { timestamps: false },
-        ),
+    await Promise.all(
+      Object.entries(noteBookCounts).map(([noteBookId, count]) =>
+        touchNoteBookAfterNoteActivity(noteBookId, -count),
+      ),
     );
-    await Promise.all(updatePromises);
 
     // 记录活动
     void ActivityLogger.record(

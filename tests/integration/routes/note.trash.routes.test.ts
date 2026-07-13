@@ -11,6 +11,7 @@ import { clearTestDb, connectTestDb } from "../../helpers/db";
 import { seedNote } from "../../helpers/seed/note.seed";
 import { seedNoteBook } from "../../helpers/seed/notebook.seed";
 import Note from "../../../src/model/Note";
+import NoteBook from "../../../src/model/NoteBook";
 import { ErrorCodes } from "../../../src/utils/response";
 
 describe("integration: /notes/trash", () => {
@@ -170,6 +171,31 @@ describe("integration: /notes/trash", () => {
     const refreshed = await Note.findById(note.id).lean();
     expect(refreshed?.isDeleted).toBe(false);
     expect(refreshed?.updatedAt?.toISOString()).toBe(past.toISOString());
+  });
+
+  it("POST /notes/:id/restore 刷新所属手帐本 updatedAt 并增加 count", async () => {
+    const { token, userId } = await createAuthUser();
+    const book = await seedNoteBook(userId);
+    const past = new Date("2020-01-15T08:00:00.000Z");
+    const note = await seedNote({ userId, noteBookId: book.id });
+
+    await NoteBook.updateOne(
+      { _id: book.id },
+      { $set: { updatedAt: past, count: 1 } },
+      { timestamps: false },
+    );
+
+    await agent.delete(`/notes/${note.id}`).set(authHeader(token));
+
+    await agent
+      .post(`/notes/${note.id}/restore`)
+      .set(authHeader(token))
+      .send({})
+      .expect(200);
+
+    const refreshed = await NoteBook.findById(book.id).lean();
+    expect(refreshed?.count).toBe(1);
+    expect(refreshed?.updatedAt?.getTime()).toBeGreaterThan(past.getTime());
   });
 
   it("POST /notes/:id/restore 指定已删手帐本返回 404", async () => {

@@ -18,6 +18,7 @@ import {
   toSafeRegex,
 } from "../utils/querySafety";
 import { InitialUserNoteSeedConfigService } from "./initialUserNoteSeedConfig.service";
+import { touchNoteBookAfterNoteActivity } from "./note/noteBookActivity";
 
 export const ADMIN_SHARE_NOTE_PATH_PREFIX =
   "/share/pages/share-note/share-note?share_id=";
@@ -376,11 +377,7 @@ export class AdminNoteService {
       ...(key ? { appliedSystemTemplateKey: key.slice(0, 120) } : {}),
     });
     await note.save();
-    await NoteBook.updateOne(
-      { _id: data.noteBookId },
-      { $inc: { count: 1 } },
-      { timestamps: false },
-    );
+    await touchNoteBookAfterNoteActivity(data.noteBookId, 1);
     return note;
   }
 
@@ -418,6 +415,8 @@ export class AdminNoteService {
 
     const prevIsShare = note.isShare;
 
+    let notebookMoved = false;
+
     if (data.noteBookId && data.noteBookId !== note.noteBookId) {
       const newNb = await NoteBook.findOne({
         _id: data.noteBookId,
@@ -426,21 +425,12 @@ export class AdminNoteService {
       if (!newNb) {
         throw new Error("目标手帐本不存在或无权访问");
       }
-      await Promise.all([
-        NoteBook.updateOne(
-          { _id: note.noteBookId },
-          { $inc: { count: -1 } },
-          { timestamps: false },
-        ),
-        NoteBook.updateOne(
-          { _id: data.noteBookId },
-          { $inc: { count: 1 } },
-          { timestamps: false },
-        ),
-      ]);
+      await touchNoteBookAfterNoteActivity(String(note.noteBookId), -1);
+      await touchNoteBookAfterNoteActivity(String(data.noteBookId), 1);
       note.noteBookId = data.noteBookId;
       note.isPinned = false;
       note.pinnedAt = null;
+      notebookMoved = true;
     }
 
     if (data.title !== undefined) note.title = data.title;
@@ -517,6 +507,11 @@ export class AdminNoteService {
     } else {
       await note.save({ timestamps: false });
     }
+
+    if (shouldBumpUpdatedAt && !notebookMoved) {
+      await touchNoteBookAfterNoteActivity(String(note.noteBookId));
+    }
+
     return note;
   }
 
@@ -529,11 +524,7 @@ export class AdminNoteService {
       throw new Error("手帐已在废纸篓，请使用废纸篓巡查永久删除");
     }
     await Note.deleteOne({ _id: id });
-    await NoteBook.updateOne(
-      { _id: note.noteBookId },
-      { $inc: { count: -1 } },
-      { timestamps: false },
-    );
+    await touchNoteBookAfterNoteActivity(String(note.noteBookId), -1);
     return true;
   }
 
