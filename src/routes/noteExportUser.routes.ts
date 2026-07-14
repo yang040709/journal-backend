@@ -6,7 +6,7 @@ import User from "../model/User";
 import { NoteExportSettingsService } from "../service/noteExportSettings.service";
 import { getQuotaDateContext } from "../utils/dateKey";
 import { getZonedWeekRangeUtc } from "../utils/weekBounds";
-import NoteExportLog from "../model/NoteExportLog";
+import { NoteExportService } from "../service/noteExport.service";
 import {
   PointsService,
   PointsExchangeInvalidError,
@@ -53,11 +53,13 @@ router.get("/export-quota", async (ctx: AuthContext) => {
     const settings = await NoteExportSettingsService.get();
     const { timezone } = getQuotaDateContext();
     const { weekStartUtc, weekEndExclusiveUtc } = getZonedWeekRangeUtc(new Date(), timezone);
-    const freeUsed = await NoteExportLog.countDocuments({
+    const weekKey = NoteExportService.weekKeyFromStart(weekStartUtc);
+    const freeUsed = await NoteExportService.ensureWeeklyUsageFromLogs(
       userId,
-      source: "weekly_free",
-      createdAt: { $gte: weekStartUtc, $lt: weekEndExclusiveUtc },
-    });
+      weekKey,
+      weekStartUtc,
+      weekEndExclusiveUtc,
+    );
     const u = await User.findOne({ userId }).select("exportExtraCredits points").lean();
     const exportExtraCredits = Math.max(
       0,
