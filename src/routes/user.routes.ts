@@ -129,10 +129,10 @@ router.post("/refresh", async (ctx) => {
     const body = refreshSchema.parse(ctx.request.body);
     const oldToken = body.token;
 
-    // 验证token是否有效（即使过期）
-    const decoded = verifyToken(oldToken, true);
+    // 仅未过期 token 可刷新
+    const decoded = verifyToken(oldToken, false);
     if (!decoded) {
-      error(ctx, "无效的Token", ErrorCodes.AUTH_ERROR, 401);
+      error(ctx, "Token无法刷新，请重新登录", ErrorCodes.AUTH_ERROR, 401);
       return;
     }
 
@@ -148,7 +148,6 @@ router.post("/refresh", async (ctx) => {
       return;
     }
 
-    // 尝试刷新token
     const newToken = refreshToken(oldToken);
     if (!newToken) {
       error(ctx, "Token无法刷新，请重新登录", ErrorCodes.AUTH_ERROR, 401);

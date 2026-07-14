@@ -229,6 +229,10 @@ describe("integration: /auth", () => {
     expect(res.body.data.systemReadingThemeCatalog).toBeTruthy();
     expect(res.body.data.systemReadingThemeCatalog.styleKeys[0]).toBeNull();
     expect(res.body.data.systemReadingThemeCatalog.styleKeys.length).toBeGreaterThan(1);
+    expect(res.body.data.systemReadingThemeCatalog.styleKeys).toContain("filmTravel");
+    expect(
+      res.body.data.systemReadingThemeCatalog.themeIdsByStyle.filmTravel,
+    ).toContain("film-default");
   });
 
   async function hideVintageRoseFromSystemCatalog() {

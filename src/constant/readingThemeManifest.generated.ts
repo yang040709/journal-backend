@@ -49,7 +49,7 @@ export const THEME_DISPLAY_META: Record<string, { name: string; backgroundColor:
   "memo-ivory": { name: "留白纸感", backgroundColor: "#EEF1F6", cardColor: "#FFFFFF" },
   "memo-mintCream": { name: "薄荷奶霜", backgroundColor: "#D8E8DF", cardColor: "#F8FFFA" },
   "memo-oatLatte": { name: "燕麦拿铁", backgroundColor: "#E8E0D4", cardColor: "#FFFCF7" },
-  minimalist_white: { name: "极简白", backgroundColor: "#EBEDF0", cardColor: "#FFFFFF" },
+  minimalist_white: { name: "极简白", backgroundColor: "#F7F8FA", cardColor: "#FFFFFF" },
   mistBlueStory: { name: "雾蓝叙事", backgroundColor: "#D8E6F4", cardColor: "#FAFCFF" },
   "nordic-dawn": { name: "晨雾青", backgroundColor: "#DCE8E5", cardColor: "#FCFEFD" },
   "nordic-default": { name: "冰川白", backgroundColor: "#ECEEF0", cardColor: "#FFFFFF" },

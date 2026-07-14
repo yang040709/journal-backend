@@ -2,6 +2,8 @@ import User from "../model/User";
 import ReadingThemeChangeLog, {
   type ReadingThemeChangeScope,
 } from "../model/ReadingThemeChangeLog";
+import { READING_STYLE_KEYS } from "../constant/noteReadingTheme";
+import { THEME_IDS_BY_STYLE } from "../constant/readingThemeCatalog";
 import {
   READING_STYLE_LABELS,
   THEME_DISPLAY_META,
@@ -109,6 +111,132 @@ function styleSortKey(styleKey: string | null): string {
 function themeSortKey(themeId: string | null): string {
   if (themeId === null) return "0";
   return `1:${themeId}`;
+}
+
+function styleKeyToken(styleKey: string | null): string {
+  return styleKey ?? "__null__";
+}
+
+function themeKeyToken(themeId: string | null): string {
+  return themeId ?? "__null__";
+}
+
+function buildManifestThemeIds(styleKey: string | null): (string | null)[] {
+  if (styleKey === null) return [null];
+  const manifestIds = THEME_IDS_BY_STYLE[styleKey] || [];
+  return [null, ...manifestIds];
+}
+
+function buildManifestStyleSkeleton(): Array<{
+  styleKey: string | null;
+  themeIds: (string | null)[];
+}> {
+  return [
+    { styleKey: null, themeIds: [null] },
+    ...READING_STYLE_KEYS.map((styleKey) => ({
+      styleKey,
+      themeIds: buildManifestThemeIds(styleKey),
+    })),
+  ];
+}
+
+function buildEmptyThemeStat(
+  themeId: string | null,
+  mode: "snapshot" | "changes",
+): ReadingThemeThemeStat {
+  const meta = themeId ? THEME_DISPLAY_META[themeId] : undefined;
+  const base = {
+    themeId,
+    label: themeLabel(themeId),
+    backgroundColor: meta?.backgroundColor,
+    cardColor: meta?.cardColor,
+  };
+
+  if (mode === "snapshot") {
+    return {
+      ...base,
+      userCount: 0,
+      percentage: 0,
+    };
+  }
+
+  return {
+    ...base,
+    changeCount: 0,
+    uniqueUsers: 0,
+  };
+}
+
+function mergeThemeStatsForStyle(
+  styleKey: string | null,
+  existingThemes: ReadingThemeThemeStat[] | undefined,
+  mode: "snapshot" | "changes",
+): ReadingThemeThemeStat[] {
+  const existingMap = new Map(
+    (existingThemes ?? []).map((item) => [themeKeyToken(item.themeId), item]),
+  );
+  const orderedThemeIds = [...buildManifestThemeIds(styleKey)];
+
+  for (const item of existingThemes ?? []) {
+    const token = themeKeyToken(item.themeId);
+    if (!orderedThemeIds.some((id) => themeKeyToken(id) === token)) {
+      orderedThemeIds.push(item.themeId);
+    }
+  }
+
+  return orderedThemeIds.map((themeId) => {
+    const existing = existingMap.get(themeKeyToken(themeId));
+    return existing ?? buildEmptyThemeStat(themeId, mode);
+  });
+}
+
+function enrichStyleStatsWithManifest(
+  styleStats: ReadingThemeStyleStat[],
+  mode: "snapshot" | "changes",
+  denominator = 0,
+): ReadingThemeStyleStat[] {
+  const existingMap = new Map(
+    styleStats.map((item) => [styleKeyToken(item.styleKey), item]),
+  );
+  const skeletonKeys = new Set(
+    buildManifestStyleSkeleton().map((item) => styleKeyToken(item.styleKey)),
+  );
+
+  const enriched = buildManifestStyleSkeleton().map(({ styleKey }) => {
+    const existing = existingMap.get(styleKeyToken(styleKey));
+
+    if (mode === "snapshot") {
+      const userCount = existing?.userCount ?? 0;
+      return {
+        styleKey,
+        label: styleLabel(styleKey),
+        userCount,
+        percentage:
+          denominator > 0
+            ? Math.round((userCount / denominator) * 1000) / 10
+            : 0,
+        themeStats: mergeThemeStatsForStyle(
+          styleKey,
+          existing?.themeStats,
+          mode,
+        ),
+      };
+    }
+
+    return {
+      styleKey,
+      label: styleLabel(styleKey),
+      changeCount: existing?.changeCount ?? 0,
+      uniqueUsers: existing?.uniqueUsers ?? 0,
+      themeStats: mergeThemeStatsForStyle(styleKey, existing?.themeStats, mode),
+    };
+  });
+
+  const legacyStyles = styleStats.filter(
+    (item) => !skeletonKeys.has(styleKeyToken(item.styleKey)),
+  );
+
+  return [...enriched, ...legacyStyles];
 }
 
 function buildStyleStatsFromRows(
@@ -416,8 +544,12 @@ export class AdminReadingThemeStatsService {
       aggregateChanges("note", startAt, endAt),
     ]);
 
-    const currentGlobalStyleStats = buildStyleStatsFromRows(
-      currentGlobalAgg.rows,
+    const currentGlobalStyleStats = enrichStyleStatsWithManifest(
+      buildStyleStatsFromRows(
+        currentGlobalAgg.rows,
+        "snapshot",
+        currentGlobalAgg.globalScopeUserCount,
+      ),
       "snapshot",
       currentGlobalAgg.globalScopeUserCount,
     );

@@ -27,6 +27,18 @@ describe("integration: admin reading theme catalog", () => {
     expect(res.body.data.catalog.styleKeys[0]).toBeNull();
     expect(res.body.data.manifest.length).toBeGreaterThan(0);
     expect(res.body.data.manifest[0].themes.length).toBeGreaterThan(0);
+
+    const filmTravel = res.body.data.manifest.find(
+      (item: { styleKey: string }) => item.styleKey === "filmTravel",
+    );
+    expect(filmTravel?.label).toBe("胶片旅行风");
+    expect(filmTravel?.themes.map((theme: { id: string }) => theme.id)).toEqual([
+      "film-default",
+      "film-golden",
+      "film-mintTrail",
+      "film-sakuraPass",
+    ]);
+    expect(res.body.data.catalog.styleKeys).toContain("filmTravel");
   });
 
   it("普通 admin GET /admin/reading-theme-catalog 返回 403", async () => {

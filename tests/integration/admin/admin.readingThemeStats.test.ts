@@ -40,7 +40,20 @@ describe("integration: admin reading theme stats", () => {
     expect(res.body.data.globalScopeUserCount).toBe(0);
     expect(res.body.data.totalGlobalChanges).toBe(0);
     expect(res.body.data.totalNoteChanges).toBe(0);
-    expect(res.body.data.currentGlobal.styleStats).toEqual([]);
+
+    const filmTravelStyle = res.body.data.currentGlobal.styleStats.find(
+      (item: { styleKey: string | null }) => item.styleKey === "filmTravel",
+    );
+    expect(filmTravelStyle?.label).toBe("胶片旅行风");
+    expect(filmTravelStyle?.userCount).toBe(0);
+    expect(filmTravelStyle?.themeStats).toHaveLength(5);
+    expect(
+      filmTravelStyle?.themeStats.find(
+        (item: { themeId: string | null }) => item.themeId === "film-default",
+      )?.label,
+    ).toBe("银盐胶片");
+
+    expect(res.body.data.currentGlobal.styleStats).toHaveLength(8);
     expect(res.body.data.globalChanges).toEqual([]);
     expect(res.body.data.noteChanges).toEqual([]);
   });
@@ -91,6 +104,48 @@ describe("integration: admin reading theme stats", () => {
     );
     expect(globalStyle.changeCount).toBe(2);
     expect(globalStyle.uniqueUsers).toBe(1);
+  });
+
+  it("filmTravel 全局变更计入 globalChanges 与 currentGlobal", async () => {
+    const { token: adminToken } = await seedAdmin();
+    const { token } = await createAuthUser({ userId: "reading-theme-stats-film-travel" });
+
+    await agent
+      .put("/auth/me/reading-theme")
+      .set(authHeader(token))
+      .send({
+        defaultReadingStyleKey: "filmTravel",
+        defaultReadingThemeId: "film-golden",
+        readingThemeApplyScope: "global",
+      })
+      .expect(200);
+
+    const res = await agent
+      .get("/admin/stats/reading-themes")
+      .set(adminAuthHeader(adminToken))
+      .expect(200);
+
+    const currentStyle = res.body.data.currentGlobal.styleStats.find(
+      (item: { styleKey: string | null }) => item.styleKey === "filmTravel",
+    );
+    expect(currentStyle?.userCount).toBe(1);
+    expect(
+      currentStyle?.themeStats.find(
+        (item: { themeId: string | null }) => item.themeId === "film-golden",
+      )?.userCount,
+    ).toBe(1);
+
+    const globalStyle = res.body.data.globalChanges.find(
+      (item: { styleKey: string | null }) => item.styleKey === "filmTravel",
+    );
+    expect(globalStyle?.label).toBe("胶片旅行风");
+    expect(globalStyle?.changeCount).toBe(1);
+    expect(globalStyle?.uniqueUsers).toBe(1);
+    expect(
+      globalStyle?.themeStats.find(
+        (item: { themeId: string | null }) => item.themeId === "film-golden",
+      )?.changeCount,
+    ).toBe(1);
   });
 
   it("手帐 PUT /notes/:id 计入 noteChanges", async () => {
