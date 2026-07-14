@@ -63,8 +63,11 @@ export class ReminderScheduler {
     const now = new Date();
     logger.info(`检查待发送提醒...`, { timestamp: now.toISOString() });
 
-    // 获取待发送的提醒（包括过去1小时内未发送的）
-    const oneHourAgo = new Date(now.getTime() - 60 * 60 * 1000);
+    const reclaimed = await ReminderService.reclaimStuckSending(now);
+    if (reclaimed > 0) {
+      logger.info(`回收卡住的 sending 提醒`, { reclaimed });
+    }
+
     const pendingReminders = await ReminderService.getPendingReminders(now);
 
     logger.info(`找到 ${pendingReminders.length} 个待发送提醒`, {

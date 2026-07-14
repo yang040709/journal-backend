@@ -1,6 +1,7 @@
 import { ReminderScheduler } from "./reminder.scheduler";
 import { AlertScheduler } from "./alert.scheduler";
 import { CosDeleteScheduler } from "./cosDelete.scheduler";
+import { TrashPurgeScheduler } from "./trashPurge.scheduler";
 import { logger } from "../utils/logger";
 
 /**
@@ -13,6 +14,7 @@ export function startAllSchedulers(): void {
     ReminderScheduler.start();
     AlertScheduler.start();
     CosDeleteScheduler.start();
+    TrashPurgeScheduler.start();
     logger.info("所有调度器已启动");
   } catch (error: any) {
     logger.error("调度器启动失败，但不会终止后端进程", {
@@ -36,6 +38,7 @@ export function stopAllSchedulers(): void {
   ReminderScheduler.stop();
   AlertScheduler.stop();
   CosDeleteScheduler.stop();
+  TrashPurgeScheduler.stop();
 
   logger.info("所有调度器已停止");
 }
@@ -56,14 +59,20 @@ export function getSchedulerStatus(): {
     isRunning: boolean;
     nextInvocation?: Date;
   };
+  trashPurgeScheduler: {
+    isRunning: boolean;
+    nextInvocation?: Date;
+  };
 } {
   return {
     reminderScheduler: ReminderScheduler.getStatus(),
     alertScheduler: AlertScheduler.getStatus(),
     cosDeleteScheduler: CosDeleteScheduler.getStatus(),
+    trashPurgeScheduler: TrashPurgeScheduler.getStatus(),
   };
 }
 
 export { ReminderScheduler } from "./reminder.scheduler";
 export { AlertScheduler } from "./alert.scheduler";
 export { CosDeleteScheduler } from "./cosDelete.scheduler";
+export { TrashPurgeScheduler } from "./trashPurge.scheduler";

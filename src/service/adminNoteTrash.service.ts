@@ -6,6 +6,7 @@ import {
   toSafeRegex,
 } from "../utils/querySafety";
 import { NoteTrashService } from "./note/noteTrash.service";
+import { TrashPurgeService } from "./trashPurge.service";
 
 export interface AdminTrashNoteListParams {
   page?: number;
@@ -133,29 +134,12 @@ export class AdminNoteTrashService {
   }
 
   /** 已超过保留期（deleteExpireAt <= now）的软删除手帐 */
-  private static expiredTrashQuery(): Record<string, unknown> {
-    return {
-      isDeleted: true,
-      deleteExpireAt: { $lte: new Date() },
-    };
-  }
-
   static async countExpiredTrashNotes(): Promise<number> {
-    return Note.countDocuments(AdminNoteTrashService.expiredTrashQuery());
+    return TrashPurgeService.countExpiredTrashNotes();
   }
 
   static async purgeExpiredTrashNotes(): Promise<{ purged: number; total: number }> {
-    const notes = await Note.find(AdminNoteTrashService.expiredTrashQuery())
-      .select("_id userId")
-      .lean();
-    let purged = 0;
-    for (const note of notes) {
-      const id = String(note._id);
-      const ok = await NoteTrashService.purgeNote(id, note.userId);
-      if (ok) {
-        purged += 1;
-      }
-    }
-    return { purged, total: notes.length };
+    const result = await TrashPurgeService.purgeExpiredTrashNotes();
+    return { purged: result.purged, total: result.total };
   }
 }

@@ -8,10 +8,12 @@ export interface IReminder extends Document {
   remindTime: Date; // 提醒时间
   messageId: string; // 微信消息模板ID
   subscriptionStatus: "pending" | "subscribed" | "cancelled"; // 订阅状态
-  sendStatus: "pending" | "sent" | "failed"; // 发送状态
+  sendStatus: "pending" | "sending" | "sent" | "failed"; // 发送状态
   retryCount: number; // 重试次数
   lastError?: string; // 最后错误信息
   sentAt?: Date; // 发送时间
+  /** 认领进入 sending 的时间，用于超时回收 */
+  sendLockedAt?: Date | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -58,7 +60,7 @@ const reminderSchema = new Schema(
     },
     sendStatus: {
       type: String,
-      enum: ["pending", "sent", "failed"],
+      enum: ["pending", "sending", "sent", "failed"],
       default: "pending",
       index: true,
     },
@@ -74,6 +76,10 @@ const reminderSchema = new Schema(
     },
     sentAt: {
       type: Date,
+    },
+    sendLockedAt: {
+      type: Date,
+      default: null,
     },
   },
   {
@@ -93,6 +99,7 @@ reminderSchema.index({ remindTime: 1, sendStatus: 1 });
 reminderSchema.index({ subscriptionStatus: 1, sendStatus: 1 });
 reminderSchema.index({ userId: 1, remindTime: -1 });
 reminderSchema.index({ userId: 1, sendStatus: 1, remindTime: -1 });
+reminderSchema.index({ sendStatus: 1, sendLockedAt: 1 });
 
 // 添加虚拟字段id
 reminderSchema.virtual("id").get(function (this: any) {

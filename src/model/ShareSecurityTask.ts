@@ -46,6 +46,8 @@ export interface IShareSecurityTask extends Document {
   resultDetail?: string;
   retryCount: number;
   nextRetryAt?: Date | null;
+  /** 认领进入 running 的时间，用于超时回收 */
+  lockedAt?: Date | null;
   snapshot?: ShareRiskSnapshot;
   createdAt: Date;
   updatedAt: Date;
@@ -72,6 +74,7 @@ const shareSecurityTaskSchema = new Schema<IShareSecurityTask>(
     resultDetail: { type: String, trim: true },
     retryCount: { type: Number, default: 0, min: 0 },
     nextRetryAt: { type: Date, default: null, index: true },
+    lockedAt: { type: Date, default: null },
     snapshot: {
       title: { type: String, default: "" },
       content: { type: String, default: "" },
@@ -107,6 +110,7 @@ const shareSecurityTaskSchema = new Schema<IShareSecurityTask>(
 
 shareSecurityTaskSchema.index({ noteId: 1, shareVersion: 1, createdAt: -1 });
 shareSecurityTaskSchema.index({ status: 1, updatedAt: 1 });
+shareSecurityTaskSchema.index({ status: 1, lockedAt: 1 });
 
 shareSecurityTaskSchema.virtual("id").get(function (this: any) {
   return this._id.toString();
