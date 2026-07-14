@@ -219,7 +219,9 @@ router.post("/exchange", async (ctx: AuthContext) => {
   const requestId = ctx.state.requestId || "unknown";
   try {
     const body = exchangeSchema.parse(ctx.request.body);
-    const data = await PointsService.exchange(userId, body.kind, { requestId });
+    const idempotencyKey =
+      ctx.get("Idempotency-Key") || ctx.get("X-Idempotency-Key") || "";
+    const data = await PointsService.exchange(userId, body.kind, { idempotencyKey });
     success(ctx, data, "兑换成功");
   } catch (err) {
     if (err instanceof z.ZodError) {
