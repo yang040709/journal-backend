@@ -150,12 +150,30 @@ export const openapiSchemas = {
   UserImageAsset: {
     type: "object",
     properties: {
-      _id: { type: "string" },
+      id: { type: "string" },
       userId: { type: "string" },
       url: { type: "string" },
-      key: { type: "string" },
+      thumbUrl: { type: "string" },
+      storageKey: {
+        type: "string",
+        description: "资产索引键；手帐图为 COS key，自定义封面为 cover:{id}",
+      },
+      objectKey: {
+        type: "string",
+        description: "真实 COS object key（封面资产从 url 还原）",
+      },
+      objectThumbKey: {
+        type: "string",
+        description: "缩略图 COS object key（若可解析）",
+      },
       source: { type: "string", enum: ["note", "cover"] },
+      refId: { type: "string" },
+      width: { type: "number" },
+      height: { type: "number" },
+      size: { type: "number" },
+      mimeType: { type: "string" },
       createdAt: { type: "string", format: "date-time" },
+      updatedAt: { type: "string", format: "date-time" },
     },
   },
   UserFeedback: {

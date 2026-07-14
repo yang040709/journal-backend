@@ -4,6 +4,7 @@ import { ActivityLogger } from "../utils/ActivityLogger";
 import { ErrorCodes } from "../utils/response";
 import { toLeanNoteBookArray, toLeanNoteBook } from "../utils/typeUtils";
 import { ensurePageDepth, pickSortField } from "../utils/querySafety";
+import { getTrashExpireAt } from "./note/note.shared";
 
 export interface CreateNoteBookData {
   title: string;
@@ -25,10 +26,6 @@ export interface PaginationParams {
 }
 
 export class NoteBookService {
-  private static getTrashExpireAt(base: Date = new Date()): Date {
-    return new Date(base.getTime() + 7 * 24 * 60 * 60 * 1000);
-  }
-
   /**
    * 创建手帐本
    */
@@ -158,7 +155,7 @@ export class NoteBookService {
     }
 
     const deletedAt = new Date();
-    const deleteExpireAt = NoteBookService.getTrashExpireAt(deletedAt);
+    const deleteExpireAt = getTrashExpireAt(deletedAt);
     await NoteBook.updateOne(
       { _id: id, userId, isDeleted: { $ne: true } },
       { $set: { isDeleted: true, deletedAt, deleteExpireAt, count: 0 } },

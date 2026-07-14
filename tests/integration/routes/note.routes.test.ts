@@ -314,6 +314,7 @@ describe("integration: /notes", () => {
       "watercolorSketch",
       "dreamyCinematic",
       "productMemo",
+      "filmTravel",
     ] as const;
 
     for (const readingStyleKey of keys) {

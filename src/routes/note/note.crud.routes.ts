@@ -12,6 +12,7 @@ import logger from "../../utils/logger";
 import { isGuardrailError } from "./note.shared";
 import { paginationSchema, createNoteSchema, updateNoteSchema, batchDeleteSchema, recentLimitSchema } from "./note.schemas";
 import { ReadingThemeCatalogValidationError } from "../../utils/readingThemeCatalog";
+import { CosKeyOwnershipError } from "../../utils/cosKeyOwnership";
 
 const router = new Router();
 
@@ -245,6 +246,8 @@ router.post("/", async (ctx: AuthContext) => {
   } catch (err) {
     if (err instanceof z.ZodError) {
       error(ctx, "参数验证失败", ErrorCodes.PARAM_ERROR, 400);
+    } else if (err instanceof CosKeyOwnershipError) {
+      error(ctx, err.message, ErrorCodes.PARAM_ERROR, 400);
     } else if (err.message === "手帐本不存在或无权访问") {
       error(ctx, err.message, ErrorCodes.NOTEBOOK_NOT_FOUND, 404);
     } else {
@@ -346,6 +349,8 @@ router.put("/:id", async (ctx: AuthContext) => {
   } catch (err) {
     if (err instanceof z.ZodError) {
       error(ctx, "参数验证失败", ErrorCodes.PARAM_ERROR, 400);
+    } else if (err instanceof CosKeyOwnershipError) {
+      error(ctx, err.message, ErrorCodes.PARAM_ERROR, 400);
     } else if (err instanceof NotePinLimitExceededError) {
       error(ctx, err.message, ErrorCodes.NOTE_PIN_LIMIT_EXCEEDED, 400);
     } else if (err instanceof ReadingThemeCatalogValidationError) {

@@ -3,6 +3,11 @@ import type { INoteImage } from "../model/Note";
 import mongoose from "mongoose";
 import { logger } from "../utils/logger";
 import { normalizeImageMimeType } from "../utils/imageMime";
+import {
+  extractCosKeyFromUrl,
+  isCosObjectKey,
+  resolveAssetObjectKey,
+} from "../utils/cosDelete";
 
 function logWarn(message: string, meta: Record<string, unknown>) {
   logger.warn(message, meta);
@@ -116,6 +121,10 @@ export interface UserImageAssetListItem {
   url: string;
   thumbUrl?: string;
   storageKey: string;
+  /** 真实 COS object key（封面资产从 url 还原，非 cover:{id}） */
+  objectKey?: string;
+  /** 缩略图 COS object key（若可解析） */
+  objectThumbKey?: string;
   source: "note" | "cover";
   refId: string;
   width: number;
@@ -128,6 +137,44 @@ export interface UserImageAssetListItem {
 
 export interface ListAllUserImageAssetsParams extends ListUserImageAssetsParams {
   userId?: string;
+}
+
+function resolveAssetThumbObjectKey(doc: {
+  thumbKey?: string;
+  thumbUrl?: string;
+}): string | null {
+  const thumbKey = String(doc?.thumbKey || "").trim();
+  if (isCosObjectKey(thumbKey)) return thumbKey;
+  return extractCosKeyFromUrl(String(doc?.thumbUrl || ""));
+}
+
+function toListItem(d: any): UserImageAssetListItem {
+  const objectKey =
+    resolveAssetObjectKey({
+      storageKey: d.storageKey,
+      url: d.url,
+    }) || undefined;
+  const objectThumbKey = resolveAssetThumbObjectKey(d) || undefined;
+
+  return {
+    id: String(d._id),
+    userId: String(d.userId || ""),
+    url: d.url,
+    ...(d.thumbUrl ? { thumbUrl: d.thumbUrl } : {}),
+    storageKey: d.storageKey,
+    ...(objectKey ? { objectKey } : {}),
+    ...(objectThumbKey ? { objectThumbKey } : {}),
+    source: d.source,
+    refId: d.refId,
+    width: d.width ?? 0,
+    height: d.height ?? 0,
+    size: d.size ?? 0,
+    ...(d.mimeType ? { mimeType: d.mimeType } : {}),
+    createdAt:
+      d.createdAt instanceof Date ? d.createdAt.toISOString() : String(d.createdAt),
+    updatedAt:
+      d.updatedAt instanceof Date ? d.updatedAt.toISOString() : String(d.updatedAt),
+  };
 }
 
 export async function listByUser(
@@ -152,25 +199,7 @@ export async function listByUser(
     UserImageAsset.countDocuments(query),
   ]);
 
-  const items: UserImageAssetListItem[] = docs.map((d: any) => ({
-    id: String(d._id),
-    userId: String(d.userId || ""),
-    url: d.url,
-    ...(d.thumbUrl ? { thumbUrl: d.thumbUrl } : {}),
-    storageKey: d.storageKey,
-    source: d.source,
-    refId: d.refId,
-    width: d.width ?? 0,
-    height: d.height ?? 0,
-    size: d.size ?? 0,
-    ...(d.mimeType ? { mimeType: d.mimeType } : {}),
-    createdAt:
-      d.createdAt instanceof Date ? d.createdAt.toISOString() : String(d.createdAt),
-    updatedAt:
-      d.updatedAt instanceof Date ? d.updatedAt.toISOString() : String(d.updatedAt),
-  }));
-
-  return { items, total };
+  return { items: docs.map((d: any) => toListItem(d)), total };
 }
 
 export async function listAll(
@@ -197,25 +226,7 @@ export async function listAll(
     UserImageAsset.countDocuments(query),
   ]);
 
-  const items: UserImageAssetListItem[] = docs.map((d: any) => ({
-    id: String(d._id),
-    userId: String(d.userId || ""),
-    url: d.url,
-    ...(d.thumbUrl ? { thumbUrl: d.thumbUrl } : {}),
-    storageKey: d.storageKey,
-    source: d.source,
-    refId: d.refId,
-    width: d.width ?? 0,
-    height: d.height ?? 0,
-    size: d.size ?? 0,
-    ...(d.mimeType ? { mimeType: d.mimeType } : {}),
-    createdAt:
-      d.createdAt instanceof Date ? d.createdAt.toISOString() : String(d.createdAt),
-    updatedAt:
-      d.updatedAt instanceof Date ? d.updatedAt.toISOString() : String(d.updatedAt),
-  }));
-
-  return { items, total };
+  return { items: docs.map((d: any) => toListItem(d)), total };
 }
 
 export async function findAssetByIdForUser(userId: string, id: string) {

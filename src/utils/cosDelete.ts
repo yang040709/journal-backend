@@ -14,6 +14,19 @@ export function isCosObjectKey(key: string): boolean {
   return Boolean(k && k.includes("/") && !k.startsWith("cover:"));
 }
 
+/**
+ * 从资产 storageKey / url 解析真实 COS object key。
+ * 封面资产 storageKey 为 cover:{id}，须从 url 还原。
+ */
+export function resolveAssetObjectKey(asset: {
+  storageKey?: string;
+  url?: string;
+}): string | null {
+  const storageKey = String(asset.storageKey || "").trim();
+  if (isCosObjectKey(storageKey)) return storageKey;
+  return extractCosKeyFromUrl(String(asset.url || ""));
+}
+
 export function extractCosKeyFromUrl(url: string): string | null {
   const raw = String(url || "").trim();
   if (!raw) return null;

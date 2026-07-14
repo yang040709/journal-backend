@@ -2,6 +2,7 @@ import Router from "@koa/router";
 import { authMiddleware, AuthContext } from "../middlewares/auth.middleware";
 import { success, error, ErrorCodes } from "../utils/response";
 import { CoverService } from "../service/cover.service";
+import { CosKeyOwnershipError } from "../utils/cosKeyOwnership";
 import { z } from "zod";
 
 const router = new Router({
@@ -290,6 +291,10 @@ router.post("/custom", async (ctx: AuthContext) => {
       error(ctx, "参数验证失败", ErrorCodes.PARAM_ERROR, 400);
       return;
     }
+    if (err instanceof CosKeyOwnershipError) {
+      error(ctx, err.message, ErrorCodes.PARAM_ERROR, 400);
+      return;
+    }
     const message = err instanceof Error ? err.message : "新增自定义封面失败";
     const isBizError = /最多上传|不能为空|不存在/.test(message);
     error(
@@ -367,6 +372,10 @@ router.put("/custom/:coverId", async (ctx: AuthContext) => {
   } catch (err) {
     if (err instanceof z.ZodError) {
       error(ctx, "参数验证失败", ErrorCodes.PARAM_ERROR, 400);
+      return;
+    }
+    if (err instanceof CosKeyOwnershipError) {
+      error(ctx, err.message, ErrorCodes.PARAM_ERROR, 400);
       return;
     }
     const message = err instanceof Error ? err.message : "更新自定义封面失败";

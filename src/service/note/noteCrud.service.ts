@@ -24,6 +24,11 @@ import {
   getTrashExpireAt,
 } from "./note.shared";
 import { touchNoteBookAfterNoteActivity } from "./noteBookActivity";
+import {
+  assertOwnedNoteImageKeys,
+  collectNoteImageKeys,
+  normalizeNoteImageObjectKeys,
+} from "../../utils/cosKeyOwnership";
 
 export class NoteCrudService {
   /**
@@ -40,6 +45,9 @@ export class NoteCrudService {
       throw new Error("手帐本不存在或无权访问");
     }
 
+    const images = normalizeNoteImageObjectKeys(data.images) || [];
+    assertOwnedNoteImageKeys(data.userId, images);
+
     const key = data.appliedSystemTemplateKey?.trim();
     const tags = sanitizeNoteTags(data.tags || []);
     const note = new Note({
@@ -47,7 +55,7 @@ export class NoteCrudService {
       title: data.title,
       content: data.content,
       tags,
-      images: data.images || [],
+      images,
       userId: data.userId,
       isShare: false,
       shareId: nanoid(12),
@@ -74,11 +82,11 @@ export class NoteCrudService {
       { blocking: false },
     );
 
-    recordFromNoteImages(data.userId, String(note.id), data.images || []);
+    recordFromNoteImages(data.userId, String(note.id), images);
     void MediaReferenceService.syncNoteImages(
       data.userId,
       String(note.id),
-      data.images || [],
+      images,
     );
 
     return note;
@@ -185,8 +193,13 @@ export class NoteCrudService {
         throw new Error("目标手帐本不存在或无权访问");
       }
 
-      await touchNoteBookAfterNoteActivity(String(oldNoteBookId), -1);
-      await touchNoteBookAfterNoteActivity(String(newNoteBookId), 1);
+      const t = Date.now();
+      await touchNoteBookAfterNoteActivity(String(oldNoteBookId), -1, new Date(t));
+      await touchNoteBookAfterNoteActivity(
+        String(newNoteBookId),
+        1,
+        new Date(t + 1),
+      );
 
       note.noteBookId = newNoteBookId;
       note.isPinned = false;
@@ -199,7 +212,14 @@ export class NoteCrudService {
     if (data.tags !== undefined) {
       note.tags = sanitizeNoteTags(data.tags);
     }
-    if (data.images !== undefined) note.images = data.images;
+    if (data.images !== undefined) {
+      const images = normalizeNoteImageObjectKeys(data.images) || [];
+      assertOwnedNoteImageKeys(userId, images, {
+        allowKeys: collectNoteImageKeys(note.images),
+      });
+      note.images = images;
+      data.images = images;
+    }
 
     if (data.isFavorite !== undefined) {
       note.isFavorite = data.isFavorite;
