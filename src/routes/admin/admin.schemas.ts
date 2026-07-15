@@ -520,6 +520,31 @@ export const adminQuotaBaseLimitsPutSchema = z
     message: "至少提供一个要更新的字段",
   });
 
+export const adminNotebookLimitsPutSchema = z
+  .object({
+    defaultMaxNoteBookCount: z.number().int().min(1).max(100).optional(),
+    hardMaxNoteBookCount: z.number().int().min(1).max(100).optional(),
+  })
+  .refine(
+    (v) =>
+      v.defaultMaxNoteBookCount !== undefined ||
+      v.hardMaxNoteBookCount !== undefined,
+    { message: "至少提供一个要更新的字段" },
+  )
+  .superRefine((v, ctx) => {
+    if (
+      v.defaultMaxNoteBookCount !== undefined &&
+      v.hardMaxNoteBookCount !== undefined &&
+      v.defaultMaxNoteBookCount > v.hardMaxNoteBookCount
+    ) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "默认上限不能大于硬顶",
+        path: ["defaultMaxNoteBookCount"],
+      });
+    }
+  });
+
 export const adminExportSettingsPutSchema = z
   .object({
     exportPointsPerExtra: z.number().int().min(1).max(1_000_000).optional(),

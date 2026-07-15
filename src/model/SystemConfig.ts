@@ -19,6 +19,8 @@ export const SYSTEM_CONFIG_FEEDBACK_QUICK_REPLIES_KEY = "feedback_quick_replies"
 export const SYSTEM_CONFIG_READING_THEME_CATALOG_KEY = "reading_theme_catalog";
 /** C 端埋点开关（JSON 存于 clientEventSettings） */
 export const SYSTEM_CONFIG_CLIENT_EVENT_SETTINGS_KEY = "client_event_settings";
+/** 手帐本数量上限（JSON 存于 notebookLimits） */
+export const SYSTEM_CONFIG_NOTEBOOK_LIMITS_KEY = "notebook_limits";
 
 /** 上次保存系统 catalog 时的 manifest 快照，用于识别发版新增 theme.id */
 export type ReadingThemeManifestSnapshot = Record<string, string[]>;
@@ -93,6 +95,8 @@ export interface ISystemConfig extends Document {
   readingThemeManifestSnapshot?: ReadingThemeManifestSnapshot | null;
   /** 仅 configKey=client_event_settings 使用：C 端埋点开关 */
   clientEventSettings?: Record<string, unknown> | null;
+  /** 仅 configKey=notebook_limits 使用：手帐本数量上限 */
+  notebookLimits?: Record<string, unknown> | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -188,6 +192,9 @@ const systemConfigSchema = new Schema(
       type: Schema.Types.Mixed,
     },
     clientEventSettings: {
+      type: Schema.Types.Mixed,
+    },
+    notebookLimits: {
       type: Schema.Types.Mixed,
     },
   },

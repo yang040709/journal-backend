@@ -82,7 +82,8 @@ export const paginatedSuccess = <T = any>(
   total: number,
   page: number,
   limit: number,
-  message: string = "success"
+  message: string = "success",
+  extra?: Record<string, unknown>,
 ): void => {
   const totalPages = Math.ceil(total / limit);
 
@@ -95,6 +96,7 @@ export const paginatedSuccess = <T = any>(
       page,
       limit,
       totalPages,
+      ...(extra ?? {}),
     },
     requestId: getRequestIdFromContext(ctx),
     timestamp: Date.now(),
@@ -118,6 +120,8 @@ export const ErrorCodes = {
 
   // 手帐本错误
   NOTEBOOK_NOT_FOUND: 2001,
+  /** 用户活本数量达到系统上限 */
+  NOTEBOOK_LIMIT_EXCEEDED: 2010,
 
   // 手帐错误
   NOTE_NOT_FOUND: 2002,

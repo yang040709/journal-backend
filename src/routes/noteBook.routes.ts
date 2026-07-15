@@ -79,7 +79,7 @@ const paginationSchema = z.object({
  *         description: 排序方向
  *     responses:
  *       200:
- *         description: 获取手帐本列表成功
+ *         description: 获取手帐本列表成功（data 含 items/total 与 maxNoteBookCount）
  *         content:
  *           application/json:
  *             schema:
@@ -103,6 +103,7 @@ router.get("/", async (ctx: AuthContext) => {
       params.page,
       params.limit,
       "获取手帐本列表成功",
+      { maxNoteBookCount: result.maxNoteBookCount },
     );
   } catch (err) {
     console.error("获取手帐本列表失败:", err);
@@ -216,6 +217,11 @@ router.post("/", async (ctx: AuthContext) => {
   } catch (err) {
     if (err instanceof z.ZodError) {
       error(ctx, "参数验证失败", ErrorCodes.PARAM_ERROR, 400);
+    } else if (
+      err instanceof Error &&
+      (err as Error & { code?: string }).code === "NOTEBOOK_LIMIT_EXCEEDED"
+    ) {
+      error(ctx, err.message, ErrorCodes.NOTEBOOK_LIMIT_EXCEEDED, 400);
     } else {
       console.error("创建手帐本失败:", err);
       error(ctx, "创建手帐本失败", ErrorCodes.INTERNAL_ERROR, 500);

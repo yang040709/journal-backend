@@ -49,6 +49,7 @@ import { listAll, listByUser } from "../../service/userImageAsset.service";
 import { NotePresetTagService } from "../../service/notePresetTag.service";
 import { UserNoteCustomTagService } from "../../service/userNoteCustomTag.service";
 import { QuotaBaseLimitsService } from "../../service/quotaBaseLimits.service";
+import { NotebookLimitsService } from "../../service/notebookLimits.service";
 import { NoteExportSettingsService } from "../../service/noteExportSettings.service";
 import { ReadingThemeCatalogConfigService } from "../../service/readingThemeCatalogConfig.service";
 import { ReadingThemeCatalogValidationError } from "../../utils/readingThemeCatalog";
@@ -130,6 +131,7 @@ const {
   announcementCreateBodySchema,
   announcementUpdateBodySchema,
   adminQuotaBaseLimitsPutSchema,
+  adminNotebookLimitsPutSchema,
   adminExportSettingsPutSchema,
   noteExportLogQuerySchema,
   createAdminSchema,
@@ -569,6 +571,86 @@ router.put(
     }
   },
 );
+
+/**
+ * @openapi
+ * /admin/notebook/limits:
+ *   get:
+ *     tags: [adminUsers]
+ *     summary: 手帐本数量上限配置
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       '200':
+ *         description: 成功
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/SuccessObject'
+ *       '401':
+ *         description: 未授权
+ */
+router.get("/notebook/limits", requireSuperAdmin(), async (ctx) => {
+  try {
+    const data = await NotebookLimitsService.getForAdmin();
+    success(ctx, data);
+  } catch (e) {
+    error(
+      ctx,
+      e instanceof Error ? e.message : "加载失败",
+      ErrorCodes.INTERNAL_ERROR,
+      500,
+    );
+  }
+});
+
+/**
+ * @openapi
+ * /admin/notebook/limits:
+ *   put:
+ *     tags: [adminUsers]
+ *     summary: 更新手帐本数量上限
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       '200':
+ *         description: 成功
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/SuccessObject'
+ *       '401':
+ *         description: 未授权
+ */
+router.put("/notebook/limits", requireSuperAdmin(), async (ctx) => {
+  try {
+    const body = adminNotebookLimitsPutSchema.parse(ctx.request.body);
+    // Zod 未同时给出两侧时，服务端 normalize 仍会钳制 default ≤ hard
+    if (
+      body.defaultMaxNoteBookCount !== undefined &&
+      body.hardMaxNoteBookCount === undefined
+    ) {
+      const prev = await NotebookLimitsService.getNotebookLimits();
+      if (body.defaultMaxNoteBookCount > prev.hardMaxNoteBookCount) {
+        error(ctx, "默认上限不能大于硬顶", ErrorCodes.PARAM_ERROR, 400);
+        return;
+      }
+    }
+    await NotebookLimitsService.setFromAdmin(body);
+    const data = await NotebookLimitsService.getForAdmin();
+    success(ctx, data);
+  } catch (e) {
+    if (e instanceof z.ZodError) {
+      error(ctx, "参数验证失败", ErrorCodes.PARAM_ERROR, 400);
+      return;
+    }
+    error(
+      ctx,
+      e instanceof Error ? e.message : "保存失败",
+      ErrorCodes.PARAM_ERROR,
+    );
+  }
+});
 
 /**
  * @openapi

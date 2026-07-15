@@ -180,6 +180,13 @@ router.post("/:id/restore", async (ctx: AuthContext) => {
       error(ctx, err.message, ErrorCodes.NOTEBOOK_NOT_FOUND, 404);
       return;
     }
+    if (
+      err instanceof Error &&
+      (err as Error & { code?: string }).code === "NOTEBOOK_LIMIT_EXCEEDED"
+    ) {
+      error(ctx, err.message, ErrorCodes.NOTEBOOK_LIMIT_EXCEEDED, 400);
+      return;
+    }
     logger.error("恢复手帐失败:", err);
     error(ctx, "恢复手帐失败", ErrorCodes.INTERNAL_ERROR, 500);
   }
