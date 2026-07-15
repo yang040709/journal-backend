@@ -162,7 +162,7 @@ const userSchema = new Schema(
     readingThemeApplyScope: {
       type: String,
       enum: ["global", "note"],
-      default: "note",
+      default: "global",
     },
     readingThemeCatalog: {
       type: new Schema(

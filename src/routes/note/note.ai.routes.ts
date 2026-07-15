@@ -33,7 +33,7 @@ router.get("/ai/styles", async (ctx: AuthContext) => {
     success(ctx, data, "ok");
   } catch (err) {
     logger.error("获取 AI 风格列表失败:", err);
-    error(ctx, "获取 AI 风格列表失败", ErrorCodes.INTERNAL_ERROR, 500);
+    error(ctx, "获取灵感风格失败", ErrorCodes.INTERNAL_ERROR, 500);
   }
 });
 
@@ -92,7 +92,7 @@ router.get("/ai/styles", async (ctx: AuthContext) => {
  *       401:
  *         description: 未授权
  *       429:
- *         description: 今日 AI 次数已用完
+ *         description: 今日灵感次数已用完
  *       500:
  *         description: 服务不可用或内部错误
  */
@@ -115,7 +115,7 @@ router.post("/ai/generate", async (ctx: AuthContext) => {
       error(ctx, "参数验证失败", ErrorCodes.PARAM_ERROR, 400);
       return;
     }
-    const message = err instanceof Error ? err.message : "AI 生成失败";
+    const message = err instanceof Error ? err.message : "灵感生成失败";
     const code =
       err instanceof Error && (err as Error & { code?: string }).code === "AI_DAILY_LIMIT_EXCEEDED"
         ? ErrorCodes.AI_DAILY_LIMIT_EXCEEDED
@@ -125,7 +125,7 @@ router.post("/ai/generate", async (ctx: AuthContext) => {
       return;
     }
     if (message === "AI service not configured") {
-      error(ctx, "AI 服务未配置", ErrorCodes.INTERNAL_ERROR, 500);
+      error(ctx, "灵感服务暂不可用", ErrorCodes.INTERNAL_ERROR, 500);
       return;
     }
     if (
@@ -136,7 +136,7 @@ router.post("/ai/generate", async (ctx: AuthContext) => {
       return;
     }
     logger.error("AI 写手帐失败:", err);
-    error(ctx, message || "AI 生成失败", ErrorCodes.INTERNAL_ERROR, 500);
+    error(ctx, message || "灵感生成失败", ErrorCodes.INTERNAL_ERROR, 500);
   }
 });
 
@@ -174,7 +174,7 @@ router.get("/ai/quota", async (ctx: AuthContext) => {
     success(ctx, result, "ok");
   } catch (err) {
     logger.error("查询 AI 额度失败:", err);
-    error(ctx, "查询 AI 额度失败", ErrorCodes.INTERNAL_ERROR, 500);
+    error(ctx, "查询灵感额度失败", ErrorCodes.INTERNAL_ERROR, 500);
   }
 });
 

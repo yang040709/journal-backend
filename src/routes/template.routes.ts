@@ -322,7 +322,7 @@ router.get("/all", async (ctx: AuthContext) => {
  *       401:
  *         description: 未授权访问
  *       429:
- *         description: 今日 AI 次数已用完
+ *         description: 今日灵感次数已用完
  *       500:
  *         description: 服务器内部错误
  */
@@ -361,7 +361,7 @@ router.post("/ai/generate", async (ctx: AuthContext) => {
       error(ctx, "参数验证失败", ErrorCodes.PARAM_ERROR, 400);
       return;
     }
-    const message = err instanceof Error ? err.message : "AI 生成模板失败";
+    const message = err instanceof Error ? err.message : "灵感生成模板失败";
     const code =
       err instanceof Error && (err as Error & { code?: string }).code === "AI_DAILY_LIMIT_EXCEEDED"
         ? ErrorCodes.AI_DAILY_LIMIT_EXCEEDED
@@ -371,7 +371,7 @@ router.post("/ai/generate", async (ctx: AuthContext) => {
       return;
     }
     if (message === "AI service not configured") {
-      error(ctx, "AI 服务未配置", ErrorCodes.INTERNAL_ERROR, 500);
+      error(ctx, "灵感服务暂不可用", ErrorCodes.INTERNAL_ERROR, 500);
       return;
     }
     if (message === "请先填写模板名称" || message === "请先填写标题模板与内容模板后再改写") {

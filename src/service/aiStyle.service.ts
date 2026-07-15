@@ -250,7 +250,7 @@ export class AiStyleService {
     if (def) return def;
     const first = await AiStyle.findOne({ enabled: true }).sort({ order: 1 });
     if (first) return first;
-    throw new Error("未配置可用 AI 风格");
+    throw new Error("未配置可用灵感风格");
   }
 
   static buildPrompt(style: IAiStyle, input: PromptBuildInput): { systemPrompt: string; userPrompt: string } {

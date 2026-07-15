@@ -187,7 +187,7 @@ export const NOTE_DETAIL_MORE_ACTION_LABELS: Record<string, string> = {
 
 export const NOTE_FORM_DOCK_ACTION_LABELS: Record<string, string> = {
   template: "模板",
-  ai_journal: "AI 写手帐",
+  ai_journal: "灵感写手帐",
   add_image: "添加图片",
   tags: "标签",
   notebook: "手帐本",

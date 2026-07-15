@@ -133,7 +133,7 @@ export class AiNoteService {
       const raw = await AiNoteService.invokeModel(systemPrompt, prompts.userPrompt, maxTokens);
       const text = AiNoteService.finalizeAiNoteText(raw);
       if (!text) {
-        throw new Error("AI 未返回有效内容，请稍后重试");
+        throw new Error("灵感未返回有效内容，请稍后重试");
       }
 
       void AiConsumptionLogService.recordJournalSuccess({
@@ -183,7 +183,7 @@ export class AiNoteService {
     const raw = await AiNoteService.invokeModel(systemPrompt, prompts.userPrompt, maxTokens);
     const text = AiNoteService.finalizeAiNoteText(raw);
     if (!text) {
-      throw new Error("AI 未返回有效内容，请稍后重试");
+      throw new Error("灵感未返回有效内容，请稍后重试");
     }
     return {
       text,

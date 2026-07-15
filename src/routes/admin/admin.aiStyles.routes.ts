@@ -484,7 +484,7 @@ router.post(
       }
       const msg = e instanceof Error ? e.message : "预览失败";
       if (msg === "AI service not configured") {
-        error(ctx, "AI 服务未配置", ErrorCodes.INTERNAL_ERROR, 500);
+        error(ctx, "灵感服务暂不可用", ErrorCodes.INTERNAL_ERROR, 500);
         return;
       }
       error(ctx, msg, ErrorCodes.PARAM_ERROR, 400);

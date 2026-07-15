@@ -61,7 +61,7 @@ export const rollbackAiUsage = async (userId: string, dateKey: string) => {
 };
 
 export const createAiDailyLimitExceededError = (dailyLimit: number): Error => {
-  const err = new Error(`今日 AI 次数已用完（每日 ${dailyLimit} 次），请明日再试`);
+  const err = new Error(`今日灵感次数已用完（每日 ${dailyLimit} 次），请明日再试`);
   (err as Error & { code: string }).code = "AI_DAILY_LIMIT_EXCEEDED";
   return err;
 };

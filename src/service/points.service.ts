@@ -648,7 +648,7 @@ export class PointsService {
         kind: ledgerKind,
         bizType,
         bizId,
-        title: kind === "upload" ? "兑换图片上传额度" : "兑换 AI 次数",
+        title: kind === "upload" ? "兑换图片上传额度" : "兑换灵感次数",
         flowType: buildFlowTypeFromDelta(-cost),
         pointsDelta: -cost,
         balanceBefore,
@@ -702,7 +702,7 @@ export class PointsService {
         title:
           kind === "upload"
             ? `积分兑换：上传永久额度 +${gain}（消耗 ${cost} 积分）`
-            : `积分兑换：AI 永久次数 +${gain}（消耗 ${cost} 积分）`,
+            : `积分兑换：灵感永久次数 +${gain}（消耗 ${cost} 积分）`,
         userId,
       },
       { blocking: false },
@@ -796,7 +796,7 @@ export class PointsService {
     const titleByKind: Record<string, string> = {
       ad_reward: "观看广告奖励",
       exchange_upload: "兑换图片上传额度",
-      exchange_ai: "兑换 AI 次数",
+      exchange_ai: "兑换灵感次数",
       exchange_note_export: "兑换手帐导出次数",
       admin_adjust: "后台积分调整",
       feedback_reward: "反馈奖励",

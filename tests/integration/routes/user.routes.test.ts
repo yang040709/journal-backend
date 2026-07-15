@@ -109,7 +109,7 @@ describe("integration: /auth", () => {
     expect(res.body.data.nickname).toBe("昵称 A");
     expect(res.body.data.defaultReadingStyleKey).toBeNull();
     expect(res.body.data.defaultReadingThemeId).toBeNull();
-    expect(res.body.data.readingThemeApplyScope).toBe("note");
+    expect(res.body.data.readingThemeApplyScope).toBe("global");
   });
 
   it("PUT /auth/me/reading-theme 可写入全局阅读主题", async () => {

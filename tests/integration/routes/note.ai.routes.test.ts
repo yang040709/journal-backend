@@ -102,7 +102,7 @@ describe("integration: /notes/ai", () => {
       })
       .expect(500);
 
-    expect(res.body.message).toContain("AI 服务未配置");
+    expect(res.body.message).toContain("灵感服务暂不可用");
 
     const quotaAfter = await agent
       .get("/notes/ai/quota")
