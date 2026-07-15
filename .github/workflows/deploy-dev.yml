@@ -45,6 +45,7 @@ jobs:
           username: ${{ secrets.SERVER_USER }}
           key: ${{ secrets.SERVER_SSH_KEY }}
           port: ${{ secrets.SERVER_PORT }}
+          command_timeout: 30m
           script: |
             sudo docker --version
             sudo docker compose version
@@ -74,6 +75,34 @@ jobs:
             ADMIN_JWT_EXPIRES_IN=7d
             ADMIN_BOOTSTRAP_USERNAME=${{ secrets.ADMIN_BOOTSTRAP_USERNAME }}
             ADMIN_BOOTSTRAP_PASSWORD=${{ secrets.ADMIN_BOOTSTRAP_PASSWORD }}
+            ADMIN_LOGIN_CAPTCHA_ENABLED=true
+            ADMIN_LOGIN_CAPTCHA_TTL_SECONDS=120
+            ADMIN_LOGIN_CAPTCHA_STORE=auto
+            ADMIN_LOGIN_IP_LIMIT=10
+            ADMIN_LOGIN_USERNAME_LIMIT=5
+            ADMIN_LOGIN_LOCK_FAIL_THRESHOLD=10
+            ADMIN_LOGIN_LOCK_MINUTES=15
+            ADMIN_LOGIN_CAPTCHA_CREATE_IP_LIMIT=30
+            # dev 环境 NODE_ENV=development，未部署 admin 时可留空（localhost 自动放行）
+            ADMIN_CORS_ORIGIN=
+            WECHAT_MP_APPID=${{ secrets.WECHAT_MP_APPID }}
+            WECHAT_MP_SECRET=${{ secrets.WECHAT_MP_SECRET }}
+            WECHAT_MP_ADMIN_OPENID=${{ secrets.WECHAT_MP_ADMIN_OPENID }}
+            WECHAT_MP_TEMPLATE_ADMIN_LOGIN=D2c9fO-jdGn1TBmjYa_rUSYiCZ4UbiR22tpNRqeSvr4
+            WECHAT_MP_TEMPLATE_ALERT=Z882lQ4PSNvLpztDazEye8WAAVD-0KIXUMq3q5PpO1o
+            WECHAT_MP_TEMPLATE_ADMIN_OPS=N3vFUH3Fr8yMrEi_ffB5Krry2zh4DWRVmiawqqBT2qY
+            WECHAT_MP_NOTIFY_ENABLED=true
+            WECHAT_MP_NOTIFY_ADMIN_LOGIN=true
+            WECHAT_MP_NOTIFY_ALERT=true
+            WECHAT_MP_NOTIFY_ADMIN_OPS=true
+            WECHAT_MP_NOTIFY_ADMIN_LOGIN_FAIL=true
+            WECHAT_MP_ADMIN_LOGIN_FAIL_WINDOW_MINUTES=5
+            WECHAT_MP_ADMIN_LOGIN_FAIL_THRESHOLD=5
+            SERVERCHAN_SENDKEY=${{ secrets.SERVERCHAN_SENDKEY }}
+            SERVERCHAN_NOTIFY_ENABLED=true
+            SERVERCHAN_NOTIFY_ADMIN_LOGIN=true
+            UPLOAD_DAILY_BASE_LIMIT=15
+            AI_DAILY_BASE_LIMIT=5
             EOF
             sudo docker pull yang0709/journal-backend:dev
             sudo docker compose -f docker-compose.dev.yml down

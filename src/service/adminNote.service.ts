@@ -18,6 +18,7 @@ import {
   toSafeRegex,
 } from "../utils/querySafety";
 import { InitialUserNoteSeedConfigService } from "./initialUserNoteSeedConfig.service";
+import { touchNoteBookAfterNoteActivity } from "./note/noteBookActivity";
 
 export const ADMIN_SHARE_NOTE_PATH_PREFIX =
   "/share/pages/share-note/share-note?share_id=";
@@ -179,6 +180,7 @@ export class AdminNoteService {
       : params;
     const query: Record<string, unknown> = {
       ...buildAdminNoteListQuery(queryParams),
+      isDeleted: { $ne: true },
     };
     if (textQ) {
       query.$text = { $search: textQ };
@@ -346,7 +348,7 @@ export class AdminNoteService {
   }
 
   static async getNoteById(id: string): Promise<AdminNoteListItem | null> {
-    const note = await Note.findById(id).lean();
+    const note = await Note.findOne({ _id: id, isDeleted: { $ne: true } }).lean();
     if (!note) {
       return null;
     }
@@ -375,7 +377,7 @@ export class AdminNoteService {
       ...(key ? { appliedSystemTemplateKey: key.slice(0, 120) } : {}),
     });
     await note.save();
-    await NoteBook.updateOne({ _id: data.noteBookId }, { $inc: { count: 1 } });
+    await touchNoteBookAfterNoteActivity(data.noteBookId, 1);
     return note;
   }
 
@@ -407,8 +409,13 @@ export class AdminNoteService {
     if (!note) {
       return null;
     }
+    if (note.isDeleted) {
+      throw new Error("手帐已在废纸篓，请使用废纸篓巡查恢复或永久删除");
+    }
 
     const prevIsShare = note.isShare;
+
+    let notebookMoved = false;
 
     if (data.noteBookId && data.noteBookId !== note.noteBookId) {
       const newNb = await NoteBook.findOne({
@@ -418,13 +425,12 @@ export class AdminNoteService {
       if (!newNb) {
         throw new Error("目标手帐本不存在或无权访问");
       }
-      await Promise.all([
-        NoteBook.updateOne({ _id: note.noteBookId }, { $inc: { count: -1 } }),
-        NoteBook.updateOne({ _id: data.noteBookId }, { $inc: { count: 1 } }),
-      ]);
+      await touchNoteBookAfterNoteActivity(String(note.noteBookId), -1);
+      await touchNoteBookAfterNoteActivity(String(data.noteBookId), 1);
       note.noteBookId = data.noteBookId;
       note.isPinned = false;
       note.pinnedAt = null;
+      notebookMoved = true;
     }
 
     if (data.title !== undefined) note.title = data.title;
@@ -489,7 +495,23 @@ export class AdminNoteService {
       }
     }
 
-    await note.save();
+    const shouldBumpUpdatedAt =
+      data.title !== undefined ||
+      data.content !== undefined ||
+      data.tags !== undefined ||
+      data.images !== undefined ||
+      data.noteBookId !== undefined;
+
+    if (shouldBumpUpdatedAt) {
+      await note.save();
+    } else {
+      await note.save({ timestamps: false });
+    }
+
+    if (shouldBumpUpdatedAt && !notebookMoved) {
+      await touchNoteBookAfterNoteActivity(String(note.noteBookId));
+    }
+
     return note;
   }
 
@@ -498,8 +520,16 @@ export class AdminNoteService {
     if (!note) {
       return false;
     }
+    if (note.isDeleted) {
+      throw new Error("手帐已在废纸篓，请使用废纸篓巡查永久删除");
+    }
+    const userId = String(note.userId);
+    const { cascadeHardDeleteNoteSideEffects } = await import(
+      "./note/noteHardDeleteCascade.service"
+    );
+    await cascadeHardDeleteNoteSideEffects(userId, id);
     await Note.deleteOne({ _id: id });
-    await NoteBook.updateOne({ _id: note.noteBookId }, { $inc: { count: -1 } });
+    await touchNoteBookAfterNoteActivity(String(note.noteBookId), -1);
     return true;
   }
 

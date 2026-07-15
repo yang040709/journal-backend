@@ -6,7 +6,7 @@ import SystemConfig, {
 
 const MAX_TITLE_LEN = 200;
 const MAX_CONTENT_LEN = 20_000;
-/** 模板行数上限（与手帐本上限一致，便于运营配置） */
+/** 模板行数上限（运营配置防异常膨胀，与手帐本数量上限无强制对齐） */
 export const MAX_INITIAL_NOTE_TEMPLATES = 40;
 export const MAX_INITIAL_NOTE_TARGET_INDEX = 19;
 /** 累积 seedKey 上限（防异常膨胀） */

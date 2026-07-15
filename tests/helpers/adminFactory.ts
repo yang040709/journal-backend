@@ -5,6 +5,38 @@ import {
   ADMIN_PAGE_GALLERY,
   ADMIN_PAGE_NOTES,
 } from "../../src/constant/adminPages";
+import { AdminCaptchaService } from "../../src/service/adminCaptcha.service";
+import type { Agent } from "supertest";
+
+export async function createLoginCaptcha() {
+  return AdminCaptchaService.createChallengeForTest("test1");
+}
+
+export async function loginAdminAgent(
+  agent: Agent,
+  input?: {
+    username?: string;
+    password?: string;
+    captchaId?: string;
+    captchaCode?: string;
+  },
+) {
+  const username = input?.username ?? process.env.ADMIN_BOOTSTRAP_USERNAME ?? "testadmin";
+  const password = input?.password ?? process.env.ADMIN_BOOTSTRAP_PASSWORD ?? "testadminpass";
+  let captchaId = input?.captchaId;
+  let captchaCode = input?.captchaCode;
+  if (!captchaId || !captchaCode) {
+    const captcha = await createLoginCaptcha();
+    captchaId = captcha.captchaId;
+    captchaCode = captcha.captchaCode;
+  }
+  return agent.post("/admin/auth/login").send({
+    username,
+    password,
+    captchaId,
+    captchaCode,
+  });
+}
 
 export async function seedAdmin(input?: {
   username?: string;

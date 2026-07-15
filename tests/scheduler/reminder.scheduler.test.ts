@@ -23,11 +23,13 @@ vi.mock("node-schedule", () => ({
 
 vi.mock("../../src/service/reminder.service", () => ({
   ReminderService: {
+    reclaimStuckSending: vi.fn().mockResolvedValue(0),
     getPendingReminders: vi.fn().mockResolvedValue([]),
     sendReminder: vi.fn(),
     cleanupExpiredReminders: vi.fn().mockResolvedValue({ deletedCount: 0 }),
   },
 }));
+
 
 import { ReminderService } from "../../src/service/reminder.service";
 import { ReminderScheduler } from "../../src/scheduler/reminder.scheduler";

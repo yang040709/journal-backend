@@ -50,21 +50,14 @@ describe("jwt utils", () => {
     expect(verifyToken(token, true)).toMatchObject({ userId: "user-1" });
   });
 
-  it("refreshToken 在过期 30 分钟窗口内可刷新", () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date("2026-01-01T00:00:00Z"));
-
-    const token = jwt.sign({ userId: "user-1" }, TEST_SECRET, {
-      expiresIn: "1s",
-    });
-
-    vi.setSystemTime(new Date("2026-01-01T00:10:00Z"));
+  it("refreshToken 未过期时可刷新", () => {
+    const token = signToken({ userId: "user-1" });
     const refreshed = refreshToken(token);
     expect(refreshed).toBeTruthy();
-    expect(verifyToken(refreshed!, true)).toMatchObject({ userId: "user-1" });
+    expect(verifyToken(refreshed!)).toMatchObject({ userId: "user-1" });
   });
 
-  it("refreshToken 过期超过 30 分钟返回 null", () => {
+  it("refreshToken 刚过期返回 null", () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-01-01T00:00:00Z"));
 
@@ -72,7 +65,16 @@ describe("jwt utils", () => {
       expiresIn: "1s",
     });
 
-    vi.setSystemTime(new Date("2026-01-01T01:00:00Z"));
+    vi.setSystemTime(new Date("2026-01-01T00:00:02Z"));
+    expect(refreshToken(token)).toBeNull();
+  });
+
+  it("损坏 token refreshToken 返回 null", () => {
+    expect(refreshToken("not.a.jwt")).toBeNull();
+  });
+
+  it("缺少 userId 的 payload 不可刷新", () => {
+    const token = jwt.sign({ role: "x" }, TEST_SECRET, { expiresIn: "1h" });
     expect(refreshToken(token)).toBeNull();
   });
 

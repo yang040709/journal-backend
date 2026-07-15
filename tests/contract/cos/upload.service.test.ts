@@ -51,8 +51,9 @@ describe("contract: UploadService COS boundary", () => {
     expect(STS.getCredential).not.toHaveBeenCalled();
   });
 
-  it("STS 失败时不调用外网且抛出错误", async () => {
+  it("STS 失败时回滚日额度且抛出错误", async () => {
     const { userId } = await seedUser();
+    const { dateKey } = getQuotaDateContext();
     vi.mocked(STS.getCredential).mockRejectedValue(new Error("STS mock failed"));
 
     await expect(
@@ -66,6 +67,38 @@ describe("contract: UploadService COS boundary", () => {
     ).rejects.toThrow("STS mock failed");
 
     expect(STS.getCredential).toHaveBeenCalledOnce();
+    const doc = await UserUploadQuotaDaily.findOne({ userId, dateKey }).lean();
+    expect(doc?.usedCount ?? 0).toBe(0);
+    expect(Number((doc as any)?.bizBreakdown?.note ?? 0)).toBe(0);
+  });
+
+  it("STS 失败时 feedback 额度与 note 额度互不污染", async () => {
+    const { userId } = await seedUser();
+    const { dateKey } = getQuotaDateContext();
+    process.env.COS_SECRET_ID = "sid";
+    process.env.COS_SECRET_KEY = "skey";
+    process.env.COS_BUCKET = "bucket-125000";
+    process.env.COS_REGION = "ap-guangzhou";
+
+    vi.mocked(STS.getCredential).mockRejectedValue(new Error("STS mock failed"));
+
+    await expect(
+      UploadService.createCosStsCredential({
+        userId,
+        biz: "feedback",
+        fileName: "fb.jpg",
+        fileType: "image/jpeg",
+        fileSize: 512,
+      }),
+    ).rejects.toThrow("STS mock failed");
+
+    const noteQuota = await UserUploadQuotaDaily.findOne({ userId, dateKey }).lean();
+    expect(noteQuota?.usedCount ?? 0).toBe(0);
+
+    const FeedbackQuota = (await import("../../../src/model/UserFeedbackImageQuotaDaily"))
+      .default;
+    const fb = await FeedbackQuota.findOne({ userId, dateKey }).lean();
+    expect(fb?.usedCount ?? 0).toBe(0);
   });
 
   it("额度耗尽时抛出 UploadDailyLimitExceededError", async () => {

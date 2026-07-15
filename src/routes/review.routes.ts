@@ -23,6 +23,41 @@ const publicListQuerySchema = z
     path: ["page"],
   });
 
+/**
+ * @openapi
+ * /reviews:
+ *   get:
+ *     tags:
+ *       - review
+ *     summary: 获取用户评价列表
+ *     description: 公开接口，分页返回已上架的用户评价
+ *     security: []
+ *     parameters:
+ *       - in: query
+ *         name: page
+ *         schema:
+ *           type: integer
+ *           default: 1
+ *         description: 页码
+ *       - in: query
+ *         name: pageSize
+ *         schema:
+ *           type: integer
+ *           default: 10
+ *           maximum: 50
+ *         description: 每页数量
+ *     responses:
+ *       200:
+ *         description: 获取评价列表成功
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/SuccessGeneric'
+ *       400:
+ *         description: 参数验证失败或分页深度超限
+ *       500:
+ *         description: 服务器内部错误
+ */
 router.get("/", async (ctx) => {
   try {
     const query = publicListQuerySchema.parse(ctx.query);

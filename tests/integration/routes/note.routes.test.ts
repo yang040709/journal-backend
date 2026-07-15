@@ -7,10 +7,14 @@ import {
 } from "vitest";
 import { createTestAgent } from "../../helpers/appFactory";
 import { authHeader, createAuthUser } from "../../helpers/authFactory";
+import { adminAuthHeader, seedAdmin } from "../../helpers/adminFactory";
 import { clearTestDb, connectTestDb } from "../../helpers/db";
 import { seedNote } from "../../helpers/seed/note.seed";
 import { seedNoteBook } from "../../helpers/seed/notebook.seed";
+import Note from "../../../src/model/Note";
+import NoteBook from "../../../src/model/NoteBook";
 import { ErrorCodes } from "../../../src/utils/response";
+import { buildDefaultReadingThemeCatalog } from "../../../src/utils/readingThemeCatalog";
 
 describe("integration: /notes", () => {
   const agent = createTestAgent();
@@ -80,6 +84,126 @@ describe("integration: /notes", () => {
     expect(res.body.code).toBe(0);
     expect(res.body.data.total).toBe(2);
     expect(res.body.data.items).toHaveLength(2);
+  });
+
+  it("GET /notes 列表返回 contentPreview 且不返回 content", async () => {
+    const { token, userId } = await createAuthUser();
+    const book = await seedNoteBook(userId);
+    await seedNote({
+      userId,
+      noteBookId: book.id,
+      title: "我是小羊",
+      content: "今天天气很好，和小羊一起去公园玩",
+    });
+
+    const res = await agent
+      .get("/notes")
+      .query({ page: 1, limit: 10, noteBookId: book.id })
+      .set(authHeader(token))
+      .expect(200);
+
+    const item = res.body.data.items[0];
+    expect(item.contentPreview).toContain("今天天气很好");
+    expect(item.content).toBeUndefined();
+  });
+
+  it("GET /notes 补全缺失 contentPreview 时不更新 updatedAt", async () => {
+    const { token, userId } = await createAuthUser();
+    const book = await seedNoteBook(userId);
+    const past = new Date("2020-01-15T08:00:00.000Z");
+
+    const doc = await Note.create({
+      userId,
+      noteBookId: book.id,
+      title: "旧数据",
+      content: "这是存量手帐正文",
+      tags: [],
+      images: [],
+      isShare: false,
+      shareId: "testshare1234",
+      shareVersion: 0,
+      isDeleted: false,
+      createdAt: past,
+      updatedAt: past,
+    });
+    await Note.updateOne(
+      { _id: doc._id },
+      { $set: { contentPreview: "" } },
+      { timestamps: false },
+    );
+
+    await agent
+      .get("/notes")
+      .query({ page: 1, limit: 10, noteBookId: book.id })
+      .set(authHeader(token))
+      .expect(200);
+
+    await new Promise((resolve) => setTimeout(resolve, 150));
+
+    const refreshed = await Note.findById(doc._id).lean();
+    expect(refreshed?.contentPreview).toContain("这是存量手帐正文");
+    expect(refreshed?.updatedAt?.toISOString()).toBe(past.toISOString());
+  });
+
+  it("GET /notes 重复请求不刷新已有 contentPreview 手帐的 updatedAt", async () => {
+    const { token, userId } = await createAuthUser();
+    const book = await seedNoteBook(userId);
+    const past = new Date("2020-01-15T08:00:00.000Z");
+
+    const doc = await Note.create({
+      userId,
+      noteBookId: book.id,
+      title: "已有摘要",
+      content: "第一行\n第二行",
+      tags: [],
+      images: [],
+      isShare: false,
+      shareId: "testshare5678",
+      shareVersion: 0,
+      isDeleted: false,
+      createdAt: past,
+      updatedAt: past,
+    });
+    await Note.updateOne(
+      { _id: doc._id },
+      { $set: { contentPreview: "旧摘要" } },
+      { timestamps: false },
+    );
+
+    await agent
+      .get("/notes")
+      .query({ page: 1, limit: 10, noteBookId: book.id })
+      .set(authHeader(token))
+      .expect(200);
+    await agent
+      .get("/notes")
+      .query({ page: 1, limit: 10, noteBookId: book.id })
+      .set(authHeader(token))
+      .expect(200);
+
+    await new Promise((resolve) => setTimeout(resolve, 150));
+
+    const refreshed = await Note.findById(doc._id).lean();
+    expect(refreshed?.contentPreview).toBe("旧摘要");
+    expect(refreshed?.updatedAt?.toISOString()).toBe(past.toISOString());
+  });
+
+  it("POST /notes 创建时写入 contentPreview", async () => {
+    const { token, userId } = await createAuthUser();
+    const book = await seedNoteBook(userId);
+
+    const res = await agent
+      .post("/notes")
+      .set(authHeader(token))
+      .send({
+        noteBookId: book.id,
+        title: "今日心情",
+        content: "阳光很好，适合写手帐",
+        tags: [],
+      })
+      .expect(200);
+
+    expect(res.body.data.contentPreview).toContain("阳光很好");
   });
 
   it("DELETE /notes/:id 软删后 trash 可见", async () => {
@@ -163,6 +287,197 @@ describe("integration: /notes", () => {
     expect(res.body.code).toBe(ErrorCodes.NOTE_NOT_FOUND);
   });
 
+  it("GET /notes/:id 默认含 readingStyleKey null", async () => {
+    const { token, userId } = await createAuthUser();
+    const book = await seedNoteBook(userId);
+    const note = await seedNote({ userId, noteBookId: book.id });
+
+    const res = await agent
+      .get(`/notes/${note.id}`)
+      .set(authHeader(token))
+      .expect(200);
+
+    expect(res.body.code).toBe(0);
+    expect(res.body.data.readingStyleKey).toBeNull();
+    expect(res.body.data.readingThemeId).toBeNull();
+    expect(res.body.data.readingThemeScope).toBeUndefined();
+  });
+
+  it("PUT /notes/:id 可写入合法 readingStyleKey 并回读", async () => {
+    const { token, userId } = await createAuthUser();
+    const book = await seedNoteBook(userId);
+    const note = await seedNote({ userId, noteBookId: book.id });
+    const keys = [
+      "journal",
+      "minimalNordic",
+      "vintageJournal",
+      "watercolorSketch",
+      "dreamyCinematic",
+      "productMemo",
+      "filmTravel",
+    ] as const;
+
+    for (const readingStyleKey of keys) {
+      const putRes = await agent
+        .put(`/notes/${note.id}`)
+        .set(authHeader(token))
+        .send({ readingStyleKey })
+        .expect(200);
+
+      expect(putRes.body.code).toBe(0);
+      expect(putRes.body.data.readingStyleKey).toBe(readingStyleKey);
+
+      const getRes = await agent
+        .get(`/notes/${note.id}`)
+        .set(authHeader(token))
+        .expect(200);
+
+      expect(getRes.body.data.readingStyleKey).toBe(readingStyleKey);
+    }
+  });
+
+  it("PUT /notes/:id readingStyleKey null 恢复标准阅读", async () => {
+    const { token, userId } = await createAuthUser();
+    const book = await seedNoteBook(userId);
+    const note = await seedNote({ userId, noteBookId: book.id });
+
+    await agent
+      .put(`/notes/${note.id}`)
+      .set(authHeader(token))
+      .send({ readingStyleKey: "journal" })
+      .expect(200);
+
+    const res = await agent
+      .put(`/notes/${note.id}`)
+      .set(authHeader(token))
+      .send({ readingStyleKey: null })
+      .expect(200);
+
+    expect(res.body.code).toBe(0);
+    expect(res.body.data.readingStyleKey).toBeNull();
+  });
+
+  it("PUT /notes/:id 非法 readingStyleKey 返回 400", async () => {
+    const { token, userId } = await createAuthUser();
+    const book = await seedNoteBook(userId);
+    const note = await seedNote({ userId, noteBookId: book.id });
+
+    const res = await agent
+      .put(`/notes/${note.id}`)
+      .set(authHeader(token))
+      .send({ readingStyleKey: "invalid-style" })
+      .expect(400);
+
+    expect(res.body.code).toBe(ErrorCodes.PARAM_ERROR);
+  });
+
+  it("PUT /notes/:id 可写入 filmTravel readingStyleKey 并回读", async () => {
+    const { token, userId } = await createAuthUser();
+    const book = await seedNoteBook(userId);
+    const note = await seedNote({ userId, noteBookId: book.id });
+
+    const putRes = await agent
+      .put(`/notes/${note.id}`)
+      .set(authHeader(token))
+      .send({
+        readingStyleKey: "filmTravel",
+        readingThemeId: "film-default",
+      })
+      .expect(200);
+
+    expect(putRes.body.data.readingStyleKey).toBe("filmTravel");
+    expect(putRes.body.data.readingThemeId).toBe("film-default");
+
+    const getRes = await agent
+      .get(`/notes/${note.id}`)
+      .set(authHeader(token))
+      .expect(200);
+
+    expect(getRes.body.data.readingStyleKey).toBe("filmTravel");
+    expect(getRes.body.data.readingThemeId).toBe("film-default");
+  });
+
+  it("PUT /notes/:id 可写入 readingThemeId 并回读", async () => {
+    const { token, userId } = await createAuthUser();
+    const book = await seedNoteBook(userId);
+    const note = await seedNote({ userId, noteBookId: book.id });
+
+    const putRes = await agent
+      .put(`/notes/${note.id}`)
+      .set(authHeader(token))
+      .send({
+        readingStyleKey: "vintageJournal",
+        readingThemeId: "vintage-rose",
+      })
+      .expect(200);
+
+    expect(putRes.body.data.readingStyleKey).toBe("vintageJournal");
+    expect(putRes.body.data.readingThemeId).toBe("vintage-rose");
+
+    const getRes = await agent
+      .get(`/notes/${note.id}`)
+      .set(authHeader(token))
+      .expect(200);
+
+    expect(getRes.body.data.readingThemeId).toBe("vintage-rose");
+  });
+
+  it("PUT /notes/:id readingStyleKey null 时清空 readingThemeId", async () => {
+    const { token, userId } = await createAuthUser();
+    const book = await seedNoteBook(userId);
+    const note = await seedNote({ userId, noteBookId: book.id });
+
+    await agent
+      .put(`/notes/${note.id}`)
+      .set(authHeader(token))
+      .send({
+        readingStyleKey: "journal",
+        readingThemeId: "vintage_paper",
+      })
+      .expect(200);
+
+    const res = await agent
+      .put(`/notes/${note.id}`)
+      .set(authHeader(token))
+      .send({ readingStyleKey: null })
+      .expect(200);
+
+    expect(res.body.data.readingStyleKey).toBeNull();
+    expect(res.body.data.readingThemeId).toBeNull();
+  });
+
+  it("PUT /notes/:id 系统已隐藏 readingThemeId 返回 400", async () => {
+    const { token: adminToken } = await seedAdmin();
+    const defaults = buildDefaultReadingThemeCatalog();
+    await agent
+      .put("/admin/reading-theme-catalog")
+      .set(adminAuthHeader(adminToken))
+      .send({
+        styleKeys: [null, "vintageJournal"],
+        themeIdsByStyle: {
+          vintageJournal: defaults.themeIdsByStyle.vintageJournal.filter(
+            (id) => id !== "vintage-rose",
+          ),
+        },
+      })
+      .expect(200);
+
+    const { token, userId } = await createAuthUser();
+    const book = await seedNoteBook(userId);
+    const note = await seedNote({ userId, noteBookId: book.id });
+
+    const res = await agent
+      .put(`/notes/${note.id}`)
+      .set(authHeader(token))
+      .send({
+        readingStyleKey: "vintageJournal",
+        readingThemeId: "vintage-rose",
+      })
+      .expect(400);
+
+    expect(res.body.code).toBe(ErrorCodes.PARAM_ERROR);
+  });
+
   it("GET /notes/search/page 分页深度超限返回 400", async () => {
     const { token } = await createAuthUser();
 
@@ -185,5 +500,131 @@ describe("integration: /notes", () => {
       .expect(400);
 
     expect(res.body.code).toBe(ErrorCodes.PARAM_ERROR);
+  });
+
+  describe("手帐活动刷新所属手帐本 updatedAt", () => {
+    it("POST /notes 创建手帐后刷新手帐本 updatedAt 并增加 count", async () => {
+      const { token, userId } = await createAuthUser();
+      const book = await seedNoteBook(userId);
+      const past = new Date("2020-01-15T08:00:00.000Z");
+
+      await NoteBook.updateOne(
+        { _id: book.id },
+        { $set: { updatedAt: past, count: 0 } },
+        { timestamps: false },
+      );
+
+      await agent
+        .post("/notes")
+        .set(authHeader(token))
+        .send({
+          noteBookId: book.id,
+          title: "今日心情",
+          content: "阳光很好",
+          tags: [],
+        })
+        .expect(200);
+
+      const refreshed = await NoteBook.findById(book.id).lean();
+      expect(refreshed?.count).toBe(1);
+      expect(refreshed?.updatedAt?.getTime()).toBeGreaterThan(past.getTime());
+    });
+
+    it("PUT /notes/:id 编辑内容后刷新手帐本 updatedAt", async () => {
+      const { token, userId } = await createAuthUser();
+      const book = await seedNoteBook(userId);
+      const past = new Date("2020-01-15T08:00:00.000Z");
+      const note = await seedNote({ userId, noteBookId: book.id, title: "原标题" });
+
+      await NoteBook.updateOne(
+        { _id: book.id },
+        { $set: { updatedAt: past } },
+        { timestamps: false },
+      );
+
+      await agent
+        .put(`/notes/${note.id}`)
+        .set(authHeader(token))
+        .send({ content: "更新后的正文" })
+        .expect(200);
+
+      const refreshed = await NoteBook.findById(book.id).lean();
+      expect(refreshed?.updatedAt?.getTime()).toBeGreaterThan(past.getTime());
+    });
+
+    it("PUT /notes/:id 仅置顶不刷新手帐本 updatedAt", async () => {
+      const { token, userId } = await createAuthUser();
+      const book = await seedNoteBook(userId);
+      const past = new Date("2020-01-15T08:00:00.000Z");
+      const note = await seedNote({ userId, noteBookId: book.id });
+
+      await NoteBook.updateOne(
+        { _id: book.id },
+        { $set: { updatedAt: past } },
+        { timestamps: false },
+      );
+
+      await agent
+        .put(`/notes/${note.id}`)
+        .set(authHeader(token))
+        .send({ isPinned: true })
+        .expect(200);
+
+      const refreshed = await NoteBook.findById(book.id).lean();
+      expect(refreshed?.updatedAt?.toISOString()).toBe(past.toISOString());
+    });
+
+    it("PUT /notes/:id 换本后目标手帐本 updatedAt 新于源手帐本", async () => {
+      const { token, userId } = await createAuthUser();
+      const sourceBook = await seedNoteBook(userId, "源本");
+      const targetBook = await seedNoteBook(userId, "目标本");
+      const past = new Date("2020-01-15T08:00:00.000Z");
+      const note = await seedNote({ userId, noteBookId: sourceBook.id });
+
+      await NoteBook.updateMany(
+        { _id: { $in: [sourceBook.id, targetBook.id] } },
+        { $set: { updatedAt: past, count: 1 } },
+        { timestamps: false },
+      );
+      await NoteBook.updateOne(
+        { _id: targetBook.id },
+        { $set: { count: 0 } },
+        { timestamps: false },
+      );
+
+      await agent
+        .put(`/notes/${note.id}`)
+        .set(authHeader(token))
+        .send({ noteBookId: targetBook.id })
+        .expect(200);
+
+      const source = await NoteBook.findById(sourceBook.id).lean();
+      const target = await NoteBook.findById(targetBook.id).lean();
+      expect(source?.count).toBe(0);
+      expect(target?.count).toBe(1);
+      expect(source?.updatedAt?.getTime()).toBeGreaterThan(past.getTime());
+      expect(target?.updatedAt?.getTime()).toBeGreaterThan(
+        source?.updatedAt?.getTime() || 0,
+      );
+    });
+
+    it("DELETE /notes/:id 软删后刷新手帐本 updatedAt 并减少 count", async () => {
+      const { token, userId } = await createAuthUser();
+      const book = await seedNoteBook(userId);
+      const past = new Date("2020-01-15T08:00:00.000Z");
+      const note = await seedNote({ userId, noteBookId: book.id });
+
+      await NoteBook.updateOne(
+        { _id: book.id },
+        { $set: { updatedAt: past, count: 1 } },
+        { timestamps: false },
+      );
+
+      await agent.delete(`/notes/${note.id}`).set(authHeader(token)).expect(200);
+
+      const refreshed = await NoteBook.findById(book.id).lean();
+      expect(refreshed?.count).toBe(0);
+      expect(refreshed?.updatedAt?.getTime()).toBeGreaterThan(past.getTime());
+    });
   });
 });

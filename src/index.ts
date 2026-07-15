@@ -2,7 +2,10 @@ import "dotenv/config";
 import app, { startSchedulersAfterDBConnection } from "./app";
 
 import { connectDB } from "./config/db";
-import { runMigrations, migrateSoftDeleteBackfill } from "./utils/migration";
+import {
+  runPendingMigrations,
+  ensureShareSecurityTaskIndexes,
+} from "./utils/migration";
 import { initSensitiveFilter } from "./utils/sensitive-encrypted";
 import { ensureAdminBootstrap } from "./service/adminBootstrap.service";
 import { ensureSystemTemplates } from "./service/systemTemplateSeed.service";
@@ -43,10 +46,11 @@ const init = async () => {
     }
     await connectDB();
 
-    // 执行数据库迁移
-    await runMigrations();
-    // 兼容旧版本数据：自动补齐软删除字段（幂等，部署后会自动执行）
-    await migrateSoftDeleteBackfill();
+    // Schema 迁移（带 name+version 账本；已 success 跳过）。
+    // 首次部署含 content-preview / note-cover-keys 时可能拖长启动数分钟。
+    await runPendingMigrations();
+    // 索引同步：每次启动，不记版本账本
+    await ensureShareSecurityTaskIndexes();
 
     await ensureAdminBootstrap();
     await ensureSystemTemplates();

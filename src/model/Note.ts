@@ -1,10 +1,13 @@
 import { Schema, model, Document } from "mongoose";
 import { LeanNote } from "../types/mongoose";
+import { buildNoteContentPreview } from "../utils/noteContentPreview";
 
 export interface INote extends Document {
   noteBookId: string;
   title: string;
   content: string;
+  /** 列表/相册封面用正文摘要（不含完整 content） */
+  contentPreview: string;
   tags: string[];
   images: INoteImage[];
   userId: string;
@@ -25,6 +28,10 @@ export interface INote extends Document {
   /** 置顶（仅当前 noteBookId 内列表排序） */
   isPinned: boolean;
   pinnedAt?: Date | null;
+  /** 详情页阅读风格 key；null 表示标准阅读 */
+  readingStyleKey?: string | null;
+  /** 详情页阅读主题色 id（与导出 preset theme.id 一致）；null 时用该风格默认主题 */
+  readingThemeId?: string | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -108,6 +115,11 @@ const noteSchema = new Schema(
       type: String,
       default: "",
     },
+    contentPreview: {
+      type: String,
+      default: "",
+      maxlength: 120,
+    },
     tags: {
       type: [String],
       default: [],
@@ -187,6 +199,17 @@ const noteSchema = new Schema(
       default: null,
       sparse: true,
     },
+    readingStyleKey: {
+      type: String,
+      default: null,
+      trim: true,
+    },
+    readingThemeId: {
+      type: String,
+      default: null,
+      trim: true,
+      maxlength: 64,
+    },
   },
   {
     timestamps: true,
@@ -217,6 +240,13 @@ noteSchema.index({ userId: 1, "images.key": 1 });
 // 添加虚拟字段id
 noteSchema.virtual("id").get(function (this: any) {
   return this._id.toString();
+});
+
+noteSchema.pre("save", function (next) {
+  if (this.isModified("content")) {
+    this.contentPreview = buildNoteContentPreview(this.content ?? "");
+  }
+  next();
 });
 
 export default model<INote>("Note", noteSchema);

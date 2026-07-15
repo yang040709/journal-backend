@@ -12,9 +12,32 @@ import { ActivityLogger } from "../utils/ActivityLogger";
 import { CoverService } from "./cover.service";
 import { InitialUserNotebookConfigService } from "./initialUserNotebookConfig.service";
 import { InitialUserNoteSeedConfigService } from "./initialUserNoteSeedConfig.service";
+import { buildNoteContentPreview } from "../utils/noteContentPreview";
 import { nanoid } from "nanoid";
 import { getWeChatAppId, getWeChatSecret } from "../config/wechatEnv";
 import { Types } from "mongoose";
+import {
+  type ReadingThemeCatalog,
+  parseReadingThemeCatalogFromUser,
+  validateReadingThemeCatalogInput,
+  validateCatalogAgainstSystem,
+  assertReadingThemeSelectionAllowed,
+} from "../utils/readingThemeCatalog";
+import { ReadingThemeCatalogConfigService } from "./readingThemeCatalogConfig.service";
+import {
+  ALBUM_COVER_NO_IMAGE_STYLE_VALUES,
+  type UpdateDisplayPreferenceInput,
+} from "../schemas/displayPreference.schema";
+import { DisplayPreferenceChangeLogService } from "./displayPreferenceChangeLog.service";
+import { ReadingThemeChangeLogService } from "./readingThemeChangeLog.service";
+
+export interface DisplayPrefs {
+  showNoteWordCount: boolean;
+  showReadingThemeClockTime: boolean;
+  useLegacyNoteItem: boolean;
+  albumCoverHighSaturation: boolean;
+  albumCoverNoImageStyle: (typeof ALBUM_COVER_NO_IMAGE_STYLE_VALUES)[number];
+}
 
 export interface LoginResult {
   token: string;
@@ -27,6 +50,12 @@ export interface MePageProfile {
   avatarUrl: string;
   bio: string;
   membershipText: string;
+  defaultReadingStyleKey: string | null;
+  defaultReadingThemeId: string | null;
+  readingThemeApplyScope: "global" | "note";
+  readingThemeCatalog: ReadingThemeCatalog | null;
+  systemReadingThemeCatalog: ReadingThemeCatalog;
+  displayPrefs: DisplayPrefs;
 }
 
 export interface MePageStats {
@@ -41,12 +70,70 @@ export interface UpdateMeProfileInput {
   bio?: string;
 }
 
+export interface UpdateDefaultReadingThemeInput {
+  defaultReadingStyleKey?: string | null;
+  defaultReadingThemeId?: string | null;
+  readingThemeApplyScope?: "global" | "note";
+}
+
+export interface UpdateReadingThemeCatalogInput {
+  styleKeys: (string | null)[];
+  themeIdsByStyle: Record<string, string[]>;
+}
+
 export class UserService {
   private static buildDefaultNickname(userId: string): string {
     const normalized = String(userId || "").trim();
     if (!normalized) return "手帐用户";
     const suffix = normalized.slice(-4);
     return `手帐用户${suffix}`;
+  }
+
+  private static parseReadingThemeApplyScope(value: unknown): "global" | "note" {
+    return value === "global" ? "global" : "note";
+  }
+
+  private static parseDisplayPrefsFields(user: any): DisplayPrefs {
+    const validNoImageStyles = new Set<string>(ALBUM_COVER_NO_IMAGE_STYLE_VALUES);
+    const rawStyle = String(user?.albumCoverNoImageStyle || "").trim();
+    const albumCoverNoImageStyle = validNoImageStyles.has(rawStyle)
+      ? (rawStyle as DisplayPrefs["albumCoverNoImageStyle"])
+      : "dateTeaser";
+
+    return {
+      showNoteWordCount: Boolean(user?.showNoteWordCount),
+      showReadingThemeClockTime: Boolean(user?.showReadingThemeClockTime),
+      useLegacyNoteItem: Boolean(user?.useLegacyNoteItem),
+      albumCoverHighSaturation: Boolean(user?.albumCoverHighSaturation),
+      albumCoverNoImageStyle,
+    };
+  }
+
+  private static parseReadingThemeFields(user: any): Pick<
+    MePageProfile,
+    | "defaultReadingStyleKey"
+    | "defaultReadingThemeId"
+    | "readingThemeApplyScope"
+    | "readingThemeCatalog"
+  > {
+    return {
+      defaultReadingStyleKey:
+        user?.defaultReadingStyleKey === undefined ||
+        user?.defaultReadingStyleKey === null
+          ? null
+          : String(user.defaultReadingStyleKey),
+      defaultReadingThemeId:
+        user?.defaultReadingThemeId === undefined ||
+        user?.defaultReadingThemeId === null
+          ? null
+          : String(user.defaultReadingThemeId),
+      readingThemeApplyScope: UserService.parseReadingThemeApplyScope(
+        user?.readingThemeApplyScope,
+      ),
+      readingThemeCatalog: parseReadingThemeCatalogFromUser(
+        user?.readingThemeCatalog,
+      ),
+    };
   }
 
   /**
@@ -207,6 +294,7 @@ export class UserService {
             noteBookId,
             title: t.title,
             content: t.content || "",
+            contentPreview: buildNoteContentPreview(t.content || ""),
             tags: Array.isArray(t.tags) ? t.tags : [],
             images: [],
             userId,
@@ -245,6 +333,7 @@ export class UserService {
             },
           ];
         }),
+        { timestamps: false },
       );
       console.log(`✅ 为用户 ${userId} 创建了 ${notesToInsert.length} 篇初始手帐`);
     } catch (error) {
@@ -291,6 +380,25 @@ export class UserService {
       throw new Error("用户不存在");
     }
 
+    const { catalog: systemReadingThemeCatalog, snapshot: systemManifestSnapshot } =
+      await ReadingThemeCatalogConfigService.getSystemCatalogWithSnapshot();
+
+    const { catalog: migratedReadingThemeCatalog, changed: readingThemeCatalogChanged } =
+      await ReadingThemeCatalogConfigService.migrateUserReadingThemeCatalog(
+        user.readingThemeCatalog,
+        systemReadingThemeCatalog,
+        systemManifestSnapshot,
+      );
+
+    if (readingThemeCatalogChanged && migratedReadingThemeCatalog) {
+      await User.updateOne(
+        { userId },
+        { $set: { readingThemeCatalog: migratedReadingThemeCatalog } },
+      );
+    }
+
+    const readingThemeFields = UserService.parseReadingThemeFields(user);
+
     return {
       userId: user.userId,
       nickname:
@@ -299,6 +407,11 @@ export class UserService {
       avatarUrl: String((user as any).avatarUrl || "").trim(),
       bio: String((user as any).bio || "").trim() || "手帐记录生活点滴",
       membershipText: String((user as any).membershipText || "").trim(),
+      ...readingThemeFields,
+      readingThemeCatalog:
+        migratedReadingThemeCatalog ?? readingThemeFields.readingThemeCatalog,
+      systemReadingThemeCatalog,
+      displayPrefs: UserService.parseDisplayPrefsFields(user),
     };
   }
 
@@ -354,6 +467,7 @@ export class UserService {
         avatarUrl: String((user as any)?.avatarUrl || "").trim(),
         bio: String((user as any)?.bio || "").trim() || "手帐记录生活点滴",
         membershipText: String((user as any)?.membershipText || "").trim(),
+        ...UserService.parseReadingThemeFields(user),
       };
     }
 
@@ -375,7 +489,188 @@ export class UserService {
       avatarUrl: String((user as any).avatarUrl || "").trim(),
       bio: String((user as any).bio || "").trim() || "手帐记录生活点滴",
       membershipText: String((user as any).membershipText || "").trim(),
+      ...UserService.parseReadingThemeFields(user),
     };
+  }
+
+  static async updateDefaultReadingTheme(
+    userId: string,
+    input: UpdateDefaultReadingThemeInput,
+  ): Promise<Pick<
+    MePageProfile,
+    "defaultReadingStyleKey" | "defaultReadingThemeId" | "readingThemeApplyScope"
+  >> {
+    const updatePayload: UpdateDefaultReadingThemeInput = {};
+
+    if (input.readingThemeApplyScope !== undefined) {
+      updatePayload.readingThemeApplyScope = input.readingThemeApplyScope;
+    }
+
+    if (input.defaultReadingStyleKey !== undefined) {
+      updatePayload.defaultReadingStyleKey = input.defaultReadingStyleKey;
+      if (input.defaultReadingStyleKey === null) {
+        updatePayload.defaultReadingThemeId = null;
+      }
+    }
+
+    if (input.defaultReadingThemeId !== undefined) {
+      const styleKey =
+        updatePayload.defaultReadingStyleKey !== undefined
+          ? updatePayload.defaultReadingStyleKey
+          : input.defaultReadingStyleKey;
+      updatePayload.defaultReadingThemeId =
+        styleKey === null ? null : input.defaultReadingThemeId;
+    }
+
+    if (Object.keys(updatePayload).length === 0) {
+      const profile = await UserService.getMeProfile(userId);
+      return {
+        defaultReadingStyleKey: profile.defaultReadingStyleKey,
+        defaultReadingThemeId: profile.defaultReadingThemeId,
+        readingThemeApplyScope: profile.readingThemeApplyScope,
+      };
+    }
+
+    const systemCatalog = await ReadingThemeCatalogConfigService.getSystemCatalog();
+
+    let effectiveStyleKey =
+      updatePayload.defaultReadingStyleKey !== undefined
+        ? updatePayload.defaultReadingStyleKey
+        : null;
+    let effectiveThemeId =
+      updatePayload.defaultReadingThemeId !== undefined
+        ? updatePayload.defaultReadingThemeId
+        : null;
+
+    const themeFieldsChanging =
+      updatePayload.defaultReadingStyleKey !== undefined ||
+      updatePayload.defaultReadingThemeId !== undefined;
+
+    let beforeThemeSelection:
+      | { readingStyleKey: string | null; readingThemeId: string | null }
+      | null = null;
+
+    if (
+      themeFieldsChanging ||
+      updatePayload.defaultReadingStyleKey === undefined ||
+      updatePayload.defaultReadingThemeId === undefined
+    ) {
+      const current = await User.findOne({ userId })
+        .select("defaultReadingStyleKey defaultReadingThemeId")
+        .lean();
+
+      if (updatePayload.defaultReadingStyleKey === undefined) {
+        effectiveStyleKey = current?.defaultReadingStyleKey ?? null;
+      }
+      if (updatePayload.defaultReadingThemeId === undefined) {
+        effectiveThemeId = current?.defaultReadingThemeId ?? null;
+      }
+      if (themeFieldsChanging) {
+        beforeThemeSelection = {
+          readingStyleKey: current?.defaultReadingStyleKey ?? null,
+          readingThemeId: current?.defaultReadingThemeId ?? null,
+        };
+      }
+    }
+
+    if (themeFieldsChanging) {
+      assertReadingThemeSelectionAllowed(
+        effectiveStyleKey,
+        effectiveThemeId,
+        systemCatalog,
+      );
+    }
+
+    const user = await User.findOneAndUpdate(
+      { userId },
+      { $set: updatePayload },
+      { new: true },
+    ).lean();
+
+    if (!user) {
+      throw new Error("用户不存在");
+    }
+
+    if (beforeThemeSelection) {
+      await ReadingThemeChangeLogService.recordChange(
+        userId,
+        "global",
+        beforeThemeSelection,
+        {
+          readingStyleKey: user.defaultReadingStyleKey ?? null,
+          readingThemeId: user.defaultReadingThemeId ?? null,
+        },
+      );
+    }
+
+    return UserService.parseReadingThemeFields(user);
+  }
+
+  static async updateDisplayPreference(
+    userId: string,
+    input: UpdateDisplayPreferenceInput,
+  ): Promise<DisplayPrefs> {
+    const updatePayload: UpdateDisplayPreferenceInput = {};
+
+    if (input.showNoteWordCount !== undefined) {
+      updatePayload.showNoteWordCount = Boolean(input.showNoteWordCount);
+    }
+    if (input.showReadingThemeClockTime !== undefined) {
+      updatePayload.showReadingThemeClockTime = Boolean(
+        input.showReadingThemeClockTime,
+      );
+    }
+    if (input.useLegacyNoteItem !== undefined) {
+      updatePayload.useLegacyNoteItem = Boolean(input.useLegacyNoteItem);
+    }
+    if (input.albumCoverHighSaturation !== undefined) {
+      updatePayload.albumCoverHighSaturation = Boolean(
+        input.albumCoverHighSaturation,
+      );
+    }
+    if (input.albumCoverNoImageStyle !== undefined) {
+      updatePayload.albumCoverNoImageStyle = input.albumCoverNoImageStyle;
+    }
+
+    if (Object.keys(updatePayload).length === 0) {
+      const profile = await UserService.getMeProfile(userId);
+      return profile.displayPrefs;
+    }
+
+    const user = await User.findOneAndUpdate(
+      { userId },
+      { $set: updatePayload },
+      { new: true },
+    ).lean();
+
+    if (!user) {
+      throw new Error("用户不存在");
+    }
+
+    await DisplayPreferenceChangeLogService.recordChanges(userId, updatePayload);
+
+    return UserService.parseDisplayPrefsFields(user);
+  }
+
+  static async updateReadingThemeCatalog(
+    userId: string,
+    input: UpdateReadingThemeCatalogInput,
+  ): Promise<ReadingThemeCatalog> {
+    const systemCatalog = await ReadingThemeCatalogConfigService.getSystemCatalog();
+    const catalog = validateReadingThemeCatalogInput(input);
+    validateCatalogAgainstSystem(catalog, systemCatalog);
+
+    const user = await User.findOneAndUpdate(
+      { userId },
+      { $set: { readingThemeCatalog: catalog } },
+      { new: true },
+    ).lean();
+
+    if (!user) {
+      throw new Error("用户不存在");
+    }
+
+    return catalog;
   }
 
   /**

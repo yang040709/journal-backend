@@ -1,5 +1,7 @@
+import { nanoid } from "nanoid";
 import User from "../model/User";
 import UserAdRewardLog from "../model/UserAdRewardLog";
+import UserAdDailyCounter from "../model/UserAdDailyCounter";
 import SystemConfig, { SYSTEM_CONFIG_POINTS_RULES_KEY } from "../model/SystemConfig";
 import { NoteExportSettingsService } from "./noteExportSettings.service";
 import PointsLedger from "../model/PointsLedger";
@@ -7,6 +9,10 @@ import PointsRuleChangeLog from "../model/PointsRuleChangeLog";
 import { getQuotaDateContext } from "../utils/dateKey";
 import { ActivityLogger } from "../utils/ActivityLogger";
 import { normalizeKeyword, toSafeRegex } from "../utils/querySafety";
+
+function isMongoDuplicateKeyError(err: unknown): boolean {
+  return Number((err as { code?: number })?.code) === 11000;
+}
 
 /** 默认新用户积分、广告与兑换（与产品规格一致，可被 DB 配置覆盖） */
 export const DEFAULT_POINTS_RULES = {
@@ -298,7 +304,7 @@ export class PointsService {
     return next;
   }
 
-  /** 今日已看激励视频次数（统一计 points 类型） */
+  /** 今日已看激励视频次数（统一计 points 类型，读 log） */
   static async getTodayVideoAdCount(userId: string): Promise<number> {
     const { dateKey } = getQuotaDateContext();
     const startOfDay = new Date(`${dateKey}T00:00:00+08:00`);
@@ -309,6 +315,72 @@ export class PointsService {
       createdAt: { $gte: startOfDay, $lte: endOfDay },
     });
     return Math.max(0, count);
+  }
+
+  /**
+   * 将日 counter 至少抬到当日 log 次数，避免上线冷启动从 0 重生额度。
+   * @returns 对齐后的 counter.count
+   */
+  static async ensureAdDailyCounterFromLogs(
+    userId: string,
+    dateKey: string,
+  ): Promise<number> {
+    const logCount = await PointsService.getTodayVideoAdCount(userId);
+    try {
+      const doc = await UserAdDailyCounter.findOneAndUpdate(
+        { userId, dateKey },
+        {
+          $max: { count: logCount },
+          $setOnInsert: { userId, dateKey },
+        },
+        { upsert: true, new: true },
+      ).lean();
+      return Math.max(0, Math.floor(Number(doc?.count ?? logCount)));
+    } catch (err: unknown) {
+      if (!isMongoDuplicateKeyError(err)) throw err;
+      const doc = await UserAdDailyCounter.findOneAndUpdate(
+        { userId, dateKey },
+        { $max: { count: logCount } },
+        { new: true },
+      ).lean();
+      return Math.max(0, Math.floor(Number(doc?.count ?? logCount)));
+    }
+  }
+
+  /** 原子占用广告日额度槽位；limit<=0 表示不限制。 */
+  static async tryClaimAdDailySlot(
+    userId: string,
+    dateKey: string,
+    limit: number,
+  ): Promise<boolean> {
+    if (limit <= 0) return true;
+
+    await PointsService.ensureAdDailyCounterFromLogs(userId, dateKey);
+
+    try {
+      const bumped = await UserAdDailyCounter.findOneAndUpdate(
+        { userId, dateKey, count: { $lt: limit } },
+        { $inc: { count: 1 }, $setOnInsert: { userId, dateKey } },
+        { upsert: true, new: true },
+      ).lean();
+      if (bumped) return true;
+    } catch (err: unknown) {
+      if (!isMongoDuplicateKeyError(err)) throw err;
+    }
+
+    const retried = await UserAdDailyCounter.findOneAndUpdate(
+      { userId, dateKey, count: { $lt: limit } },
+      { $inc: { count: 1 } },
+      { new: true },
+    ).lean();
+    return Boolean(retried);
+  }
+
+  static async releaseAdDailySlot(userId: string, dateKey: string): Promise<void> {
+    await UserAdDailyCounter.updateOne(
+      { userId, dateKey, count: { $gt: 0 } },
+      { $inc: { count: -1 } },
+    );
   }
 
   static async getEffectiveDailyAdLimit(userId: string, rules: PointsRulesPayload): Promise<number> {
@@ -332,9 +404,10 @@ export class PointsService {
     await PointsService.ensureRulesDocumentExists();
     await PointsService.bootstrapLegacyUserPoints(userId);
     const rules = await PointsService.getRules();
+    const { dateKey } = getQuotaDateContext();
     const [user, todayCount, limit] = await Promise.all([
       User.findOne({ userId }).select("points").lean(),
-      PointsService.getTodayVideoAdCount(userId),
+      PointsService.ensureAdDailyCounterFromLogs(userId, dateKey),
       PointsService.getEffectiveDailyAdLimit(userId, rules),
     ]);
     const points = Math.max(0, Math.floor(Number((user as { points?: number })?.points ?? 0)));
@@ -379,8 +452,10 @@ export class PointsService {
     }
 
     const dailyLimit = await PointsService.getEffectiveDailyAdLimit(userId, rules);
-    const todayCount = await PointsService.getTodayVideoAdCount(userId);
-    if (dailyLimit > 0 && todayCount >= dailyLimit) {
+    const { dateKey } = getQuotaDateContext();
+    const claimedSlot = await PointsService.tryClaimAdDailySlot(userId, dateKey, dailyLimit);
+    if (!claimedSlot) {
+      const todayCount = await PointsService.ensureAdDailyCounterFromLogs(userId, dateKey);
       throw new PointsAdRewardDailyLimitExceededError({
         todayAdRewardCount: todayCount,
         todayAdRewardLimit: dailyLimit,
@@ -400,43 +475,61 @@ export class PointsService {
         status: "success",
       });
     } catch (err: unknown) {
-      const e = err as { code?: number };
-      if (e?.code === 11000) {
+      if (isMongoDuplicateKeyError(err)) {
+        await PointsService.releaseAdDailySlot(userId, dateKey);
         const u = await User.findOne({ userId }).select("points").lean();
         const points = Math.max(0, Math.floor(Number((u as { points?: number })?.points ?? 0)));
         return { rewardPoints, points, duplicated: true };
       }
+      await PointsService.releaseAdDailySlot(userId, dateKey);
       throw err;
     }
 
-    const updatedUser = await User.findOneAndUpdate(
-      { userId },
-      { $setOnInsert: { userId }, $inc: { points: rewardPoints } },
-      { upsert: true, new: true },
-    ).lean();
-    const points = Math.max(0, Math.floor(Number((updatedUser as { points?: number })?.points ?? 0)));
-    const balanceBefore = Math.max(0, points - rewardPoints);
-
+    let pointsGranted = false;
+    let points = 0;
     try {
-      await PointsLedger.create({
-        userId,
-        kind: "ad_reward",
-        bizType: "ad_reward",
-        bizId: rewardToken,
-        title: "观看广告奖励",
-        flowType: buildFlowTypeFromDelta(rewardPoints),
-        pointsDelta: rewardPoints,
-        balanceBefore,
-        balanceAfter: points,
-        operatorType: "system",
-        operatorId: "points.ad_reward",
-        operatorName: "system",
-      });
-    } catch (err: unknown) {
-      const e = err as { code?: number };
-      if (e?.code !== 11000) {
-        throw err;
+      const updatedUser = await User.findOneAndUpdate(
+        { userId },
+        { $setOnInsert: { userId }, $inc: { points: rewardPoints } },
+        { upsert: true, new: true },
+      ).lean();
+      if (!updatedUser) {
+        throw new Error("更新用户积分失败");
       }
+      pointsGranted = true;
+      points = Math.max(0, Math.floor(Number((updatedUser as { points?: number })?.points ?? 0)));
+      const balanceBefore = Math.max(0, points - rewardPoints);
+
+      try {
+        await PointsLedger.create({
+          userId,
+          kind: "ad_reward",
+          bizType: "ad_reward",
+          bizId: rewardToken,
+          title: "观看广告奖励",
+          flowType: buildFlowTypeFromDelta(rewardPoints),
+          pointsDelta: rewardPoints,
+          balanceBefore,
+          balanceAfter: points,
+          operatorType: "system",
+          operatorId: "points.ad_reward",
+          operatorName: "system",
+        });
+      } catch (err: unknown) {
+        if (!isMongoDuplicateKeyError(err)) {
+          throw err;
+        }
+      }
+    } catch (err: unknown) {
+      if (pointsGranted) {
+        await User.findOneAndUpdate(
+          { userId },
+          { $inc: { points: -rewardPoints } },
+        );
+      }
+      await UserAdRewardLog.deleteOne({ rewardToken });
+      await PointsService.releaseAdDailySlot(userId, dateKey);
+      throw err;
     }
 
     void ActivityLogger.record(
@@ -453,10 +546,38 @@ export class PointsService {
     return { rewardPoints, points, duplicated: false };
   }
 
+  private static async buildExchangeQuotaResult(
+    userId: string,
+    kind: "upload" | "ai",
+    gain: number,
+  ): Promise<{
+    points: number;
+    quotaGain: number;
+    uploadExtraQuotaTotal?: number;
+    aiBonusQuota?: number;
+  }> {
+    const user = await User.findOne({ userId })
+      .select("points uploadExtraQuotaTotal aiBonusQuota")
+      .lean();
+    const points = Math.max(0, Math.floor(Number((user as { points?: number })?.points ?? 0)));
+    if (kind === "upload") {
+      const uploadExtraQuotaTotal = Math.max(
+        0,
+        Math.floor(Number((user as { uploadExtraQuotaTotal?: number })?.uploadExtraQuotaTotal ?? 0)),
+      );
+      return { points, quotaGain: gain, uploadExtraQuotaTotal };
+    }
+    const aiBonusQuota = Math.max(
+      0,
+      Math.floor(Number((user as { aiBonusQuota?: number })?.aiBonusQuota ?? 0)),
+    );
+    return { points, quotaGain: gain, aiBonusQuota };
+  }
+
   static async exchange(
     userId: string,
     kind: "upload" | "ai",
-    opts?: { requestId?: string },
+    opts?: { idempotencyKey?: string },
   ): Promise<{
     points: number;
     quotaGain: number;
@@ -483,6 +604,16 @@ export class PointsService {
       quotaGain: gain,
     } as Record<string, unknown>;
 
+    const ledgerKind = kind === "upload" ? "exchange_upload" : "exchange_ai";
+    const bizType = kind === "upload" ? "exchange_image_quota" : "exchange_ai_quota";
+    const idemKey = String(opts?.idempotencyKey || "").trim() || nanoid(16);
+    const bizId = `exchange_${userId}_${idemKey}`;
+
+    const existingLedger = await PointsLedger.findOne({ bizType, bizId }).select("_id").lean();
+    if (existingLedger) {
+      return PointsService.buildExchangeQuotaResult(userId, kind, gain);
+    }
+
     const incQuota = kind === "upload" ? { uploadExtraQuotaTotal: gain } : { aiBonusQuota: gain };
 
     const updated = await User.findOneAndUpdate(
@@ -508,30 +639,43 @@ export class PointsService {
       throw new PointsExchangeInvalidError("兑换失败，请重试");
     }
 
-    const ledgerKind = kind === "upload" ? "exchange_upload" : "exchange_ai";
-    const bizType = kind === "upload" ? "exchange_image_quota" : "exchange_ai_quota";
     const balanceAfter = Math.max(0, Math.floor(Number((updated as { points?: number }).points ?? 0)));
     const balanceBefore = balanceAfter + cost;
-    const bizId =
-      opts?.requestId && String(opts.requestId).trim()
-        ? String(opts.requestId).trim()
-        : `exchange_${userId}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
-    await PointsLedger.create({
-      userId,
-      kind: ledgerKind,
-      bizType,
-      bizId,
-      title: kind === "upload" ? "兑换图片上传额度" : "兑换 AI 次数",
-      flowType: buildFlowTypeFromDelta(-cost),
-      pointsDelta: -cost,
-      balanceBefore,
-      balanceAfter,
-      quotaDelta: gain,
-      ruleSnapshot,
-      operatorType: "user",
-      operatorId: userId,
-      operatorName: userId,
-    });
+
+    try {
+      await PointsLedger.create({
+        userId,
+        kind: ledgerKind,
+        bizType,
+        bizId,
+        title: kind === "upload" ? "兑换图片上传额度" : "兑换灵感次数",
+        flowType: buildFlowTypeFromDelta(-cost),
+        pointsDelta: -cost,
+        balanceBefore,
+        balanceAfter,
+        quotaDelta: gain,
+        ruleSnapshot,
+        operatorType: "user",
+        operatorId: userId,
+        operatorName: userId,
+      });
+    } catch (err: unknown) {
+      await User.findOneAndUpdate(
+        { userId },
+        {
+          $inc: {
+            points: cost,
+            ...(kind === "upload"
+              ? { uploadExtraQuotaTotal: -gain }
+              : { aiBonusQuota: -gain }),
+          },
+        },
+      );
+      if (isMongoDuplicateKeyError(err)) {
+        return PointsService.buildExchangeQuotaResult(userId, kind, gain);
+      }
+      throw err;
+    }
 
     const points = balanceAfter;
     const uploadExtra = Math.max(
@@ -558,7 +702,7 @@ export class PointsService {
         title:
           kind === "upload"
             ? `积分兑换：上传永久额度 +${gain}（消耗 ${cost} 积分）`
-            : `积分兑换：AI 永久次数 +${gain}（消耗 ${cost} 积分）`,
+            : `积分兑换：灵感永久次数 +${gain}（消耗 ${cost} 积分）`,
         userId,
       },
       { blocking: false },
@@ -652,7 +796,7 @@ export class PointsService {
     const titleByKind: Record<string, string> = {
       ad_reward: "观看广告奖励",
       exchange_upload: "兑换图片上传额度",
-      exchange_ai: "兑换 AI 次数",
+      exchange_ai: "兑换灵感次数",
       exchange_note_export: "兑换手帐导出次数",
       admin_adjust: "后台积分调整",
       feedback_reward: "反馈奖励",
@@ -810,18 +954,31 @@ export class PointsService {
       };
     }
 
-    const existed = await PointsLedger.findOne({
-      bizType: input.bizType,
-      bizId: input.bizId,
-    })
-      .select("_id")
-      .lean();
-    if (existed) {
-      const user = await User.findOne({ userId: input.userId }).select("points").lean();
-      return {
-        points: Math.max(0, Math.floor(Number((user as { points?: number })?.points ?? 0))),
-        duplicated: true,
-      };
+    try {
+      await PointsLedger.create({
+        userId: input.userId,
+        kind: input.kind || "feedback_reward",
+        bizType: input.bizType,
+        bizId: input.bizId,
+        title: input.title,
+        flowType: "income",
+        pointsDelta: pointsToAdd,
+        balanceBefore: 0,
+        balanceAfter: 0,
+        operatorType: input.operatorType || "system",
+        operatorId: input.operatorId || "system.feedback",
+        operatorName: input.operatorName || "system",
+        remark: input.remark || "",
+      });
+    } catch (err: unknown) {
+      if (isMongoDuplicateKeyError(err)) {
+        const latest = await User.findOne({ userId: input.userId }).select("points").lean();
+        return {
+          points: Math.max(0, Math.floor(Number((latest as { points?: number })?.points ?? 0))),
+          duplicated: true,
+        };
+      }
+      throw err;
     }
 
     const updatedUser = await User.findOneAndUpdate(
@@ -832,33 +989,10 @@ export class PointsService {
     const balanceAfter = Math.max(0, Math.floor(Number((updatedUser as { points?: number })?.points ?? 0)));
     const balanceBefore = Math.max(0, balanceAfter - pointsToAdd);
 
-    try {
-      await PointsLedger.create({
-        userId: input.userId,
-        kind: input.kind || "feedback_reward",
-        bizType: input.bizType,
-        bizId: input.bizId,
-        title: input.title,
-        flowType: "income",
-        pointsDelta: pointsToAdd,
-        balanceBefore,
-        balanceAfter,
-        operatorType: input.operatorType || "system",
-        operatorId: input.operatorId || "system.feedback",
-        operatorName: input.operatorName || "system",
-        remark: input.remark || "",
-      });
-    } catch (err: unknown) {
-      const e = err as { code?: number };
-      if (e?.code !== 11000) {
-        throw err;
-      }
-      const latest = await User.findOne({ userId: input.userId }).select("points").lean();
-      return {
-        points: Math.max(0, Math.floor(Number((latest as { points?: number })?.points ?? 0))),
-        duplicated: true,
-      };
-    }
+    await PointsLedger.updateOne(
+      { bizType: input.bizType, bizId: input.bizId },
+      { $set: { balanceBefore, balanceAfter } },
+    );
 
     return { points: balanceAfter, duplicated: false };
   }

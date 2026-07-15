@@ -19,6 +19,9 @@ function getMaxRetry(): number {
   return v || 3;
 }
 
+/** running 卡住超过该时间则回收为 queued */
+export const SHARE_SECURITY_STUCK_MS = 15 * 60 * 1000;
+
 export interface ShareRiskSummary {
   riskStatus: "none" | "pass" | "risky_wechat" | "reject_local" | "reject_wechat" | "error";
   riskReason?: string;
@@ -159,6 +162,48 @@ export class ShareSecurityTaskService {
     return "none";
   }
 
+  /**
+   * Soft-delete: drop incomplete tasks so worker stops WeChat checks.
+   * Terminal results are kept until hard purge / deleteByNoteId.
+   */
+  static async cancelByNoteId(noteId: string, userId: string): Promise<number> {
+    if (!noteId || !userId) return 0;
+    const result = await ShareSecurityTask.deleteMany({
+      noteId,
+      userId,
+      status: { $in: ["queued", "running", "error"] },
+    });
+    return result.deletedCount || 0;
+  }
+
+  static async cancelByNoteIds(noteIds: string[], userId: string): Promise<number> {
+    const ids = (noteIds || []).map((id) => String(id || "").trim()).filter(Boolean);
+    if (!ids.length || !userId) return 0;
+    const result = await ShareSecurityTask.deleteMany({
+      noteId: { $in: ids },
+      userId,
+      status: { $in: ["queued", "running", "error"] },
+    });
+    return result.deletedCount || 0;
+  }
+
+  /** Hard delete / purge: remove all security tasks for the note. */
+  static async deleteByNoteId(noteId: string, userId: string): Promise<number> {
+    if (!noteId || !userId) return 0;
+    const result = await ShareSecurityTask.deleteMany({ noteId, userId });
+    return result.deletedCount || 0;
+  }
+
+  static async deleteByNoteIds(noteIds: string[], userId: string): Promise<number> {
+    const ids = (noteIds || []).map((id) => String(id || "").trim()).filter(Boolean);
+    if (!ids.length || !userId) return 0;
+    const result = await ShareSecurityTask.deleteMany({
+      noteId: { $in: ids },
+      userId,
+    });
+    return result.deletedCount || 0;
+  }
+
   static startWorker(): void {
     if (workerStarted) return;
     workerStarted = true;
@@ -167,17 +212,41 @@ export class ShareSecurityTaskService {
     }, getWorkerIntervalMs());
   }
 
+  private static async reclaimStuckRunning(now: Date): Promise<number> {
+    const cutoff = new Date(now.getTime() - SHARE_SECURITY_STUCK_MS);
+    const result = await ShareSecurityTask.updateMany(
+      {
+        status: "running",
+        $or: [
+          { lockedAt: { $lte: cutoff } },
+          { lockedAt: null },
+          { lockedAt: { $exists: false } },
+        ],
+      },
+      {
+        $set: {
+          status: "queued",
+          nextRetryAt: now,
+          lockedAt: null,
+        },
+      },
+    );
+    return result.modifiedCount || 0;
+  }
+
   private static async runOnce(): Promise<void> {
     if (running) return;
     running = true;
     try {
       const now = new Date();
+      await this.reclaimStuckRunning(now);
+
       const task = await ShareSecurityTask.findOneAndUpdate(
         {
           status: { $in: ["queued", "error"] },
           $or: [{ nextRetryAt: { $lte: now } }, { nextRetryAt: null }],
         },
-        { $set: { status: "running" } },
+        { $set: { status: "running", lockedAt: now } },
         { sort: { createdAt: 1 }, new: true },
       );
       if (!task) return;
@@ -187,8 +256,20 @@ export class ShareSecurityTaskService {
     }
   }
 
-  private static async handleTask(task: IShareSecurityTask): Promise<void> {
+  /** Exposed for unit tests */
+  static async runOnceForTest(): Promise<void> {
+    await this.runOnce();
+  }
+
+  /** Exposed for unit tests; production path uses runOnce → handleTask. */
+  static async handleTask(task: IShareSecurityTask): Promise<void> {
     try {
+      const note = await Note.findById(task.noteId).select("isDeleted").lean();
+      if (!note || note.isDeleted) {
+        await ShareSecurityTask.deleteOne({ _id: task._id });
+        return;
+      }
+
       if (task.source === "wechat_text") {
         const textPayload = `${task.snapshot?.title || ""}\n${task.snapshot?.content || ""}`.trim();
         const result = await WeChatContentSecurityService.checkText(
@@ -196,14 +277,15 @@ export class ShareSecurityTaskService {
           task.userId,
         );
         console.log(
-          `[share-security][text] taskId=${task.taskId} suggest=${result.suggest || "unknown"} label=${result.label || 0} code=${result.code || ""} traceId=${result.traceId || ""}`,
+          `[share-security][text] taskId=${task.taskId} decision=${result.decision} suggest=${result.suggest || "unknown"} label=${result.label || 0} code=${result.code || ""} traceId=${result.traceId || ""}`,
         );
-        if (result.passed && result.suggest === "risky") {
+        if (result.decision === "pass" && result.suggest === "risky") {
           await ShareSecurityTask.updateOne(
             { _id: task._id },
             {
               $set: {
                 status: "risky_wechat",
+                lockedAt: null,
                 resultCode: result.code || "WECHAT_TEXT_RISKY",
                 resultDetail: result.detail || "suggest=risky",
                 wechatTraceId: result.traceId,
@@ -215,13 +297,14 @@ export class ShareSecurityTaskService {
           );
           return;
         }
-        if (!result.passed) {
+        if (result.decision === "reject") {
           await closeShareIfVersionMatch(task.noteId, task.shareVersion);
           await ShareSecurityTask.updateOne(
             { _id: task._id },
             {
               $set: {
                 status: "reject_wechat",
+                lockedAt: null,
                 resultCode: result.code || "WECHAT_TEXT_REJECT",
                 resultDetail: result.detail || "",
                 wechatTraceId: result.traceId,
@@ -233,11 +316,20 @@ export class ShareSecurityTaskService {
           );
           return;
         }
+        if (result.decision === "retry") {
+          await this.scheduleTaskRetry(
+            task,
+            result.code || "WECHAT_TEXT_RETRY",
+            result.detail || "wechat check retryable failure",
+          );
+          return;
+        }
         await ShareSecurityTask.updateOne(
           { _id: task._id },
           {
             $set: {
               status: "pass",
+              lockedAt: null,
               resultCode: "WECHAT_TEXT_PASS",
               wechatTraceId: result.traceId,
               "snapshot.riskMeta.code": "WECHAT_TEXT_PASS",
@@ -254,6 +346,7 @@ export class ShareSecurityTaskService {
           {
             $set: {
               status: "pass",
+              lockedAt: null,
               resultCode: "WECHAT_IMAGE_CHECK_DISABLED",
               resultDetail: "image check skipped",
               "snapshot.riskMeta.code": "WECHAT_IMAGE_CHECK_DISABLED",
@@ -266,27 +359,42 @@ export class ShareSecurityTaskService {
 
       await ShareSecurityTask.updateOne(
         { _id: task._id },
-        { $set: { status: "pass", resultCode: "LOCAL_PASS" } },
+        { $set: { status: "pass", lockedAt: null, resultCode: "LOCAL_PASS" } },
       );
     } catch (e) {
-      const retryCount = (task.retryCount || 0) + 1;
-      const exhausted = retryCount >= getMaxRetry();
-      if (exhausted) {
-        await closeShareIfVersionMatch(task.noteId, task.shareVersion);
-      }
-      await ShareSecurityTask.updateOne(
-        { _id: task._id },
-        {
-          $set: {
-            status: exhausted ? "error" : "queued",
-            retryCount,
-            nextRetryAt: exhausted ? null : nextRetryDate(retryCount),
-            resultCode: exhausted ? "TASK_RETRY_EXHAUSTED" : "TASK_RETRYING",
-            resultDetail: e instanceof Error ? e.message : String(e),
-            "snapshot.riskMeta.detail": e instanceof Error ? e.message : String(e),
-          },
-        },
+      await this.scheduleTaskRetry(
+        task,
+        "TASK_EXCEPTION",
+        e instanceof Error ? e.message : String(e),
       );
     }
+  }
+
+  /**
+   * Infrastructure / transport failures: requeue. Never close share for these.
+   * Exhausted retries mark task `error` but leave `isShare` unchanged.
+   */
+  private static async scheduleTaskRetry(
+    task: IShareSecurityTask,
+    resultCode: string,
+    resultDetail: string,
+  ): Promise<void> {
+    const retryCount = (task.retryCount || 0) + 1;
+    const exhausted = retryCount >= getMaxRetry();
+    await ShareSecurityTask.updateOne(
+      { _id: task._id },
+      {
+        $set: {
+          status: exhausted ? "error" : "queued",
+          retryCount,
+          nextRetryAt: exhausted ? null : nextRetryDate(retryCount),
+          lockedAt: null,
+          resultCode: exhausted ? "TASK_RETRY_EXHAUSTED" : resultCode,
+          resultDetail,
+          "snapshot.riskMeta.code": exhausted ? "TASK_RETRY_EXHAUSTED" : resultCode,
+          "snapshot.riskMeta.detail": resultDetail,
+        },
+      },
+    );
   }
 }

@@ -450,6 +450,7 @@ export class AdminNotebookMigrationService {
       await NoteBook.updateOne(
         { _id: noteBookId },
         { $set: { count: notesToImport.length } },
+        { timestamps: false },
       );
 
       void ActivityLogger.record(

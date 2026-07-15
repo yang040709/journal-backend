@@ -7,6 +7,12 @@ import { z } from "zod";
 import { AlertMetricService } from "../service/alertMetric.service";
 import User from "../model/User";
 import logger from "../utils/logger";
+import {
+  updateDefaultReadingThemeSchema,
+  readingThemeCatalogPutSchema,
+} from "../schemas/readingTheme.schema";
+import { updateDisplayPreferenceSchema } from "../schemas/displayPreference.schema";
+import { ReadingThemeCatalogValidationError } from "../utils/readingThemeCatalog";
 
 const router = new Router({
   prefix: "/auth",
@@ -33,13 +39,13 @@ const updateMeProfileSchema = z
   });
 
 /**
- * @swagger
+ * @openapi
  * /auth/login:
  *   post:
- *     tags:
- *       - 认证
+ *     tags: [user]
  *     summary: 用户登录
  *     description: 使用微信登录凭证进行用户登录
+ *     security: []
  *     requestBody:
  *       required: true
  *       content:
@@ -59,14 +65,7 @@ const updateMeProfileSchema = z
  *         content:
  *           application/json:
  *             schema:
- *               type: object
- *               properties:
- *                 token:
- *                   type: string
- *                   description: JWT令牌
- *                   example: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
- *                 user:
- *                   $ref: '#/components/schemas/User'
+ *               $ref: '#/components/schemas/SuccessLogin'
  *       400:
  *         description: 参数验证失败
  *       500:
@@ -91,13 +90,13 @@ router.post("/login", async (ctx) => {
 });
 
 /**
- * @swagger
+ * @openapi
  * /auth/refresh:
  *   post:
- *     tags:
- *       - 认证
- *     summary: 刷新JWT令牌
- *     description: 使用旧的JWT令牌刷新获取新的令牌
+ *     tags: [user]
+ *     summary: 刷新 JWT 令牌
+ *     description: 使用旧的 JWT 令牌刷新获取新的令牌
+ *     security: []
  *     requestBody:
  *       required: true
  *       content:
@@ -117,12 +116,7 @@ router.post("/login", async (ctx) => {
  *         content:
  *           application/json:
  *             schema:
- *               type: object
- *               properties:
- *                 token:
- *                   type: string
- *                   description: 新的JWT令牌
- *                   example: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+ *               $ref: '#/components/schemas/SuccessRefreshToken'
  *       400:
  *         description: 参数验证失败
  *       401:
@@ -135,10 +129,10 @@ router.post("/refresh", async (ctx) => {
     const body = refreshSchema.parse(ctx.request.body);
     const oldToken = body.token;
 
-    // 验证token是否有效（即使过期）
-    const decoded = verifyToken(oldToken, true);
+    // 仅未过期 token 可刷新
+    const decoded = verifyToken(oldToken, false);
     if (!decoded) {
-      error(ctx, "无效的Token", ErrorCodes.AUTH_ERROR, 401);
+      error(ctx, "Token无法刷新，请重新登录", ErrorCodes.AUTH_ERROR, 401);
       return;
     }
 
@@ -154,7 +148,6 @@ router.post("/refresh", async (ctx) => {
       return;
     }
 
-    // 尝试刷新token
     const newToken = refreshToken(oldToken);
     if (!newToken) {
       error(ctx, "Token无法刷新，请重新登录", ErrorCodes.AUTH_ERROR, 401);
@@ -178,11 +171,10 @@ router.post("/refresh", async (ctx) => {
 });
 
 /**
- * @swagger
+ * @openapi
  * /auth/session:
  *   post:
- *     tags:
- *       - 认证
+ *     tags: [user]
  *     summary: 上报本地会话启动
  *     description: 客户端已持有有效 JWT、未走微信 code 登录时调用，用于记录活动日志；需 Bearer Token
  *     security:
@@ -193,11 +185,7 @@ router.post("/refresh", async (ctx) => {
  *         content:
  *           application/json:
  *             schema:
- *               type: object
- *               properties:
- *                 ok:
- *                   type: boolean
- *                   example: true
+ *               $ref: '#/components/schemas/SuccessObject'
  *       401:
  *         description: 未认证或 Token 无效
  */
@@ -211,7 +199,25 @@ router.post("/session", authMiddleware, async (ctx: AuthContext) => {
   }
 });
 
-/** 兼容旧客户端：聚合资料 + 统计，结构与历史版本一致 */
+/**
+ * @openapi
+ * /auth/me-page:
+ *   get:
+ *     tags: [user]
+ *     summary: 获取我的页面聚合信息
+ *     description: 兼容旧客户端，返回 profile + stats
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       '200':
+ *         description: 成功
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/SuccessObject'
+ *       '401':
+ *         description: 未授权
+ */
 router.get("/me-page", authMiddleware, async (ctx: AuthContext) => {
   try {
     const userId = ctx.user!.userId;
@@ -233,6 +239,24 @@ router.get("/me-page", authMiddleware, async (ctx: AuthContext) => {
   }
 });
 
+/**
+ * @openapi
+ * /auth/me-profile:
+ *   get:
+ *     tags: [user]
+ *     summary: 获取我的资料
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       '200':
+ *         description: 成功
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/SuccessUser'
+ *       '401':
+ *         description: 未授权
+ */
 router.get("/me-profile", authMiddleware, async (ctx: AuthContext) => {
   try {
     const data = await UserService.getMeProfile(ctx.user!.userId);
@@ -250,6 +274,24 @@ router.get("/me-profile", authMiddleware, async (ctx: AuthContext) => {
   }
 });
 
+/**
+ * @openapi
+ * /auth/me-stats:
+ *   get:
+ *     tags: [user]
+ *     summary: 获取我的统计
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       '200':
+ *         description: 成功
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/SuccessObject'
+ *       '401':
+ *         description: 未授权
+ */
 router.get("/me-stats", authMiddleware, async (ctx: AuthContext) => {
   try {
     const data = await UserService.getMeStats(ctx.user!.userId);
@@ -267,6 +309,42 @@ router.get("/me-stats", authMiddleware, async (ctx: AuthContext) => {
   }
 });
 
+/**
+ * @openapi
+ * /auth/me/profile:
+ *   put:
+ *     tags: [user]
+ *     summary: 更新我的资料
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               nickname:
+ *                 type: string
+ *                 maxLength: 32
+ *               avatarUrl:
+ *                 type: string
+ *                 format: uri
+ *               bio:
+ *                 type: string
+ *                 maxLength: 100
+ *     responses:
+ *       '200':
+ *         description: 成功
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/SuccessUser'
+ *       '400':
+ *         description: 参数验证失败
+ *       '401':
+ *         description: 未授权
+ */
 router.put("/me/profile", authMiddleware, async (ctx: AuthContext) => {
   try {
     const body = updateMeProfileSchema.parse(ctx.request.body || {});
@@ -279,6 +357,180 @@ router.put("/me/profile", authMiddleware, async (ctx: AuthContext) => {
     }
     console.error("更新资料失败:", err);
     error(ctx, err.message || "更新资料失败", ErrorCodes.INTERNAL_ERROR, 500);
+  }
+});
+
+/**
+ * @openapi
+ * /auth/me/reading-theme:
+ *   put:
+ *     tags: [user]
+ *     summary: 更新全局默认阅读主题
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               defaultReadingStyleKey:
+ *                 type: string
+ *                 nullable: true
+ *               defaultReadingThemeId:
+ *                 type: string
+ *                 nullable: true
+ *               readingThemeApplyScope:
+ *                 type: string
+ *                 enum: [global, note]
+ *     responses:
+ *       '200':
+ *         description: 成功
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/SuccessObject'
+ *       '400':
+ *         description: 参数验证失败
+ *       '401':
+ *         description: 未授权
+ */
+router.put("/me/reading-theme", authMiddleware, async (ctx: AuthContext) => {
+  try {
+    const body = updateDefaultReadingThemeSchema.parse(ctx.request.body || {});
+    const data = await UserService.updateDefaultReadingTheme(
+      ctx.user!.userId,
+      body,
+    );
+    success(ctx, data, "更新全局阅读主题成功");
+  } catch (err) {
+    if (err instanceof z.ZodError) {
+      error(ctx, err.issues[0]?.message || "参数验证失败", ErrorCodes.PARAM_ERROR, 400);
+      return;
+    }
+    if (err instanceof ReadingThemeCatalogValidationError) {
+      error(ctx, err.message, ErrorCodes.PARAM_ERROR, 400);
+      return;
+    }
+    console.error("更新全局阅读主题失败:", err);
+    error(ctx, err.message || "更新全局阅读主题失败", ErrorCodes.INTERNAL_ERROR, 500);
+  }
+});
+
+/**
+ * @openapi
+ * /auth/me/reading-theme-catalog:
+ *   put:
+ *     tags: [user]
+ *     summary: 更新阅读主题选择器可见列表
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               styleKeys:
+ *                 type: array
+ *                 items:
+ *                   type: string
+ *                   nullable: true
+ *               themeIdsByStyle:
+ *                 type: object
+ *                 additionalProperties:
+ *                   type: array
+ *                   items:
+ *                     type: string
+ *     responses:
+ *       '200':
+ *         description: 成功
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/SuccessObject'
+ *       '400':
+ *         description: 参数验证失败
+ *       '401':
+ *         description: 未授权
+ */
+router.put("/me/reading-theme-catalog", authMiddleware, async (ctx: AuthContext) => {
+  try {
+    const body = readingThemeCatalogPutSchema.parse(ctx.request.body || {});
+    const data = await UserService.updateReadingThemeCatalog(
+      ctx.user!.userId,
+      body,
+    );
+    success(ctx, data, "更新主题列表成功");
+  } catch (err) {
+    if (err instanceof z.ZodError) {
+      error(ctx, err.issues[0]?.message || "参数验证失败", ErrorCodes.PARAM_ERROR, 400);
+      return;
+    }
+    if (err instanceof ReadingThemeCatalogValidationError) {
+      error(ctx, err.message, ErrorCodes.PARAM_ERROR, 400);
+      return;
+    }
+    console.error("更新主题列表失败:", err);
+    error(ctx, err.message || "更新主题列表失败", ErrorCodes.INTERNAL_ERROR, 500);
+  }
+});
+
+/**
+ * @openapi
+ * /auth/me/display-preference:
+ *   put:
+ *     tags: [user]
+ *     summary: 更新显示偏好
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               showNoteWordCount:
+ *                 type: boolean
+ *               showReadingThemeClockTime:
+ *                 type: boolean
+ *               useLegacyNoteItem:
+ *                 type: boolean
+ *               albumCoverHighSaturation:
+ *                 type: boolean
+ *               albumCoverNoImageStyle:
+ *                 type: string
+ *                 enum: [dateTeaser, watermark, excerpt]
+ *     responses:
+ *       '200':
+ *         description: 成功
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/SuccessObject'
+ *       '400':
+ *         description: 参数验证失败
+ *       '401':
+ *         description: 未授权
+ */
+router.put("/me/display-preference", authMiddleware, async (ctx: AuthContext) => {
+  try {
+    const body = updateDisplayPreferenceSchema.parse(ctx.request.body || {});
+    const data = await UserService.updateDisplayPreference(
+      ctx.user!.userId,
+      body,
+    );
+    success(ctx, data, "更新显示偏好成功");
+  } catch (err) {
+    if (err instanceof z.ZodError) {
+      error(ctx, err.issues[0]?.message || "参数验证失败", ErrorCodes.PARAM_ERROR, 400);
+      return;
+    }
+    console.error("更新显示偏好失败:", err);
+    error(ctx, err.message || "更新显示偏好失败", ErrorCodes.INTERNAL_ERROR, 500);
   }
 });
 

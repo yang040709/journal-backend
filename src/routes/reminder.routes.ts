@@ -55,8 +55,54 @@ const batchDeleteSchema = z.object({
 });
 
 /**
- * @route GET /reminders
- * @desc 获取提醒列表
+ * @openapi
+ * /reminders:
+ *   get:
+ *     tags:
+ *       - reminder
+ *     summary: 获取提醒列表
+ *     description: 获取当前用户的提醒列表，支持分页和状态筛选
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: page
+ *         schema:
+ *           type: integer
+ *           default: 1
+ *         description: 页码
+ *       - in: query
+ *         name: limit
+ *         schema:
+ *           type: integer
+ *           default: 20
+ *           maximum: 100
+ *         description: 每页数量
+ *       - in: query
+ *         name: status
+ *         schema:
+ *           type: string
+ *           enum: [pending, subscribed, cancelled]
+ *         description: 订阅状态筛选
+ *       - in: query
+ *         name: sendStatus
+ *         schema:
+ *           type: string
+ *           enum: [pending, sent, failed]
+ *         description: 发送状态筛选
+ *     responses:
+ *       200:
+ *         description: 获取提醒列表成功
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/SuccessPaginatedReminderList'
+ *       400:
+ *         description: 参数验证失败
+ *       401:
+ *         description: 未授权访问
+ *       500:
+ *         description: 服务器内部错误
  */
 router.get("/", async (ctx: AuthContext) => {
   try {
@@ -82,8 +128,35 @@ router.get("/", async (ctx: AuthContext) => {
 });
 
 /**
- * @route GET /reminders/:id
- * @desc 获取单个提醒
+ * @openapi
+ * /reminders/{id}:
+ *   get:
+ *     tags:
+ *       - reminder
+ *     summary: 获取单个提醒
+ *     description: 根据ID获取单个提醒的详细信息
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: 提醒ID
+ *     responses:
+ *       200:
+ *         description: 获取提醒成功
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/SuccessReminder'
+ *       401:
+ *         description: 未授权访问
+ *       404:
+ *         description: 提醒不存在
+ *       500:
+ *         description: 服务器内部错误
  */
 router.get("/:id", async (ctx: AuthContext) => {
   try {
@@ -104,8 +177,58 @@ router.get("/:id", async (ctx: AuthContext) => {
 });
 
 /**
- * @route POST /reminders
- * @desc 创建提醒
+ * @openapi
+ * /reminders:
+ *   post:
+ *     tags:
+ *       - reminder
+ *     summary: 创建提醒
+ *     description: 为指定手帐创建一条提醒
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - noteId
+ *               - content
+ *               - remindTime
+ *             properties:
+ *               noteId:
+ *                 type: string
+ *                 minLength: 1
+ *                 description: 手帐ID
+ *               content:
+ *                 type: string
+ *                 minLength: 1
+ *                 maxLength: 500
+ *                 description: 提醒内容
+ *               remindTime:
+ *                 type: string
+ *                 format: date-time
+ *                 description: 提醒时间
+ *               title:
+ *                 type: string
+ *                 maxLength: 200
+ *                 description: 日程标题
+ *     responses:
+ *       200:
+ *         description: 创建提醒成功
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/SuccessReminder'
+ *       400:
+ *         description: 参数验证失败
+ *       401:
+ *         description: 未授权访问
+ *       404:
+ *         description: 手帐不存在或无权访问
+ *       500:
+ *         description: 服务器内部错误
  */
 router.post("/", async (ctx: AuthContext) => {
   try {
@@ -131,8 +254,57 @@ router.post("/", async (ctx: AuthContext) => {
 });
 
 /**
- * @route PUT /reminders/:id
- * @desc 更新提醒
+ * @openapi
+ * /reminders/{id}:
+ *   put:
+ *     tags:
+ *       - reminder
+ *     summary: 更新提醒
+ *     description: 根据ID更新提醒信息
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: 提醒ID
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               content:
+ *                 type: string
+ *                 minLength: 1
+ *                 maxLength: 500
+ *                 description: 提醒内容
+ *               remindTime:
+ *                 type: string
+ *                 format: date-time
+ *                 description: 提醒时间
+ *               subscriptionStatus:
+ *                 type: string
+ *                 enum: [pending, subscribed, cancelled]
+ *                 description: 订阅状态
+ *     responses:
+ *       200:
+ *         description: 更新提醒成功
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/SuccessReminder'
+ *       400:
+ *         description: 参数验证失败
+ *       401:
+ *         description: 未授权访问
+ *       404:
+ *         description: 提醒不存在
+ *       500:
+ *         description: 服务器内部错误
  */
 router.put("/:id", async (ctx: AuthContext) => {
   try {
@@ -167,8 +339,35 @@ router.put("/:id", async (ctx: AuthContext) => {
 });
 
 /**
- * @route DELETE /reminders/:id
- * @desc 删除提醒
+ * @openapi
+ * /reminders/{id}:
+ *   delete:
+ *     tags:
+ *       - reminder
+ *     summary: 删除提醒
+ *     description: 根据ID删除提醒
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: 提醒ID
+ *     responses:
+ *       200:
+ *         description: 删除提醒成功
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/SuccessObject'
+ *       401:
+ *         description: 未授权访问
+ *       404:
+ *         description: 提醒不存在
+ *       500:
+ *         description: 服务器内部错误
  */
 router.delete("/:id", async (ctx: AuthContext) => {
   try {
@@ -189,8 +388,43 @@ router.delete("/:id", async (ctx: AuthContext) => {
 });
 
 /**
- * @route POST /reminders/batch-delete
- * @desc 批量删除提醒
+ * @openapi
+ * /reminders/batch-delete:
+ *   post:
+ *     tags:
+ *       - reminder
+ *     summary: 批量删除提醒
+ *     description: 批量删除多条提醒
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - reminderIds
+ *             properties:
+ *               reminderIds:
+ *                 type: array
+ *                 minItems: 1
+ *                 items:
+ *                   type: string
+ *                 description: 提醒ID列表
+ *     responses:
+ *       200:
+ *         description: 批量删除提醒成功
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/SuccessObject'
+ *       400:
+ *         description: 参数验证失败
+ *       401:
+ *         description: 未授权访问
+ *       500:
+ *         description: 服务器内部错误
  */
 router.post("/batch-delete", async (ctx: AuthContext) => {
   try {
@@ -214,8 +448,35 @@ router.post("/batch-delete", async (ctx: AuthContext) => {
 });
 
 /**
- * @route POST /reminders/:id/subscribe
- * @desc 订阅提醒
+ * @openapi
+ * /reminders/{id}/subscribe:
+ *   post:
+ *     tags:
+ *       - reminder
+ *     summary: 订阅提醒
+ *     description: 将提醒的订阅状态设为 subscribed
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: 提醒ID
+ *     responses:
+ *       200:
+ *         description: 订阅提醒成功
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/SuccessReminder'
+ *       401:
+ *         description: 未授权访问
+ *       404:
+ *         description: 提醒不存在
+ *       500:
+ *         description: 服务器内部错误
  */
 router.post("/:id/subscribe", async (ctx: AuthContext) => {
   try {
@@ -240,8 +501,35 @@ router.post("/:id/subscribe", async (ctx: AuthContext) => {
 });
 
 /**
- * @route POST /reminders/:id/cancel
- * @desc 取消订阅提醒
+ * @openapi
+ * /reminders/{id}/cancel:
+ *   post:
+ *     tags:
+ *       - reminder
+ *     summary: 取消订阅提醒
+ *     description: 将提醒的订阅状态设为 cancelled
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: 提醒ID
+ *     responses:
+ *       200:
+ *         description: 取消订阅成功
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/SuccessReminder'
+ *       401:
+ *         description: 未授权访问
+ *       404:
+ *         description: 提醒不存在
+ *       500:
+ *         description: 服务器内部错误
  */
 router.post("/:id/cancel", async (ctx: AuthContext) => {
   try {

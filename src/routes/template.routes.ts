@@ -104,8 +104,62 @@ const aiTemplateGenerateSchema = z.discriminatedUnion("mode", [
 ]);
 
 /**
- * @route GET /templates
- * @desc 获取用户模板列表
+ * @openapi
+ * /templates:
+ *   get:
+ *     tags:
+ *       - template
+ *     summary: 获取用户模板列表
+ *     description: 获取当前用户的自定义模板列表，支持分页、排序和搜索
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: page
+ *         schema:
+ *           type: integer
+ *           default: 1
+ *         description: 页码
+ *       - in: query
+ *         name: limit
+ *         schema:
+ *           type: integer
+ *           default: 20
+ *           maximum: 100
+ *         description: 每页数量
+ *       - in: query
+ *         name: sortBy
+ *         schema:
+ *           type: string
+ *           enum: [createdAt, updatedAt, name]
+ *           default: updatedAt
+ *         description: 排序字段
+ *       - in: query
+ *         name: order
+ *         schema:
+ *           type: string
+ *           enum: [asc, desc]
+ *           default: desc
+ *         description: 排序方向
+ *       - in: query
+ *         name: search
+ *         schema:
+ *           type: string
+ *           minLength: 1
+ *         description: 搜索关键词（按名称或描述）
+ *     responses:
+ *       200:
+ *         description: 获取模板列表成功
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/SuccessPaginatedTemplateList'
+ *       400:
+ *         description: 参数验证失败
+ *       401:
+ *         description: 未授权访问
+ *       500:
+ *         description: 服务器内部错误
  */
 router.get("/", async (ctx: AuthContext) => {
   try {
@@ -136,8 +190,26 @@ router.get("/", async (ctx: AuthContext) => {
 });
 
 /**
- * @route GET /templates/all
- * @desc 获取所有模板（系统模板 + 用户自定义模板）
+ * @openapi
+ * /templates/all:
+ *   get:
+ *     tags:
+ *       - template
+ *     summary: 获取所有模板
+ *     description: 获取系统模板与当前用户自定义模板的合并列表
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: 获取所有模板成功
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/SuccessTemplateList'
+ *       401:
+ *         description: 未授权访问
+ *       500:
+ *         description: 服务器内部错误
  */
 router.get("/all", async (ctx: AuthContext) => {
   try {
@@ -151,8 +223,108 @@ router.get("/all", async (ctx: AuthContext) => {
 });
 
 /**
- * @route POST /templates/ai/generate
- * @desc AI 生成或润色模板（与手帐 AI 共用日额度）
+ * @openapi
+ * /templates/ai/generate:
+ *   post:
+ *     tags:
+ *       - template
+ *     summary: AI 生成或润色模板
+ *     description: 使用 AI 从零生成模板或改写已有模板；与手帐 AI 共用日额度
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             oneOf:
+ *               - type: object
+ *                 required:
+ *                   - mode
+ *                   - name
+ *                 properties:
+ *                   mode:
+ *                     type: string
+ *                     enum: [template_generate]
+ *                     description: 从零生成模板
+ *                   name:
+ *                     type: string
+ *                     minLength: 1
+ *                     maxLength: 100
+ *                     description: 模板名称
+ *                   description:
+ *                     type: string
+ *                     maxLength: 500
+ *                     description: 模板描述
+ *                   supplementRequirement:
+ *                     type: string
+ *                     maxLength: 500
+ *                     description: 补充需求说明
+ *                   hint:
+ *                     type: string
+ *                     maxLength: 500
+ *                     description: 用户提示（与 supplementRequirement 等价）
+ *               - type: object
+ *                 required:
+ *                   - mode
+ *                   - template
+ *                 properties:
+ *                   mode:
+ *                     type: string
+ *                     enum: [template_rewrite]
+ *                     description: 改写润色已有模板
+ *                   supplementRequirement:
+ *                     type: string
+ *                     maxLength: 500
+ *                     description: 补充需求说明
+ *                   hint:
+ *                     type: string
+ *                     maxLength: 500
+ *                     description: 用户提示
+ *                   template:
+ *                     type: object
+ *                     required:
+ *                       - name
+ *                       - fields
+ *                     properties:
+ *                       name:
+ *                         type: string
+ *                         minLength: 1
+ *                         maxLength: 100
+ *                       description:
+ *                         type: string
+ *                         maxLength: 500
+ *                       fields:
+ *                         type: object
+ *                         required:
+ *                           - title
+ *                           - content
+ *                         properties:
+ *                           title:
+ *                             type: string
+ *                             minLength: 1
+ *                           content:
+ *                             type: string
+ *                             minLength: 1
+ *                           tags:
+ *                             type: array
+ *                             items:
+ *                               type: string
+ *     responses:
+ *       200:
+ *         description: 成功；data 含 template 与 remainingToday
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/SuccessObject'
+ *       400:
+ *         description: 参数验证失败或前置条件不满足
+ *       401:
+ *         description: 未授权访问
+ *       429:
+ *         description: 今日灵感次数已用完
+ *       500:
+ *         description: 服务器内部错误
  */
 router.post("/ai/generate", async (ctx: AuthContext) => {
   try {
@@ -189,7 +361,7 @@ router.post("/ai/generate", async (ctx: AuthContext) => {
       error(ctx, "参数验证失败", ErrorCodes.PARAM_ERROR, 400);
       return;
     }
-    const message = err instanceof Error ? err.message : "AI 生成模板失败";
+    const message = err instanceof Error ? err.message : "灵感生成模板失败";
     const code =
       err instanceof Error && (err as Error & { code?: string }).code === "AI_DAILY_LIMIT_EXCEEDED"
         ? ErrorCodes.AI_DAILY_LIMIT_EXCEEDED
@@ -199,7 +371,7 @@ router.post("/ai/generate", async (ctx: AuthContext) => {
       return;
     }
     if (message === "AI service not configured") {
-      error(ctx, "AI 服务未配置", ErrorCodes.INTERNAL_ERROR, 500);
+      error(ctx, "灵感服务暂不可用", ErrorCodes.INTERNAL_ERROR, 500);
       return;
     }
     if (message === "请先填写模板名称" || message === "请先填写标题模板与内容模板后再改写") {
@@ -212,8 +384,35 @@ router.post("/ai/generate", async (ctx: AuthContext) => {
 });
 
 /**
- * @route GET /templates/:id
- * @desc 获取单个模板
+ * @openapi
+ * /templates/{id}:
+ *   get:
+ *     tags:
+ *       - template
+ *     summary: 获取单个模板
+ *     description: 根据ID获取单个模板的详细信息
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: 模板ID
+ *     responses:
+ *       200:
+ *         description: 获取模板成功
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/SuccessTemplate'
+ *       401:
+ *         description: 未授权访问
+ *       404:
+ *         description: 模板不存在
+ *       500:
+ *         description: 服务器内部错误
  */
 router.get("/:id", async (ctx: AuthContext) => {
   try {
@@ -234,8 +433,67 @@ router.get("/:id", async (ctx: AuthContext) => {
 });
 
 /**
- * @route POST /templates
- * @desc 创建模板
+ * @openapi
+ * /templates:
+ *   post:
+ *     tags:
+ *       - template
+ *     summary: 创建模板
+ *     description: 创建一个新的自定义模板
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - name
+ *               - fields
+ *             properties:
+ *               name:
+ *                 type: string
+ *                 minLength: 1
+ *                 maxLength: 100
+ *                 description: 模板名称
+ *               description:
+ *                 type: string
+ *                 maxLength: 500
+ *                 description: 模板描述
+ *               fields:
+ *                 type: object
+ *                 required:
+ *                   - title
+ *                   - content
+ *                 properties:
+ *                   title:
+ *                     type: string
+ *                     minLength: 1
+ *                     maxLength: 200
+ *                     description: 标题模板
+ *                   content:
+ *                     type: string
+ *                     minLength: 1
+ *                     description: 内容模板
+ *                   tags:
+ *                     type: array
+ *                     items:
+ *                       type: string
+ *                     description: 默认标签
+ *     responses:
+ *       200:
+ *         description: 创建模板成功
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/SuccessTemplate'
+ *       400:
+ *         description: 参数验证失败
+ *       401:
+ *         description: 未授权访问
+ *       500:
+ *         description: 服务器内部错误
  */
 router.post("/", async (ctx: AuthContext) => {
   try {
@@ -261,8 +519,69 @@ router.post("/", async (ctx: AuthContext) => {
 });
 
 /**
- * @route PUT /templates/:id
- * @desc 更新模板
+ * @openapi
+ * /templates/{id}:
+ *   put:
+ *     tags:
+ *       - template
+ *     summary: 更新模板
+ *     description: 根据ID更新模板信息
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: 模板ID
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               name:
+ *                 type: string
+ *                 minLength: 1
+ *                 maxLength: 100
+ *                 description: 模板名称
+ *               description:
+ *                 type: string
+ *                 maxLength: 500
+ *                 description: 模板描述
+ *               fields:
+ *                 type: object
+ *                 properties:
+ *                   title:
+ *                     type: string
+ *                     minLength: 1
+ *                     maxLength: 200
+ *                     description: 标题模板
+ *                   content:
+ *                     type: string
+ *                     description: 内容模板
+ *                   tags:
+ *                     type: array
+ *                     items:
+ *                       type: string
+ *                     description: 默认标签
+ *     responses:
+ *       200:
+ *         description: 更新模板成功
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/SuccessTemplate'
+ *       400:
+ *         description: 参数验证失败
+ *       401:
+ *         description: 未授权访问
+ *       404:
+ *         description: 模板不存在
+ *       500:
+ *         description: 服务器内部错误
  */
 router.put("/:id", async (ctx: AuthContext) => {
   try {
@@ -288,8 +607,35 @@ router.put("/:id", async (ctx: AuthContext) => {
 });
 
 /**
- * @route DELETE /templates/:id
- * @desc 删除模板
+ * @openapi
+ * /templates/{id}:
+ *   delete:
+ *     tags:
+ *       - template
+ *     summary: 删除模板
+ *     description: 根据ID删除模板
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: 模板ID
+ *     responses:
+ *       200:
+ *         description: 删除模板成功
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/SuccessObject'
+ *       401:
+ *         description: 未授权访问
+ *       404:
+ *         description: 模板不存在
+ *       500:
+ *         description: 服务器内部错误
  */
 router.delete("/:id", async (ctx: AuthContext) => {
   try {
@@ -310,8 +656,43 @@ router.delete("/:id", async (ctx: AuthContext) => {
 });
 
 /**
- * @route POST /templates/batch-delete
- * @desc 批量删除模板
+ * @openapi
+ * /templates/batch-delete:
+ *   post:
+ *     tags:
+ *       - template
+ *     summary: 批量删除模板
+ *     description: 批量删除多个模板
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - templateIds
+ *             properties:
+ *               templateIds:
+ *                 type: array
+ *                 minItems: 1
+ *                 items:
+ *                   type: string
+ *                 description: 模板ID列表
+ *     responses:
+ *       200:
+ *         description: 批量删除模板成功
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/SuccessObject'
+ *       400:
+ *         description: 参数验证失败
+ *       401:
+ *         description: 未授权访问
+ *       500:
+ *         description: 服务器内部错误
  */
 router.post("/batch-delete", async (ctx: AuthContext) => {
   try {

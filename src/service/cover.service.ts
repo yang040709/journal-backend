@@ -2,8 +2,47 @@ import User from "../model/User";
 import SystemConfig, { SYSTEM_CONFIG_COVERS_KEY } from "../model/SystemConfig";
 import { coverPreviewList } from "../constant/img";
 import { ActivityLogger } from "../utils/ActivityLogger";
+import {
+  assertOwnedCosKey,
+  CosKeyOwnershipError,
+} from "../utils/cosKeyOwnership";
+import {
+  extractCosKeyFromUrl,
+  isCosObjectKey,
+} from "../utils/cosDelete";
 import { recordFromCover } from "./userImageAsset.service";
 import { MediaReferenceService } from "./mediaReference.service";
+
+/** 自定义封面 URL/thumb 须指向当前用户 COS 前缀下的对象（复用图库时也不放过外链） */
+function assertOwnedCustomCoverMedia(
+  userId: string,
+  coverUrl: string,
+  thumbUrl?: string,
+  thumbKey?: string,
+): void {
+  const cosKey = extractCosKeyFromUrl(coverUrl);
+  if (!cosKey) {
+    throw new CosKeyOwnershipError("封面地址无效或不属于当前账号");
+  }
+  assertOwnedCosKey(userId, cosKey);
+
+  const tKey = String(thumbKey || "").trim();
+  if (tKey) {
+    if (!isCosObjectKey(tKey)) {
+      throw new CosKeyOwnershipError("封面缩略图无效或不属于当前账号");
+    }
+    assertOwnedCosKey(userId, tKey);
+  } else {
+    const tUrl = String(thumbUrl || "").trim();
+    if (tUrl) {
+      const fromThumb = extractCosKeyFromUrl(tUrl);
+      if (!fromThumb) {
+        throw new CosKeyOwnershipError("封面缩略图无效或不属于当前账号");
+      }
+      assertOwnedCosKey(userId, fromThumb);
+    }
+  }
+}
 
 export interface UpdateQuickCoversData {
   covers: string[];
@@ -279,7 +318,12 @@ export class CoverService {
       throw new Error("封面地址不能为空");
     }
     const thumbUrl = payload.thumbUrl != null ? String(payload.thumbUrl).trim() : "";
-    const thumbKey = payload.thumbKey != null ? String(payload.thumbKey).trim() : "";
+    let thumbKey = payload.thumbKey != null ? String(payload.thumbKey).trim() : "";
+    if (thumbKey && !isCosObjectKey(thumbKey)) {
+      thumbKey = extractCosKeyFromUrl(thumbUrl) || "";
+    }
+
+    assertOwnedCustomCoverMedia(userId, normalizedCoverUrl, thumbUrl, thumbKey);
 
     const pushDoc: { coverUrl: string; thumbUrl?: string; thumbKey?: string } = {
       coverUrl: normalizedCoverUrl,
@@ -361,6 +405,19 @@ export class CoverService {
     if (!normalizedCoverUrl) {
       throw new Error("封面地址不能为空");
     }
+    const nextThumbUrl =
+      payload.thumbUrl !== undefined ? String(payload.thumbUrl || "").trim() : undefined;
+    let nextThumbKey =
+      payload.thumbKey !== undefined ? String(payload.thumbKey || "").trim() : undefined;
+    if (nextThumbKey && !isCosObjectKey(nextThumbKey)) {
+      nextThumbKey = extractCosKeyFromUrl(String(nextThumbUrl || "")) || "";
+    }
+    assertOwnedCustomCoverMedia(
+      userId,
+      normalizedCoverUrl,
+      nextThumbUrl,
+      nextThumbKey,
+    );
 
     const $set: Record<string, unknown> = {
       "customCovers.$.coverUrl": normalizedCoverUrl,
@@ -368,17 +425,15 @@ export class CoverService {
     };
     const $unset: Record<string, "" | 1> = {};
     if (payload.thumbUrl !== undefined) {
-      const t = String(payload.thumbUrl || "").trim();
-      if (t) {
-        $set["customCovers.$.thumbUrl"] = t;
+      if (nextThumbUrl) {
+        $set["customCovers.$.thumbUrl"] = nextThumbUrl;
       } else {
         $unset["customCovers.$.thumbUrl"] = "";
       }
     }
     if (payload.thumbKey !== undefined) {
-      const k = String(payload.thumbKey || "").trim();
-      if (k) {
-        $set["customCovers.$.thumbKey"] = k;
+      if (nextThumbKey) {
+        $set["customCovers.$.thumbKey"] = nextThumbKey;
       } else {
         $unset["customCovers.$.thumbKey"] = "";
       }

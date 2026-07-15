@@ -250,7 +250,7 @@ export class FeedbackService {
         points: weeklyRewardPoints,
         kind: "feedback_reward",
         bizType: "feedback_weekly_first_reward",
-        bizId: String(doc._id),
+        bizId: `feedback_weekly_first_${input.userId}_${weekStartDateKey}`,
         title: "反馈周首条奖励",
         operatorType: "system",
         operatorId: "feedback.weekly_first",

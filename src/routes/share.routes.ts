@@ -13,9 +13,34 @@ const router = new Router({
 });
 
 /**
- * @route GET /share/:shareId
- * @desc 通过 shareId 获取分享手帐（无需鉴权；可选 Bearer，与作者一致时返回 isOwner: true）
- * @access Public
+ * @openapi
+ * /share/{shareId}:
+ *   get:
+ *     tags:
+ *       - share
+ *     summary: 通过 shareId 获取分享手帐
+ *     description: 无需登录；可选 Bearer Token，与作者一致时返回 isOwner true
+ *     security:
+ *       - {}
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: shareId
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: 分享 ID
+ *     responses:
+ *       200:
+ *         description: 获取分享手帐成功
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/SuccessNote'
+ *       404:
+ *         description: 分享不存在、已关闭或手帐已删除
+ *       500:
+ *         description: 服务器内部错误
  */
 router.get("/:shareId", optionalAuthMiddleware, async (ctx: AuthContext) => {
   try {
@@ -48,9 +73,49 @@ router.get("/:shareId", optionalAuthMiddleware, async (ctx: AuthContext) => {
 });
 
 /**
- * @route POST /notes/:id/share
- * @desc 开启或关闭手帐分享
- * @access Private
+ * @openapi
+ * /share/notes/{id}/share:
+ *   post:
+ *     tags:
+ *       - share
+ *     summary: 开启或关闭手帐分享
+ *     description: 切换指定手帐的分享状态，开启时进行内容安全检测
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: 手帐 ID
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - share
+ *             properties:
+ *               share:
+ *                 type: boolean
+ *                 description: true 开启分享，false 关闭分享
+ *     responses:
+ *       200:
+ *         description: 分享状态更新成功
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/SuccessObject'
+ *       400:
+ *         description: 参数错误或本地风控拦截
+ *       401:
+ *         description: 未授权访问
+ *       404:
+ *         description: 手帐不存在或无权访问
+ *       500:
+ *         description: 服务器内部错误
  */
 router.post("/notes/:id/share", authMiddleware, async (ctx) => {
   try {
@@ -104,9 +169,26 @@ router.post("/notes/:id/share", authMiddleware, async (ctx) => {
 });
 
 /**
- * @route GET /notes/shared
- * @desc 获取用户的分享手帐列表
- * @access Private
+ * @openapi
+ * /share/notes/shared:
+ *   get:
+ *     tags:
+ *       - share
+ *     summary: 获取用户的分享手帐列表
+ *     description: 获取当前用户已开启分享的手帐列表
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: 获取分享手帐列表成功
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/SuccessNoteList'
+ *       401:
+ *         description: 未授权访问
+ *       500:
+ *         description: 服务器内部错误
  */
 router.get("/notes/shared", authMiddleware, async (ctx: AuthContext) => {
   try {

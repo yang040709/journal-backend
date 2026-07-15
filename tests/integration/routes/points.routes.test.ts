@@ -83,4 +83,121 @@ describe("integration: /points", () => {
     expect(res.body.data.list.length).toBeGreaterThan(0);
     expect(res.body.data.pagination.total).toBeGreaterThan(0);
   });
+
+  it("POST /points/exchange 相同 Idempotency-Key 只扣一次积分", async () => {
+    const { token } = await createAuthUser({ points: 200 });
+    const headers = {
+      ...authHeader(token),
+      "Idempotency-Key": "idem-exchange-upload-1",
+    };
+
+    const first = await agent
+      .post("/points/exchange")
+      .set(headers)
+      .send({ kind: "upload" })
+      .expect(200);
+    const second = await agent
+      .post("/points/exchange")
+      .set(headers)
+      .send({ kind: "upload" })
+      .expect(200);
+
+    expect(first.body.data.points).toBe(second.body.data.points);
+    expect(first.body.data.points).toBeLessThan(200);
+  });
+
+  it("POST /points/exchange 两用户相同裸 requestId 互不影响", async () => {
+    const a = await createAuthUser({ userId: "pts-a", points: 200 });
+    const b = await createAuthUser({ userId: "pts-b", points: 200 });
+    const sharedRequestId = "shared-client-request-id";
+
+    const resA = await agent
+      .post("/points/exchange")
+      .set({ ...authHeader(a.token), "X-Request-Id": sharedRequestId })
+      .send({ kind: "upload" })
+      .expect(200);
+    const resB = await agent
+      .post("/points/exchange")
+      .set({ ...authHeader(b.token), "X-Request-Id": sharedRequestId })
+      .send({ kind: "upload" })
+      .expect(200);
+
+    expect(resA.body.code).toBe(0);
+    expect(resB.body.code).toBe(0);
+    expect(resA.body.data.points).toBeLessThan(200);
+    expect(resB.body.data.points).toBeLessThan(200);
+  });
+
+  it("ad-reward Zod/凭证无效；transactions Zod；campaigns 404", async () => {
+    const { token } = await createAuthUser({ points: 50 });
+    const h = authHeader(token);
+
+    expect(
+      (await agent.post("/points/ad-reward").set(h).send({})).status,
+    ).toBe(400);
+    expect(
+      (
+        await agent
+          .post("/points/ad-reward")
+          .set(h)
+          .send({
+            adProvider: "wx",
+            adUnitId: "u1",
+            rewardToken: "tok-route-1",
+            requestId: "r1",
+          })
+      ).status,
+    ).toBe(200);
+    expect(
+      (
+        await agent
+          .post("/points/ad-reward")
+          .set(h)
+          .send({
+            adProvider: "wx",
+            adUnitId: "u1",
+            rewardToken: "tok-route-1",
+          })
+      ).status,
+    ).toBe(200);
+
+    expect(
+      (await agent.get("/points/transactions").set(h).query({ page: "x" })).status,
+    ).toBe(400);
+    expect(
+      (
+        await agent
+          .get("/points/transactions")
+          .set(h)
+          .query({ page: 1, pageSize: 10, flowType: "income" })
+      ).status,
+    ).toBe(200);
+    expect(
+      (
+        await agent
+          .get("/points/transactions")
+          .set(h)
+          .query({ page: 1, flowType: "expense" })
+      ).status,
+    ).toBe(200);
+
+    expect(
+      (await agent.post("/points/exchange").set(h).send({ kind: "nope" })).status,
+    ).toBe(400);
+    expect(
+      (await agent.post("/points/exchange").set(h).send({ kind: "ai" })).status,
+    ).toBeLessThan(500);
+
+    expect(
+      (await agent.get("/points/campaigns/000000000000000000000000").set(h)).status,
+    ).toBe(404);
+    expect(
+      (
+        await agent
+          .post("/points/campaigns/000000000000000000000000/claim")
+          .set(h)
+          .send({})
+      ).status,
+    ).toBe(404);
+  });
 });

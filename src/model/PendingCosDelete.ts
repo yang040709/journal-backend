@@ -1,6 +1,10 @@
 import { Schema, model, Document } from "mongoose";
 
-export type PendingCosDeleteStatus = "pending" | "done" | "failed";
+export type PendingCosDeleteStatus =
+  | "pending"
+  | "processing"
+  | "done"
+  | "failed";
 
 export interface IPendingCosDelete extends Document {
   /** COS object key */
@@ -13,6 +17,8 @@ export interface IPendingCosDelete extends Document {
   maxAttempts: number;
   lastError?: string;
   nextRetryAt?: Date | null;
+  /** 认领进入 processing 的时间，用于超时回收 */
+  lockedAt?: Date | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -36,7 +42,7 @@ const pendingCosDeleteSchema = new Schema<IPendingCosDelete>(
     status: {
       type: String,
       required: true,
-      enum: ["pending", "done", "failed"],
+      enum: ["pending", "processing", "done", "failed"],
       default: "pending",
     },
     attempts: {
@@ -47,7 +53,6 @@ const pendingCosDeleteSchema = new Schema<IPendingCosDelete>(
     maxAttempts: {
       type: Number,
       default: 5,
-      min: 1,
     },
     lastError: {
       type: String,
@@ -57,12 +62,17 @@ const pendingCosDeleteSchema = new Schema<IPendingCosDelete>(
       type: Date,
       default: null,
     },
+    lockedAt: {
+      type: Date,
+      default: null,
+    },
   },
   { timestamps: true },
 );
 
 pendingCosDeleteSchema.index({ cosKey: 1 }, { unique: true });
 pendingCosDeleteSchema.index({ status: 1, nextRetryAt: 1, createdAt: 1 });
+pendingCosDeleteSchema.index({ status: 1, lockedAt: 1 });
 
 const PendingCosDelete = model<IPendingCosDelete>(
   "PendingCosDelete",

@@ -28,6 +28,27 @@ export interface IUser extends Document {
   }>;
   /** 用户手帐自定义标签（与系统预设合并为可选白名单），最多 12 个 */
   customNoteTags: string[];
+  /** 详情页全局默认阅读风格 key；null 表示标准阅读 */
+  defaultReadingStyleKey?: string | null;
+  /** 详情页全局默认阅读主题色 id；null 时用该风格默认主题 */
+  defaultReadingThemeId?: string | null;
+  /** 阅读主题作用范围：global=全局默认，note=各手帐独立 */
+  readingThemeApplyScope?: "global" | "note";
+  /** 阅读主题选择器可见列表与排序；null 表示使用系统默认 */
+  readingThemeCatalog?: {
+    styleKeys: (string | null)[];
+    themeIdsByStyle: Record<string, string[]>;
+  } | null;
+  /** 手帐详情是否显示字数统计 */
+  showNoteWordCount?: boolean;
+  /** 阅读主题时间是否显示到时分秒 */
+  showReadingThemeClockTime?: boolean;
+  /** 列表是否使用旧版 note-item 布局 */
+  useLegacyNoteItem?: boolean;
+  /** 相册模式无图封面是否使用较高饱和渐变 */
+  albumCoverHighSaturation?: boolean;
+  /** 无图封面样式 */
+  albumCoverNoImageStyle?: "dateTeaser" | "watermark" | "excerpt";
   createdAt: Date;
   updatedAt: Date;
 }
@@ -126,6 +147,59 @@ const userSchema = new Schema(
     customNoteTags: {
       type: [String],
       default: [],
+    },
+    defaultReadingStyleKey: {
+      type: String,
+      default: null,
+      trim: true,
+    },
+    defaultReadingThemeId: {
+      type: String,
+      default: null,
+      trim: true,
+      maxlength: 64,
+    },
+    readingThemeApplyScope: {
+      type: String,
+      enum: ["global", "note"],
+      default: "global",
+    },
+    readingThemeCatalog: {
+      type: new Schema(
+        {
+          styleKeys: {
+            type: [Schema.Types.Mixed],
+            default: undefined,
+          },
+          themeIdsByStyle: {
+            type: Schema.Types.Mixed,
+            default: undefined,
+          },
+        },
+        { _id: false },
+      ),
+      default: null,
+    },
+    showNoteWordCount: {
+      type: Boolean,
+      default: false,
+    },
+    showReadingThemeClockTime: {
+      type: Boolean,
+      default: false,
+    },
+    useLegacyNoteItem: {
+      type: Boolean,
+      default: false,
+    },
+    albumCoverHighSaturation: {
+      type: Boolean,
+      default: false,
+    },
+    albumCoverNoImageStyle: {
+      type: String,
+      enum: ["dateTeaser", "watermark", "excerpt"],
+      default: "dateTeaser",
     },
   },
   {

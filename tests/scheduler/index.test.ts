@@ -13,6 +13,12 @@ vi.mock("node-schedule", () => ({
       cancel: vi.fn(),
       nextInvocation: () => new Date(Date.now() + 60_000),
     })),
+    RecurrenceRule: class RecurrenceRule {
+      dayOfWeek?: number;
+      hour?: number;
+      minute?: number;
+      tz?: string;
+    },
   },
 }));
 
@@ -39,6 +45,15 @@ vi.mock("../../src/service/pendingCosDelete.service", () => ({
   processPendingCosDeletes: vi.fn().mockResolvedValue({ processed: 0, succeeded: 0, failed: 0 }),
 }));
 
+vi.mock("../../src/service/trashPurge.service", () => ({
+  TrashPurgeService: {
+    runWeeklyPurge: vi.fn().mockResolvedValue({
+      notes: { purged: 0, total: 0, errors: 0 },
+      notebooks: { purged: 0, total: 0, errors: 0 },
+    }),
+  },
+}));
+
 import {
   getSchedulerStatus,
   startAllSchedulers,
@@ -61,6 +76,7 @@ describe("scheduler: index", () => {
     expect(status.reminderScheduler.isRunning).toBe(false);
     expect(status.alertScheduler.isRunning).toBe(false);
     expect(status.cosDeleteScheduler.isRunning).toBe(false);
+    expect(status.trashPurgeScheduler.isRunning).toBe(false);
   });
 
   it("startAllSchedulers 后 getSchedulerStatus 均为运行中", async () => {
@@ -71,6 +87,7 @@ describe("scheduler: index", () => {
     expect(status.reminderScheduler.isRunning).toBe(true);
     expect(status.alertScheduler.isRunning).toBe(true);
     expect(status.cosDeleteScheduler.isRunning).toBe(true);
+    expect(status.trashPurgeScheduler.isRunning).toBe(true);
   });
 
   it("stopAllSchedulers 后 getSchedulerStatus 均为未运行", async () => {
@@ -82,5 +99,6 @@ describe("scheduler: index", () => {
     expect(status.reminderScheduler.isRunning).toBe(false);
     expect(status.alertScheduler.isRunning).toBe(false);
     expect(status.cosDeleteScheduler.isRunning).toBe(false);
+    expect(status.trashPurgeScheduler.isRunning).toBe(false);
   });
 });

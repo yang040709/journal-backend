@@ -9,6 +9,27 @@ const router = new Router({
   prefix: "/feedbacks",
 });
 
+/**
+ * @openapi
+ * /feedbacks/weekly-first-status:
+ *   get:
+ *     tags:
+ *       - feedback
+ *     summary: 获取本周首条反馈奖励状态
+ *     description: |
+ *       可选认证接口（security 为空）。未携带 Bearer Token 时返回公开奖励规则与 granted=false；
+ *       携带有效 bearerAuth 时返回当前用户本周是否已获得首条反馈奖励。
+ *     security: []
+ *     responses:
+ *       200:
+ *         description: 获取状态成功
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/SuccessObject'
+ *       500:
+ *         description: 服务器内部错误
+ */
 router.get("/weekly-first-status", optionalAuthMiddleware, async (ctx: AuthContext) => {
   try {
     const userId = ctx.user?.userId;
@@ -49,6 +70,64 @@ const listQuerySchema = z.object({
   pageSize: z.coerce.number().int().min(1).max(50).optional().default(20),
 });
 
+/**
+ * @openapi
+ * /feedbacks:
+ *   post:
+ *     tags:
+ *       - feedback
+ *     summary: 提交用户反馈
+ *     description: 提交 bug、吐槽、需求或表扬类反馈，可附带截图
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - type
+ *               - content
+ *             properties:
+ *               type:
+ *                 type: string
+ *                 enum: [bug, rant, demand, praise]
+ *                 description: 反馈类型
+ *               content:
+ *                 type: string
+ *                 minLength: 1
+ *                 maxLength: 4000
+ *                 description: 反馈正文
+ *               contact:
+ *                 type: string
+ *                 maxLength: 120
+ *                 description: 联系方式（可选）
+ *               images:
+ *                 type: array
+ *                 maxItems: 9
+ *                 items:
+ *                   type: string
+ *                   format: uri
+ *                 description: 截图 URL 列表
+ *               clientMeta:
+ *                 type: object
+ *                 additionalProperties: true
+ *                 description: 客户端元信息（可选）
+ *     responses:
+ *       200:
+ *         description: 反馈提交成功
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/SuccessObject'
+ *       400:
+ *         description: 参数验证失败或提交过于频繁（4301）
+ *       401:
+ *         description: 未授权访问
+ *       500:
+ *         description: 服务器内部错误
+ */
 router.post("/", async (ctx: AuthContext) => {
   const userId = ctx.user!.userId;
   try {
@@ -76,6 +155,44 @@ router.post("/", async (ctx: AuthContext) => {
   }
 });
 
+/**
+ * @openapi
+ * /feedbacks/my:
+ *   get:
+ *     tags:
+ *       - feedback
+ *     summary: 获取我的反馈列表
+ *     description: 分页返回当前用户提交的反馈记录
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: page
+ *         schema:
+ *           type: integer
+ *           default: 1
+ *         description: 页码
+ *       - in: query
+ *         name: pageSize
+ *         schema:
+ *           type: integer
+ *           default: 20
+ *           maximum: 50
+ *         description: 每页数量
+ *     responses:
+ *       200:
+ *         description: 获取反馈列表成功
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/SuccessGeneric'
+ *       400:
+ *         description: 参数验证失败或分页深度超限
+ *       401:
+ *         description: 未授权访问
+ *       500:
+ *         description: 服务器内部错误
+ */
 router.get("/my", async (ctx: AuthContext) => {
   const userId = ctx.user!.userId;
   try {
@@ -91,6 +208,28 @@ router.get("/my", async (ctx: AuthContext) => {
   }
 });
 
+/**
+ * @openapi
+ * /feedbacks/unread-summary:
+ *   get:
+ *     tags:
+ *       - feedback
+ *     summary: 获取未读反馈回复汇总
+ *     description: 返回未读回复数量及最新一条未读摘要
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: 获取未读汇总成功
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/SuccessObject'
+ *       401:
+ *         description: 未授权访问
+ *       500:
+ *         description: 服务器内部错误
+ */
 router.get("/unread-summary", async (ctx: AuthContext) => {
   const userId = ctx.user!.userId;
   try {
@@ -101,6 +240,28 @@ router.get("/unread-summary", async (ctx: AuthContext) => {
   }
 });
 
+/**
+ * @openapi
+ * /feedbacks/mark-all-replies-read:
+ *   post:
+ *     tags:
+ *       - feedback
+ *     summary: 标记全部反馈回复为已读
+ *     description: 将当前用户所有未读反馈回复一次性标记为已读
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: 操作成功
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/SuccessObject'
+ *       401:
+ *         description: 未授权访问
+ *       500:
+ *         description: 服务器内部错误
+ */
 router.post("/mark-all-replies-read", async (ctx: AuthContext) => {
   const userId = ctx.user!.userId;
   try {
@@ -111,6 +272,39 @@ router.post("/mark-all-replies-read", async (ctx: AuthContext) => {
   }
 });
 
+/**
+ * @openapi
+ * /feedbacks/{id}/mark-reply-read:
+ *   post:
+ *     tags:
+ *       - feedback
+ *     summary: 标记单条反馈回复为已读
+ *     description: 将指定反馈的官方回复标记为已读
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: 反馈 ID
+ *     responses:
+ *       200:
+ *         description: 操作成功
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/SuccessObject'
+ *       400:
+ *         description: 该反馈暂无回复
+ *       401:
+ *         description: 未授权访问
+ *       404:
+ *         description: 反馈不存在
+ *       500:
+ *         description: 服务器内部错误
+ */
 router.post("/:id/mark-reply-read", async (ctx: AuthContext) => {
   const userId = ctx.user!.userId;
   try {
@@ -129,6 +323,37 @@ router.post("/:id/mark-reply-read", async (ctx: AuthContext) => {
   }
 });
 
+/**
+ * @openapi
+ * /feedbacks/{id}:
+ *   get:
+ *     tags:
+ *       - feedback
+ *     summary: 获取我的反馈详情
+ *     description: 返回指定反馈的完整详情（含官方回复）
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: 反馈 ID
+ *     responses:
+ *       200:
+ *         description: 获取反馈详情成功
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/SuccessObject'
+ *       401:
+ *         description: 未授权访问
+ *       404:
+ *         description: 反馈不存在
+ *       500:
+ *         description: 服务器内部错误
+ */
 router.get("/:id", async (ctx: AuthContext) => {
   const userId = ctx.user!.userId;
   const detail = await FeedbackService.getMyFeedbackDetail(userId, String(ctx.params.id || ""));

@@ -1,15 +1,24 @@
 import NoteBook, { INoteBook, LeanNoteBook } from "../model/NoteBook";
 import Note from "../model/Note";
 import { ActivityLogger } from "../utils/ActivityLogger";
-import { ErrorCodes } from "../utils/response";
 import { toLeanNoteBookArray, toLeanNoteBook } from "../utils/typeUtils";
 import { ensurePageDepth, pickSortField } from "../utils/querySafety";
+import { getTrashExpireAt } from "./note/note.shared";
+import { NotebookLimitsService } from "./notebookLimits.service";
 
 export interface CreateNoteBookData {
   title: string;
   coverImg?: string;
   userId: string;
 }
+
+export const createNotebookLimitExceededError = (max: number): Error => {
+  const err = new Error(
+    `手帐本数量已达到上限（${max}个），无法继续添加`,
+  );
+  (err as Error & { code: string }).code = "NOTEBOOK_LIMIT_EXCEEDED";
+  return err;
+};
 
 export interface UpdateNoteBookData {
   title?: string;
@@ -25,14 +34,20 @@ export interface PaginationParams {
 }
 
 export class NoteBookService {
-  private static getTrashExpireAt(base: Date = new Date()): Date {
-    return new Date(base.getTime() + 7 * 24 * 60 * 60 * 1000);
-  }
-
   /**
    * 创建手帐本
    */
   static async createNoteBook(data: CreateNoteBookData): Promise<INoteBook> {
+    const effectiveMax =
+      await NotebookLimitsService.getEffectiveMaxNoteBookCount();
+    const liveCount = await NoteBook.countDocuments({
+      userId: data.userId,
+      isDeleted: { $ne: true },
+    });
+    if (liveCount >= effectiveMax) {
+      throw createNotebookLimitExceededError(effectiveMax);
+    }
+
     const noteBook = new NoteBook({
       title: data.title,
       coverImg: data.coverImg || "",
@@ -66,7 +81,11 @@ export class NoteBookService {
   static async getUserNoteBooks(
     userId: string,
     params: PaginationParams = {},
-  ): Promise<{ items: LeanNoteBook[]; total: number }> {
+  ): Promise<{
+    items: LeanNoteBook[];
+    total: number;
+    maxNoteBookCount: number;
+  }> {
     const page = Math.max(1, params.page || 1);
     const limit = Math.min(100, Math.max(1, params.limit || 20));
     ensurePageDepth({ page, limit });
@@ -79,16 +98,21 @@ export class NoteBookService {
     );
     const sortOrder = params.order === "asc" ? 1 : -1;
 
-    const [items, total] = await Promise.all([
+    const [items, total, maxNoteBookCount] = await Promise.all([
       NoteBook.find({ userId, isDeleted: { $ne: true } })
         .sort({ [sortField]: sortOrder })
         .skip(skip)
         .limit(limit)
         .lean(),
       NoteBook.countDocuments({ userId, isDeleted: { $ne: true } }),
+      NotebookLimitsService.getEffectiveMaxNoteBookCount(),
     ]);
 
-    return { items: toLeanNoteBookArray(items), total };
+    return {
+      items: toLeanNoteBookArray(items),
+      total,
+      maxNoteBookCount,
+    };
   }
 
   /**
@@ -158,10 +182,21 @@ export class NoteBookService {
     }
 
     const deletedAt = new Date();
-    const deleteExpireAt = NoteBookService.getTrashExpireAt(deletedAt);
+    const deleteExpireAt = getTrashExpireAt(deletedAt);
+
+    const notesToSoftDelete = await Note.find({
+      noteBookId: id,
+      userId,
+      isDeleted: { $ne: true },
+    })
+      .select("_id")
+      .lean();
+    const noteIds = notesToSoftDelete.map((n) => String(n._id));
+
     await NoteBook.updateOne(
       { _id: id, userId, isDeleted: { $ne: true } },
       { $set: { isDeleted: true, deletedAt, deleteExpireAt, count: 0 } },
+      { timestamps: false },
     );
     await Note.updateMany(
       { noteBookId: id, userId, isDeleted: { $ne: true } },
@@ -173,7 +208,17 @@ export class NoteBookService {
           isShare: false,
         },
       },
+      { timestamps: false },
     );
+
+    if (noteIds.length) {
+      const { ReminderService } = await import("./reminder.service");
+      await ReminderService.markUnavailableByNoteIds(noteIds, userId);
+      const { ShareSecurityTaskService } = await import(
+        "./shareSecurityTask.service"
+      );
+      await ShareSecurityTaskService.cancelByNoteIds(noteIds, userId);
+    }
 
     // 记录活动
     ActivityLogger.record(
@@ -211,9 +256,13 @@ export class NoteBookService {
       userId,
       isDeleted: { $ne: true },
     });
-    // 如果数量不一致，更新手帐本的数量
+    // 如果数量不一致，更新手帐本的数量（不刷新手帐本 updatedAt）
     if (noteCount !== noteBook.count) {
-      await NoteBook.updateOne({ _id: id }, { count: noteCount });
+      await NoteBook.updateOne(
+        { _id: id },
+        { count: noteCount },
+        { timestamps: false },
+      );
     }
     return { noteCount };
   }

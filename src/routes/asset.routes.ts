@@ -18,11 +18,10 @@ const listImagesQuerySchema = z.object({
 });
 
 /**
- * @swagger
+ * @openapi
  * /assets/images:
  *   get:
- *     tags:
- *       - 用户资产
+ *     tags: [asset]
  *     summary: 分页获取当前用户上传过的图片记录
  *     security:
  *       - bearerAuth: []
@@ -43,8 +42,14 @@ const listImagesQuerySchema = z.object({
  *           type: string
  *           enum: [note, cover]
  *     responses:
- *       200:
+ *       '200':
  *         description: 成功
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/SuccessPaginatedUserImageAssetList'
+ *       '401':
+ *         description: 未授权
  */
 router.get("/images", async (ctx: AuthContext) => {
   try {
@@ -74,12 +79,12 @@ router.get("/images", async (ctx: AuthContext) => {
 });
 
 /**
- * @swagger
+ * @openapi
  * /assets/images/{id}:
  *   delete:
- *     tags:
- *       - 用户资产
- *     summary: 彻底删除用户图片（同步手帐/封面引用，COS 异步入队删除）
+ *     tags: [asset]
+ *     summary: 彻底删除用户图片
+ *     description: 同步手帐/封面引用，COS 异步入队删除
  *     security:
  *       - bearerAuth: []
  *     parameters:
@@ -89,9 +94,13 @@ router.get("/images", async (ctx: AuthContext) => {
  *         schema:
  *           type: string
  *     responses:
- *       200:
+ *       '200':
  *         description: 成功
- *       404:
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/SuccessObject'
+ *       '404':
  *         description: 记录不存在或无权操作
  */
 router.delete("/images/:id", async (ctx: AuthContext) => {

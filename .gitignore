@@ -7,7 +7,12 @@ yarn-error.log*
 .npm
 .yarn
 
-scripts/
+# Local-only scripts and sensitive inputs (scripts/ otherwise tracked)
+scripts/note.txt
+scripts/split-admin-routes.mjs
+scripts/split-note-routes.mjs
+scripts/audit-route-split.mjs
+scripts/injectAdminOpenapi.ts
 
 # Build outputs (adjust based on your build tool)
 dist/

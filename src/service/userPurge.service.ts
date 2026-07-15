@@ -2,11 +2,13 @@ import { enqueueCosDeletes } from "./pendingCosDelete.service";
 import { isCosObjectKey } from "../utils/cosDelete";
 import mongoose from "mongoose";
 import Activity from "../model/Activity";
+import ClientEvent from "../model/ClientEvent";
 import Note from "../model/Note";
 import NoteBook from "../model/NoteBook";
 import NoteExportLog from "../model/NoteExportLog";
 import PointsCampaignClaim from "../model/PointsCampaignClaim";
 import PointsLedger from "../model/PointsLedger";
+import ReadingThemeChangeLog from "../model/ReadingThemeChangeLog";
 import Reminder from "../model/Reminder";
 import ShareSecurityTask from "../model/ShareSecurityTask";
 import Template from "../model/Template";
@@ -37,6 +39,8 @@ type PurgeCollectionKey =
   | "noteExportLogs"
   | "pointsCampaignClaims"
   | "userImageAssets"
+  | "readingThemeChangeLogs"
+  | "clientEvents"
   | "user";
 
 export type PurgeStats = Record<PurgeCollectionKey, number>;
@@ -85,6 +89,8 @@ function blankStats(): PurgeStats {
     noteExportLogs: 0,
     pointsCampaignClaims: 0,
     userImageAssets: 0,
+    readingThemeChangeLogs: 0,
+    clientEvents: 0,
     user: 0,
   };
 }
@@ -163,6 +169,8 @@ export class UserPurgeService {
         noteExportLogs,
         pointsCampaignClaims,
         userImageAssets,
+        readingThemeChangeLogs,
+        clientEvents,
       ] = await Promise.all([
         Note.countDocuments({ userId }),
         NoteBook.countDocuments({ userId }),
@@ -180,6 +188,8 @@ export class UserPurgeService {
         NoteExportLog.countDocuments({ userId }),
         PointsCampaignClaim.countDocuments({ userId }),
         UserImageAsset.countDocuments({ userId }),
+        ReadingThemeChangeLog.countDocuments({ userId }),
+        ClientEvent.countDocuments({ userId }),
       ]);
 
       return {
@@ -200,6 +210,8 @@ export class UserPurgeService {
         noteExportLogs,
         pointsCampaignClaims,
         userImageAssets,
+        readingThemeChangeLogs,
+        clientEvents,
         user: 1,
       };
     };
@@ -241,6 +253,8 @@ export class UserPurgeService {
         PointsCampaignClaim.deleteMany({ userId }, opt as any),
         UserImageAsset.deleteMany({ userId }, opt as any),
         MediaRef.deleteMany({ userId }, opt as any),
+        ReadingThemeChangeLog.deleteMany({ userId }, opt as any),
+        ClientEvent.deleteMany({ userId }, opt as any),
       ]);
       await User.deleteOne({ _id: id }, opt as any);
     };

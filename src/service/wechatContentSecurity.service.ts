@@ -16,13 +16,28 @@ interface WeChatApiResponse {
   result?: { suggest?: string; label?: number };
 }
 
+export type WeChatSecurityDecision = "pass" | "reject" | "retry";
+
 export interface WeChatSecurityResult {
+  decision: WeChatSecurityDecision;
+  /** @deprecated Prefer `decision`. Derived: pass→true, reject/retry→false (retry is not a content reject). */
   passed: boolean;
   suggest?: "pass" | "risky" | "review" | "unknown";
   label?: number;
   traceId?: string;
   code?: string;
   detail?: string;
+}
+
+function withDecision(
+  decision: WeChatSecurityDecision,
+  rest: Omit<WeChatSecurityResult, "decision" | "passed">,
+): WeChatSecurityResult {
+  return {
+    decision,
+    passed: decision === "pass",
+    ...rest,
+  };
 }
 
 const WECHAT_OPENID_PATTERN = /^o[A-Za-z0-9_-]{15,63}$/;
@@ -77,7 +92,10 @@ export class WeChatContentSecurityService {
 
   static async checkText(content: string, openid?: string): Promise<WeChatSecurityResult> {
     if (!this.isConfigured()) {
-      return { passed: false, code: "WECHAT_NOT_CONFIGURED", detail: "微信风控未配置" };
+      return withDecision("retry", {
+        code: "WECHAT_NOT_CONFIGURED",
+        detail: "微信风控未配置",
+      });
     }
 
     try {
@@ -96,62 +114,64 @@ export class WeChatContentSecurityService {
       );
 
       if (res.data?.errcode && res.data.errcode !== 0) {
-        return {
-          passed: false,
+        return withDecision("retry", {
           traceId: res.data.trace_id,
           code: `WECHAT_TEXT_API_${res.data.errcode}`,
           detail: res.data.errmsg || "微信文本检测失败",
-        };
+        });
       }
 
       const suggest = res.data?.result?.suggest;
       const label = res.data?.result?.label;
       if (suggest === "pass") {
-        return { passed: true, suggest: "pass", label, traceId: res.data?.trace_id };
+        return withDecision("pass", {
+          suggest: "pass",
+          label,
+          traceId: res.data?.trace_id,
+        });
       }
       if (suggest === "risky") {
-        return {
-          passed: true,
+        return withDecision("pass", {
           suggest: "risky",
           label,
           traceId: res.data?.trace_id,
           code: "WECHAT_TEXT_RISKY",
           detail: "suggest=risky",
-        };
+        });
       }
       if (suggest === "review") {
-        return {
-          passed: false,
+        return withDecision("reject", {
           suggest: "review",
           label,
           traceId: res.data?.trace_id,
           code: "WECHAT_TEXT_REJECT",
           detail: "suggest=review",
-        };
+        });
       }
-      return {
-        passed: false,
+      return withDecision("retry", {
         suggest: "unknown",
         label,
         traceId: res.data?.trace_id,
-        code: "WECHAT_TEXT_REJECT",
+        code: "WECHAT_TEXT_UNKNOWN_SUGGEST",
         detail: `suggest=${suggest || "unknown"}`,
-      };
+      });
     } catch (e) {
-      return {
-        passed: false,
+      return withDecision("retry", {
         code: "WECHAT_TEXT_REQUEST_ERROR",
         detail: e instanceof Error ? e.message : String(e),
-      };
+      });
     }
   }
 
   static async checkImageByUrl(imageUrl: string): Promise<WeChatSecurityResult> {
     if (!this.isConfigured()) {
-      return { passed: false, code: "WECHAT_NOT_CONFIGURED", detail: "微信风控未配置" };
+      return withDecision("retry", {
+        code: "WECHAT_NOT_CONFIGURED",
+        detail: "微信风控未配置",
+      });
     }
     if (!imageUrl) {
-      return { passed: true };
+      return withDecision("pass", {});
     }
 
     try {
@@ -164,22 +184,20 @@ export class WeChatContentSecurityService {
       );
 
       if (res.data?.errcode && res.data.errcode !== 0) {
-        return {
-          passed: false,
+        return withDecision("retry", {
           traceId: res.data.trace_id,
           code: `WECHAT_IMAGE_API_${res.data.errcode}`,
           detail: res.data.errmsg || "微信图片检测失败",
-        };
+        });
       }
 
       // 异步接口通常返回受理成功（errcode=0），这里按通过处理，后续可接回调做更精细决策
-      return { passed: true, traceId: res.data?.trace_id };
+      return withDecision("pass", { traceId: res.data?.trace_id });
     } catch (e) {
-      return {
-        passed: false,
+      return withDecision("retry", {
         code: "WECHAT_IMAGE_REQUEST_ERROR",
         detail: e instanceof Error ? e.message : String(e),
-      };
+      });
     }
   }
 }

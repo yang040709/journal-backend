@@ -56,7 +56,7 @@ const parseTemplateJson = (raw: string): AiTemplatePayload => {
   try {
     parsed = JSON.parse(cleaned);
   } catch {
-    throw new Error("AI 返回不是合法 JSON，请重试");
+    throw new Error("灵感结果解析失败，请重试");
   }
   if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
     const o = parsed as Record<string, unknown>;
@@ -69,7 +69,7 @@ const parseTemplateJson = (raw: string): AiTemplatePayload => {
   }
   const result = aiTemplateOutputSchema.safeParse(parsed);
   if (!result.success) {
-    throw new Error("AI 返回的模板格式不符合要求，请重试");
+    throw new Error("灵感返回的模板格式不符合要求，请重试");
   }
   const d = result.data;
   return {

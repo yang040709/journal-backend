@@ -4,6 +4,7 @@ import UserUploadQuotaDaily, { UploadBiz } from "../model/UserUploadQuotaDaily";
 import UserFeedbackImageQuotaDaily from "../model/UserFeedbackImageQuotaDaily";
 import User from "../model/User";
 import { getQuotaDateContext } from "../utils/dateKey";
+import { logger } from "../utils/logger";
 import { QuotaBaseLimitsService } from "./quotaBaseLimits.service";
 export type UploadCredentialBiz = UploadBiz | "feedback";
 export interface CreateCosStsInput {
@@ -171,6 +172,49 @@ const consumeDailyQuota = async (userId: string, biz: UploadBiz) => {
   };
 };
 
+const rollbackDailyQuota = async (
+  userId: string,
+  dateKey: string,
+  biz: UploadBiz,
+): Promise<void> => {
+  try {
+    await UserUploadQuotaDaily.updateOne(
+      { userId, dateKey, usedCount: { $gt: 0 } },
+      {
+        $inc: {
+          usedCount: -1,
+          [`bizBreakdown.${biz}`]: -1,
+        },
+      },
+    );
+  } catch (err) {
+    logger.error("上传日额度回滚失败", {
+      userId,
+      dateKey,
+      biz,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+};
+
+const rollbackFeedbackDailyQuota = async (
+  userId: string,
+  dateKey: string,
+): Promise<void> => {
+  try {
+    await UserFeedbackImageQuotaDaily.updateOne(
+      { userId, dateKey, usedCount: { $gt: 0 } },
+      { $inc: { usedCount: -1 } },
+    );
+  } catch (err) {
+    logger.error("反馈上传日额度回滚失败", {
+      userId,
+      dateKey,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+};
+
 const consumeFeedbackDailyQuota = async (userId: string) => {
   const { dateKey } = getQuotaDateContext();
 
@@ -288,66 +332,77 @@ export class UploadService {
         ? await consumeFeedbackDailyQuota(input.userId)
         : await consumeDailyQuota(input.userId, input.biz);
 
-    const secretId = getRequiredEnv("COS_SECRET_ID");
-    const secretKey = getRequiredEnv("COS_SECRET_KEY");
-    const bucket = getRequiredEnv("COS_BUCKET");
-    const region = getRequiredEnv("COS_REGION");
-    const uploadDir = process.env.COS_UPLOAD_DIR || "journal";
-    const publicDomain = process.env.COS_PUBLIC_DOMAIN || "";
-    const durationSeconds = toNumber(process.env.COS_STS_DURATION_SECONDS, 1800);
+    try {
+      const secretId = getRequiredEnv("COS_SECRET_ID");
+      const secretKey = getRequiredEnv("COS_SECRET_KEY");
+      const bucket = getRequiredEnv("COS_BUCKET");
+      const region = getRequiredEnv("COS_REGION");
+      const uploadDir = process.env.COS_UPLOAD_DIR || "journal";
+      const publicDomain = process.env.COS_PUBLIC_DOMAIN || "";
+      const durationSeconds = toNumber(process.env.COS_STS_DURATION_SECONDS, 1800);
 
-    const date = new Date();
-    const month = `${date.getFullYear()}${String(date.getMonth() + 1).padStart(2, "0")}`;
-    const ext = getFileExt(input.fileName, input.fileType);
-    const id = randomUUID();
-    const key = `${uploadDir}/${input.userId}/${month}/${id}${ext}`;
-    const thumbKey =
-      input.withThumb === true ? `${uploadDir}/${input.userId}/${month}/${id}-mini.jpg` : undefined;
-    const resources =
-      thumbKey != null
-        ? [createCosResource(bucket, region, key), createCosResource(bucket, region, thumbKey)]
-        : [createCosResource(bucket, region, key)];
+      const date = new Date();
+      const month = `${date.getFullYear()}${String(date.getMonth() + 1).padStart(2, "0")}`;
+      const ext = getFileExt(input.fileName, input.fileType);
+      const id = randomUUID();
+      const key = `${uploadDir}/${input.userId}/${month}/${id}${ext}`;
+      const thumbKey =
+        input.withThumb === true
+          ? `${uploadDir}/${input.userId}/${month}/${id}-mini.jpg`
+          : undefined;
+      const resources =
+        thumbKey != null
+          ? [createCosResource(bucket, region, key), createCosResource(bucket, region, thumbKey)]
+          : [createCosResource(bucket, region, key)];
 
-    const credential = await STS.getCredential({
-      secretId,
-      secretKey,
-      durationSeconds,
-      policy: {
-        version: "2.0",
-        statement: [
-          {
-            action: ["cos:PutObject", "cos:PostObject"],
-            effect: "allow",
-            resource: resources,
-          },
-        ],
-      },
-    });
+      const credential = await STS.getCredential({
+        secretId,
+        secretKey,
+        durationSeconds,
+        policy: {
+          version: "2.0",
+          statement: [
+            {
+              action: ["cos:PutObject", "cos:PostObject"],
+              effect: "allow",
+              resource: resources,
+            },
+          ],
+        },
+      });
 
-    if (!credential?.credentials) {
-      throw new Error("获取COS临时凭证失败");
+      if (!credential?.credentials) {
+        throw new Error("获取COS临时凭证失败");
+      }
+
+      const uploadHost = `https://${bucket}.cos.${region}.myqcloud.com`;
+      const fileBase = publicDomain ? publicDomain.replace(/\/$/, "") : uploadHost;
+
+      return {
+        bucket,
+        region,
+        key,
+        ...(thumbKey != null
+          ? {
+              thumbKey,
+              thumbFileUrl: `${fileBase}/${thumbKey}`,
+            }
+          : {}),
+        expiredTime: credential.expiredTime,
+        tmpSecretId: credential.credentials.tmpSecretId,
+        tmpSecretKey: credential.credentials.tmpSecretKey,
+        sessionToken: credential.credentials.sessionToken,
+        uploadHost,
+        fileUrl: `${fileBase}/${key}`,
+        quota,
+      };
+    } catch (err) {
+      if (input.biz === "feedback") {
+        await rollbackFeedbackDailyQuota(input.userId, quota.dateKey);
+      } else {
+        await rollbackDailyQuota(input.userId, quota.dateKey, input.biz);
+      }
+      throw err;
     }
-
-    const uploadHost = `https://${bucket}.cos.${region}.myqcloud.com`;
-    const fileBase = publicDomain ? publicDomain.replace(/\/$/, "") : uploadHost;
-
-    return {
-      bucket,
-      region,
-      key,
-      ...(thumbKey != null
-        ? {
-            thumbKey,
-            thumbFileUrl: `${fileBase}/${thumbKey}`,
-          }
-        : {}),
-      expiredTime: credential.expiredTime,
-      tmpSecretId: credential.credentials.tmpSecretId,
-      tmpSecretKey: credential.credentials.tmpSecretKey,
-      sessionToken: credential.credentials.sessionToken,
-      uploadHost,
-      fileUrl: `${fileBase}/${key}`,
-      quota,
-    };
   }
 }

@@ -15,7 +15,7 @@ export interface UpdateReminderData {
   content?: string;
   remindTime?: Date;
   subscriptionStatus?: "pending" | "subscribed" | "cancelled";
-  sendStatus?: "pending" | "sent" | "failed";
+  sendStatus?: "pending" | "sending" | "sent" | "failed";
   retryCount?: number;
   lastError?: string;
   sentAt?: Date;
@@ -24,6 +24,9 @@ export interface UpdateReminderData {
 function getReminderDbId(reminder: { id?: string; _id?: unknown }): string {
   return String(reminder.id || reminder._id);
 }
+
+/** sending 卡住超过该时间则回收为 pending */
+export const REMINDER_SEND_STUCK_MS = 15 * 60 * 1000;
 
 export class ReminderService {
   /**
@@ -74,7 +77,7 @@ export class ReminderService {
       page?: number;
       limit?: number;
       status?: "pending" | "subscribed" | "cancelled";
-      sendStatus?: "pending" | "sent" | "failed";
+      sendStatus?: "pending" | "sending" | "sent" | "failed";
     } = {},
   ): Promise<{
     items: IReminder[];
@@ -231,6 +234,79 @@ export class ReminderService {
   }
 
   /**
+   * 手帐软删：标记关联提醒不可用，并取消未发送完的订阅
+   */
+  static async markUnavailableByNoteId(
+    noteId: string,
+    userId: string,
+  ): Promise<number> {
+    return this.markUnavailableByNoteIds([noteId], userId);
+  }
+
+  /**
+   * 批量手帐软删：标记关联提醒不可用
+   */
+  static async markUnavailableByNoteIds(
+    noteIds: string[],
+    userId: string,
+  ): Promise<number> {
+    const ids = [...new Set(noteIds.map(String).filter(Boolean))];
+    if (!ids.length) return 0;
+
+    const now = new Date();
+    const filter = { noteId: { $in: ids }, userId };
+
+    const result = await Reminder.updateMany(filter, {
+      $set: {
+        noteUnavailable: true,
+        noteUnavailableAt: now,
+      },
+    });
+
+    // 未成功发送的：取消 subscribed / pending，避免用户误以为还会推送
+    await Reminder.updateMany(
+      {
+        ...filter,
+        sendStatus: { $ne: "sent" },
+        subscriptionStatus: { $in: ["subscribed", "pending"] },
+      },
+      { $set: { subscriptionStatus: "cancelled" } },
+    );
+
+    return result.modifiedCount || 0;
+  }
+
+  /**
+   * 手帐从废纸篓恢复：清除不可用标记；不自动恢复 subscribed
+   */
+  static async clearUnavailableByNoteId(
+    noteId: string,
+    userId: string,
+  ): Promise<number> {
+    const result = await Reminder.updateMany(
+      { noteId, userId, noteUnavailable: true },
+      {
+        $set: {
+          noteUnavailable: false,
+          noteUnavailableAt: null,
+        },
+      },
+    );
+    return result.modifiedCount || 0;
+  }
+
+  /**
+   * 手帐永久清除：删除关联提醒
+   */
+  static async deleteByNoteId(
+    noteId: string,
+    userId: string,
+  ): Promise<number> {
+    const result = await Reminder.deleteMany({ noteId, userId });
+    return result.deletedCount || 0;
+  }
+
+  /**
    * 获取待发送的提醒
    */
   static async getPendingReminders(
@@ -241,53 +317,142 @@ export class ReminderService {
       subscriptionStatus: "subscribed",
       sendStatus: "pending",
       retryCount: { $lt: 3 },
+      noteUnavailable: { $ne: true },
     }).lean();
 
     return toLeanReminderArray(reminders) as unknown as IReminder[];
   }
 
   /**
-   * 发送提醒
+   * 回收卡住的 sending（进程崩溃 / 微信调用超时等），使其可再次发送。
+   */
+  static async reclaimStuckSending(
+    now = new Date(),
+    stuckMs = REMINDER_SEND_STUCK_MS,
+  ): Promise<number> {
+    const cutoff = new Date(now.getTime() - stuckMs);
+    const result = await Reminder.updateMany(
+      {
+        sendStatus: "sending",
+        $or: [
+          { sendLockedAt: { $lte: cutoff } },
+          { sendLockedAt: null },
+          { sendLockedAt: { $exists: false } },
+        ],
+      },
+      {
+        $set: {
+          sendStatus: "pending",
+          sendLockedAt: null,
+          lastError: "send lock reclaimed after timeout",
+        },
+      },
+    );
+    return result.modifiedCount || 0;
+  }
+
+  /**
+   * 原子认领待发送提醒（pending → sending），避免多实例重复推送。
+   */
+  static async claimReminderForSend(
+    reminderId: string,
+  ): Promise<IReminder | null> {
+    const now = new Date();
+    const claimed = await Reminder.findOneAndUpdate(
+      {
+        _id: reminderId,
+        sendStatus: "pending",
+        subscriptionStatus: "subscribed",
+        retryCount: { $lt: 3 },
+        noteUnavailable: { $ne: true },
+      },
+      { $set: { sendStatus: "sending", sendLockedAt: now } },
+      { new: true },
+    ).lean();
+
+    return claimed
+      ? (toLeanReminder(claimed) as unknown as IReminder)
+      : null;
+  }
+
+  /**
+   * 发送提醒（调用方应已通过 claimReminderForSend 认领，或传入仍为 pending 的文档由本方法认领）
    */
   static async sendReminder(reminder: IReminder): Promise<boolean> {
-    try {
-      // 准备模板消息数据，确保符合微信要求
-      const templateData = this.prepareTemplateData(reminder);
+    const id = getReminderDbId(reminder);
+    let toSend = reminder;
+    if (reminder.sendStatus !== "sending") {
+      const claimed = await this.claimReminderForSend(id);
+      if (!claimed) {
+        return false;
+      }
+      toSend = claimed;
+    }
 
-      // 调用微信服务发送消息
+    try {
+      // 双保险：关联手帐不存在或已软删则标记不可用并中止
+      if (toSend.noteUnavailable) {
+        await this.abortSendDueToUnavailableNote(toSend);
+        return false;
+      }
+      const note = await NoteService.getNoteById(toSend.noteId, toSend.userId);
+      if (!note) {
+        await this.markUnavailableByNoteId(toSend.noteId, toSend.userId);
+        await this.abortSendDueToUnavailableNote(toSend);
+        return false;
+      }
+
+      const templateData = this.prepareTemplateData(toSend);
+
       const success = await WeChatService.sendSubscriptionMessage({
-        userId: reminder.userId,
-        templateId: reminder.messageId,
+        userId: toSend.userId,
+        templateId: toSend.messageId,
         data: templateData,
-        page: `pages/note-detail/note-detail?noteId=${reminder.noteId}`,
+        page: `pages/note-detail/note-detail?noteId=${toSend.noteId}`,
       });
 
       if (success) {
-        // 更新发送状态
         await Reminder.updateOne(
-          { _id: getReminderDbId(reminder) },
+          { _id: id },
           {
             $set: {
               sendStatus: "sent",
               sentAt: new Date(),
+              sendLockedAt: null,
             },
             $inc: { retryCount: 1 },
           },
         );
         return true;
-      } else {
-        // 发送失败，更新重试次数
-        await this.handleSendFailure(reminder, "微信消息发送失败");
-        return false;
       }
+      await this.handleSendFailure(toSend, "微信消息发送失败");
+      return false;
     } catch (error: any) {
-      // 发送异常，更新错误信息
       await this.handleSendFailure(
-        reminder,
+        toSend,
         error.message || "发送消息时发生异常",
       );
       return false;
     }
+  }
+
+  /**
+   * 因关联手帐不可用中止发送：释放 sending 锁，不再推送
+   */
+  private static async abortSendDueToUnavailableNote(
+    reminder: IReminder,
+  ): Promise<void> {
+    const id = getReminderDbId(reminder);
+    await Reminder.updateOne(
+      { _id: id },
+      {
+        $set: {
+          sendStatus: "pending",
+          sendLockedAt: null,
+          lastError: "关联手帐已删除或不存在",
+        },
+      },
+    );
   }
 
   /**
@@ -334,39 +499,55 @@ export class ReminderService {
   }
 
   /**
-   * 处理发送失败
+   * 处理发送失败：正确使用顶层 $inc，未达上限则回到 pending 以便重试。
    */
   private static async handleSendFailure(
     reminder: IReminder,
     error: string,
   ): Promise<void> {
-    const updateData: any = {
-      lastError: error,
-      $inc: { retryCount: 1 },
-    };
+    const id = getReminderDbId(reminder);
+    const current = await Reminder.findById(id).select("retryCount").lean();
+    const nextRetry =
+      Math.max(0, Math.floor(Number(current?.retryCount ?? reminder.retryCount ?? 0))) + 1;
+    const failed = nextRetry >= 3;
 
-    // 如果重试次数达到上限，标记为失败
-    if (reminder.retryCount + 1 >= 3) {
-      updateData.sendStatus = "failed";
-    }
-
-    await Reminder.updateOne({ _id: getReminderDbId(reminder) }, { $set: updateData });
+    await Reminder.updateOne(
+      { _id: id },
+      {
+        $set: {
+          lastError: error,
+          sendStatus: failed ? "failed" : "pending",
+          sendLockedAt: null,
+        },
+        $inc: { retryCount: 1 },
+      },
+    );
   }
 
   /**
-   * 格式化时间
+   * 格式化为上海墙钟时间（与主机本地时区无关）。
+   * 导出供单元测试断言。
    */
-  private static formatTime(date: Date): string {
-    /* 
-     为了配合服务器，先这样处理，本地服务器就先理解一下
-    */
-    const adjustedDate = new Date(date.getTime() + 8 * 60 * 60 * 1000);
-    const year = adjustedDate.getFullYear();
-    const month = String(adjustedDate.getMonth() + 1).padStart(2, "0");
-    const day = String(adjustedDate.getDate()).padStart(2, "0");
-    const hours = String(adjustedDate.getHours()).padStart(2, "0");
-    const minutes = String(adjustedDate.getMinutes()).padStart(2, "0");
-    return `${year}-${month}-${day} ${hours}:${minutes}`;
+  static formatTime(date: Date): string {
+    const timezone = process.env.UPLOAD_QUOTA_TIMEZONE || "Asia/Shanghai";
+    const parts = new Intl.DateTimeFormat("en-CA", {
+      timeZone: timezone,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: false,
+    }).formatToParts(date);
+
+    const get = (type: Intl.DateTimeFormatPartTypes) =>
+      parts.find((p) => p.type === type)?.value || "00";
+
+    // en-CA 在部分环境下 hour 可能为 "24"（午夜），规范为 "00"
+    const hourRaw = get("hour");
+    const hour = hourRaw === "24" ? "00" : hourRaw;
+
+    return `${get("year")}-${get("month")}-${get("day")} ${hour}:${get("minute")}`;
   }
 
   /**

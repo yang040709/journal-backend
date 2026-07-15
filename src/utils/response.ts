@@ -82,7 +82,8 @@ export const paginatedSuccess = <T = any>(
   total: number,
   page: number,
   limit: number,
-  message: string = "success"
+  message: string = "success",
+  extra?: Record<string, unknown>,
 ): void => {
   const totalPages = Math.ceil(total / limit);
 
@@ -95,6 +96,7 @@ export const paginatedSuccess = <T = any>(
       page,
       limit,
       totalPages,
+      ...(extra ?? {}),
     },
     requestId: getRequestIdFromContext(ctx),
     timestamp: Date.now(),
@@ -103,6 +105,8 @@ export const paginatedSuccess = <T = any>(
 
 /**
  * 错误码常量
+ * C 端镜像：client/src/constant/errorCodes.js
+ * 前端 toast 默认读 message，特殊 UX 见 client/src/utils/apiError.js
  */
 export const ErrorCodes = {
   // 通用错误
@@ -116,6 +120,8 @@ export const ErrorCodes = {
 
   // 手帐本错误
   NOTEBOOK_NOT_FOUND: 2001,
+  /** 用户活本数量达到系统上限 */
+  NOTEBOOK_LIMIT_EXCEEDED: 2010,
 
   // 手帐错误
   NOTE_NOT_FOUND: 2002,
@@ -163,6 +169,7 @@ export const ErrorCodes = {
   CAMPAIGN_ALREADY_CLAIMED: 4215,
   TOO_MANY_REQUESTS: 4216,
   FEEDBACK_RATE_LIMIT: 4301,
+  ADMIN_LOGIN_CAPTCHA_ERROR: 4401,
 
   // 服务器错误
   INTERNAL_ERROR: 9999,

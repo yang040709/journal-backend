@@ -26,11 +26,10 @@ const createCosStsSchema = z
   });
 
 /**
- * @swagger
+ * @openapi
  * /api/upload/cos/sts:
  *   post:
- *     tags:
- *       - 文件上传
+ *     tags: [upload]
  *     summary: 获取 COS 上传临时凭证
  *     description: 仅签发上传凭证，不接收图片二进制内容
  *     security:
@@ -62,8 +61,12 @@ const createCosStsSchema = z
  *                 type: boolean
  *                 description: biz=note 或 cover 时有效；返回 thumbKey/thumbFileUrl，STS 允许写入主图与 -mini.jpg
  *     responses:
- *       200:
+ *       '200':
  *         description: 获取临时凭证成功
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/SuccessObject'
  *       400:
  *         description: 参数验证失败
  *       401:
@@ -147,6 +150,24 @@ router.post("/cos/sts", async (ctx: AuthContext) => {
   }
 });
 
+/**
+ * @openapi
+ * /api/upload/quota:
+ *   get:
+ *     tags: [upload]
+ *     summary: 获取上传额度摘要
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       '200':
+ *         description: 成功
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/SuccessObject'
+ *       '401':
+ *         description: 未授权
+ */
 router.get("/quota", async (ctx: AuthContext) => {
   const userId = ctx.user!.userId;
   const requestId = ctx.state.requestId || "unknown";

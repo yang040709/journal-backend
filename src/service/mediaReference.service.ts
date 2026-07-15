@@ -6,6 +6,7 @@ import { logger } from "../utils/logger";
 import {
   extractCosKeyFromUrl,
   isCosObjectKey,
+  resolveAssetObjectKey,
 } from "../utils/cosDelete";
 import { CoverService } from "./cover.service";
 import {
@@ -13,6 +14,7 @@ import {
   deleteIndexByUser,
 } from "./userImageAsset.service";
 import { enqueueCosDeletes } from "./pendingCosDelete.service";
+import { isOwnedCosKey } from "../utils/cosKeyOwnership";
 
 export type UnreferenceReason =
   | "gallery"
@@ -49,15 +51,11 @@ function collectCosKeys(cosKey: string, thumbKey?: string | null): string[] {
 
 export class MediaReferenceService {
   static resolveCosKeyFromAsset(asset: {
-    source: "note" | "cover";
+    source?: "note" | "cover";
     storageKey?: string;
     url?: string;
   }): string | null {
-    if (asset.source === "note") {
-      const key = String(asset.storageKey || "").trim();
-      return isCosObjectKey(key) ? key : null;
-    }
-    return extractCosKeyFromUrl(String(asset.url || ""));
+    return resolveAssetObjectKey(asset);
   }
 
   static async countRefs(userId: string, cosKey: string): Promise<number> {
@@ -75,7 +73,7 @@ export class MediaReferenceService {
     const list = Array.isArray(images) ? images : [];
     const currentKeys = list
       .map((img) => String(img?.key || "").trim())
-      .filter((k) => isCosObjectKey(k));
+      .filter((k) => isCosObjectKey(k) && isOwnedCosKey(userId, k));
 
     const staleRefs = await MediaRef.find({
       userId,
@@ -103,7 +101,7 @@ export class MediaReferenceService {
 
     for (const img of list) {
       const cosKey = String(img?.key || "").trim();
-      if (!isCosObjectKey(cosKey)) continue;
+      if (!isCosObjectKey(cosKey) || !isOwnedCosKey(userId, cosKey)) continue;
       await MediaRef.updateOne(
         { userId, cosKey, holderType: "note", holderId: noteId },
         {
@@ -155,24 +153,47 @@ export class MediaReferenceService {
       holderId: noteId,
     }).lean();
 
-    if (!refs.length) return;
-
     await MediaRef.deleteMany({
       userId,
       holderType: "note",
       holderId: noteId,
     });
 
-    const seen = new Set<string>();
+    const cosKeyToThumb = new Map<string, string | undefined>();
     for (const ref of refs) {
-      const cosKey = String(ref.cosKey || "");
-      if (!cosKey || seen.has(cosKey)) continue;
-      seen.add(cosKey);
+      const cosKey = String(ref.cosKey || "").trim();
+      if (!cosKey || !isCosObjectKey(cosKey)) continue;
+      if (!cosKeyToThumb.has(cosKey)) {
+        cosKeyToThumb.set(cosKey, ref.thumbKey ? String(ref.thumbKey) : undefined);
+      }
+    }
+
+    // 无 MediaRef 或脏 cover: key：从 note.images 解析真实 COS key
+    const note = await Note.findOne({ _id: noteId, userId })
+      .select("images")
+      .lean();
+    for (const img of (note?.images || []) as INoteImage[]) {
+      const raw = String(img?.key || "").trim();
+      let cosKey = isCosObjectKey(raw) ? raw : "";
+      if (!cosKey) {
+        cosKey = extractCosKeyFromUrl(String(img?.url || "")) || "";
+      }
+      if (!cosKey || !isOwnedCosKey(userId, cosKey)) continue;
+      if (!cosKeyToThumb.has(cosKey)) {
+        cosKeyToThumb.set(
+          cosKey,
+          img?.thumbKey ? String(img.thumbKey) : undefined,
+        );
+      }
+    }
+
+    for (const [cosKey, thumbKey] of cosKeyToThumb) {
       await MediaReferenceService.maybeEnqueueCosIfUnreferenced(
         userId,
         cosKey,
-        ref.thumbKey,
+        thumbKey,
         "note_delete",
+        { excludeNoteId: noteId },
       );
     }
   }
@@ -248,6 +269,7 @@ export class MediaReferenceService {
       const pullResult = await Note.updateMany(
         { userId, "images.key": key },
         { $pull: { images: { key } } },
+        { timestamps: false },
       );
       notesUpdated = pullResult.modifiedCount ?? 0;
 
@@ -287,7 +309,9 @@ export class MediaReferenceService {
     let cosKeysQueued = 0;
 
     if (refsRemaining === 0) {
-      const keys = [...cosKeysToDelete].filter(isCosObjectKey);
+      const keys = [...cosKeysToDelete]
+        .filter(isCosObjectKey)
+        .filter((k) => isOwnedCosKey(userId, k));
       if (keys.length) {
         cosKeysQueued = await enqueueCosDeletes(keys, {
           userId,
@@ -310,27 +334,36 @@ export class MediaReferenceService {
   private static async backfillRefsFromNotesIfNeeded(
     userId: string,
     cosKey: string,
+    excludeNoteId?: string,
   ): Promise<number> {
     const existing = await MediaReferenceService.countRefs(userId, cosKey);
     if (existing > 0) return existing;
 
-    const notes = await Note.find({ userId, "images.key": cosKey })
+    const notes = await Note.find({ userId })
       .select("_id images")
       .lean();
 
-    if (!notes.length) return 0;
-
     for (const note of notes) {
-      const img = ((note.images || []) as INoteImage[]).find(
-        (i) => String(i.key || "") === cosKey,
-      );
+      const holderId = String(note._id);
+      if (excludeNoteId && holderId === excludeNoteId) continue;
+
+      const img = ((note.images || []) as INoteImage[]).find((i) => {
+        const key = String(i.key || "").trim();
+        if (key === cosKey) return true;
+        if (!isCosObjectKey(key)) {
+          const fromUrl = extractCosKeyFromUrl(String(i.url || ""));
+          return fromUrl === cosKey;
+        }
+        return false;
+      });
       if (!img) continue;
+
       await MediaRef.updateOne(
         {
           userId,
           cosKey,
           holderType: "note",
-          holderId: String(note._id),
+          holderId,
         },
         {
           $set: {
@@ -388,19 +421,23 @@ export class MediaReferenceService {
     cosKey: string,
     thumbKey: string | undefined,
     reason: UnreferenceReason,
+    options?: { excludeNoteId?: string },
   ): Promise<void> {
     let refsRemaining = await MediaReferenceService.countRefs(userId, cosKey);
     if (refsRemaining === 0) {
       refsRemaining = await MediaReferenceService.backfillRefsFromNotesIfNeeded(
         userId,
         cosKey,
+        options?.excludeNoteId,
       );
     }
     if (refsRemaining > 0) return;
 
     await deleteIndexByStorageKey(userId, cosKey);
 
-    const keys = collectCosKeys(cosKey, thumbKey);
+    const keys = collectCosKeys(cosKey, thumbKey).filter((k) =>
+      isOwnedCosKey(userId, k),
+    );
     if (keys.length) {
       await enqueueCosDeletes(keys, { userId, source: reason });
     }
