@@ -127,4 +127,77 @@ describe("integration: /points", () => {
     expect(resA.body.data.points).toBeLessThan(200);
     expect(resB.body.data.points).toBeLessThan(200);
   });
+
+  it("ad-reward Zod/凭证无效；transactions Zod；campaigns 404", async () => {
+    const { token } = await createAuthUser({ points: 50 });
+    const h = authHeader(token);
+
+    expect(
+      (await agent.post("/points/ad-reward").set(h).send({})).status,
+    ).toBe(400);
+    expect(
+      (
+        await agent
+          .post("/points/ad-reward")
+          .set(h)
+          .send({
+            adProvider: "wx",
+            adUnitId: "u1",
+            rewardToken: "tok-route-1",
+            requestId: "r1",
+          })
+      ).status,
+    ).toBe(200);
+    expect(
+      (
+        await agent
+          .post("/points/ad-reward")
+          .set(h)
+          .send({
+            adProvider: "wx",
+            adUnitId: "u1",
+            rewardToken: "tok-route-1",
+          })
+      ).status,
+    ).toBe(200);
+
+    expect(
+      (await agent.get("/points/transactions").set(h).query({ page: "x" })).status,
+    ).toBe(400);
+    expect(
+      (
+        await agent
+          .get("/points/transactions")
+          .set(h)
+          .query({ page: 1, pageSize: 10, flowType: "income" })
+      ).status,
+    ).toBe(200);
+    expect(
+      (
+        await agent
+          .get("/points/transactions")
+          .set(h)
+          .query({ page: 1, flowType: "expense" })
+      ).status,
+    ).toBe(200);
+
+    expect(
+      (await agent.post("/points/exchange").set(h).send({ kind: "nope" })).status,
+    ).toBe(400);
+    expect(
+      (await agent.post("/points/exchange").set(h).send({ kind: "ai" })).status,
+    ).toBeLessThan(500);
+
+    expect(
+      (await agent.get("/points/campaigns/000000000000000000000000").set(h)).status,
+    ).toBe(404);
+    expect(
+      (
+        await agent
+          .post("/points/campaigns/000000000000000000000000/claim")
+          .set(h)
+          .send({})
+      ).status,
+    ).toBe(404);
+  });
 });

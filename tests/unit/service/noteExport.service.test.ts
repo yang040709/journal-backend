@@ -6,6 +6,7 @@ import {
   it,
   vi,
 } from "vitest";
+import mongoose from "mongoose";
 import Note from "../../../src/model/Note";
 import NoteExportLog from "../../../src/model/NoteExportLog";
 import NoteExportWeeklyUsage from "../../../src/model/NoteExportWeeklyUsage";
@@ -163,5 +164,20 @@ describe("unit: NoteExportService quota", () => {
 
     const usage = await NoteExportWeeklyUsage.findOne({ userId, weekKey }).lean();
     expect(usage?.used).toBe(2);
+  });
+
+  it("run 手帐本不存在时不写入 NoteExportLog", async () => {
+    const { userId } = await seedUser();
+    const missingId = new mongoose.Types.ObjectId().toString();
+
+    await expect(
+      NoteExportService.run(userId, {
+        noteBookId: missingId,
+        sort: "updatedAt",
+      }),
+    ).rejects.toBeInstanceOf(NoteExportQuotaError);
+
+    const logCount = await NoteExportLog.countDocuments({ userId });
+    expect(logCount).toBe(0);
   });
 });
