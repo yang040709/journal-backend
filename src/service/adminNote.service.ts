@@ -523,6 +523,11 @@ export class AdminNoteService {
     if (note.isDeleted) {
       throw new Error("手帐已在废纸篓，请使用废纸篓巡查永久删除");
     }
+    const userId = String(note.userId);
+    const { cascadeHardDeleteNoteSideEffects } = await import(
+      "./note/noteHardDeleteCascade.service"
+    );
+    await cascadeHardDeleteNoteSideEffects(userId, id);
     await Note.deleteOne({ _id: id });
     await touchNoteBookAfterNoteActivity(String(note.noteBookId), -1);
     return true;

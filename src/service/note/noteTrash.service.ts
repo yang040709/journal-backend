@@ -1,7 +1,7 @@
 import Note, { INote, LeanNote } from "../../model/Note";
 import NoteBook from "../../model/NoteBook";
 import { toLeanNote, toLeanNoteArray } from "../../utils/typeUtils";
-import { MediaReferenceService } from "../mediaReference.service";
+import { NoteBookService } from "../noteBook.service";
 import { PaginationParams, MAX_PAGE_DEPTH } from "./note.shared";
 import { touchNoteBookAfterNoteActivity } from "./noteBookActivity";
 
@@ -66,6 +66,9 @@ export class NoteTrashService {
     await note.save({ timestamps: false });
     await touchNoteBookAfterNoteActivity(noteBookId, 1);
 
+    const { ReminderService } = await import("../reminder.service");
+    await ReminderService.clearUnavailableByNoteId(id, userId);
+
     return {
       note,
       restoredToNoteBookId: noteBookId,
@@ -77,7 +80,10 @@ export class NoteTrashService {
     const note = await Note.findOne({ _id: id, userId, isDeleted: true });
     if (!note) return false;
 
-    await MediaReferenceService.releaseNoteRefs(userId, id);
+    const { cascadeHardDeleteNoteSideEffects } = await import(
+      "./noteHardDeleteCascade.service"
+    );
+    await cascadeHardDeleteNoteSideEffects(userId, id);
 
     const result = await Note.deleteOne({ _id: id, userId, isDeleted: true });
     return Boolean(result.deletedCount);
@@ -126,16 +132,11 @@ export class NoteTrashService {
       };
     }
 
-    const created = new NoteBook({
+    const created = await NoteBookService.createNoteBook({
       title: "已恢复手帐",
       coverImg: "",
-      count: 0,
       userId,
-      isDeleted: false,
-      deletedAt: null,
-      deleteExpireAt: null,
     });
-    await created.save();
     return {
       noteBookId: String(created.id),
       title: created.title,

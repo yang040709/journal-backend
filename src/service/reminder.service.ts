@@ -234,6 +234,79 @@ export class ReminderService {
   }
 
   /**
+   * 手帐软删：标记关联提醒不可用，并取消未发送完的订阅
+   */
+  static async markUnavailableByNoteId(
+    noteId: string,
+    userId: string,
+  ): Promise<number> {
+    return this.markUnavailableByNoteIds([noteId], userId);
+  }
+
+  /**
+   * 批量手帐软删：标记关联提醒不可用
+   */
+  static async markUnavailableByNoteIds(
+    noteIds: string[],
+    userId: string,
+  ): Promise<number> {
+    const ids = [...new Set(noteIds.map(String).filter(Boolean))];
+    if (!ids.length) return 0;
+
+    const now = new Date();
+    const filter = { noteId: { $in: ids }, userId };
+
+    const result = await Reminder.updateMany(filter, {
+      $set: {
+        noteUnavailable: true,
+        noteUnavailableAt: now,
+      },
+    });
+
+    // 未成功发送的：取消 subscribed / pending，避免用户误以为还会推送
+    await Reminder.updateMany(
+      {
+        ...filter,
+        sendStatus: { $ne: "sent" },
+        subscriptionStatus: { $in: ["subscribed", "pending"] },
+      },
+      { $set: { subscriptionStatus: "cancelled" } },
+    );
+
+    return result.modifiedCount || 0;
+  }
+
+  /**
+   * 手帐从废纸篓恢复：清除不可用标记；不自动恢复 subscribed
+   */
+  static async clearUnavailableByNoteId(
+    noteId: string,
+    userId: string,
+  ): Promise<number> {
+    const result = await Reminder.updateMany(
+      { noteId, userId, noteUnavailable: true },
+      {
+        $set: {
+          noteUnavailable: false,
+          noteUnavailableAt: null,
+        },
+      },
+    );
+    return result.modifiedCount || 0;
+  }
+
+  /**
+   * 手帐永久清除：删除关联提醒
+   */
+  static async deleteByNoteId(
+    noteId: string,
+    userId: string,
+  ): Promise<number> {
+    const result = await Reminder.deleteMany({ noteId, userId });
+    return result.deletedCount || 0;
+  }
+
+  /**
    * 获取待发送的提醒
    */
   static async getPendingReminders(
@@ -244,6 +317,7 @@ export class ReminderService {
       subscriptionStatus: "subscribed",
       sendStatus: "pending",
       retryCount: { $lt: 3 },
+      noteUnavailable: { $ne: true },
     }).lean();
 
     return toLeanReminderArray(reminders) as unknown as IReminder[];
@@ -290,6 +364,7 @@ export class ReminderService {
         sendStatus: "pending",
         subscriptionStatus: "subscribed",
         retryCount: { $lt: 3 },
+        noteUnavailable: { $ne: true },
       },
       { $set: { sendStatus: "sending", sendLockedAt: now } },
       { new: true },
@@ -315,6 +390,18 @@ export class ReminderService {
     }
 
     try {
+      // 双保险：关联手帐不存在或已软删则标记不可用并中止
+      if (toSend.noteUnavailable) {
+        await this.abortSendDueToUnavailableNote(toSend);
+        return false;
+      }
+      const note = await NoteService.getNoteById(toSend.noteId, toSend.userId);
+      if (!note) {
+        await this.markUnavailableByNoteId(toSend.noteId, toSend.userId);
+        await this.abortSendDueToUnavailableNote(toSend);
+        return false;
+      }
+
       const templateData = this.prepareTemplateData(toSend);
 
       const success = await WeChatService.sendSubscriptionMessage({
@@ -347,6 +434,25 @@ export class ReminderService {
       );
       return false;
     }
+  }
+
+  /**
+   * 因关联手帐不可用中止发送：释放 sending 锁，不再推送
+   */
+  private static async abortSendDueToUnavailableNote(
+    reminder: IReminder,
+  ): Promise<void> {
+    const id = getReminderDbId(reminder);
+    await Reminder.updateOne(
+      { _id: id },
+      {
+        $set: {
+          sendStatus: "pending",
+          sendLockedAt: null,
+          lastError: "关联手帐已删除或不存在",
+        },
+      },
+    );
   }
 
   /**

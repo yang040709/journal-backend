@@ -162,6 +162,48 @@ export class ShareSecurityTaskService {
     return "none";
   }
 
+  /**
+   * Soft-delete: drop incomplete tasks so worker stops WeChat checks.
+   * Terminal results are kept until hard purge / deleteByNoteId.
+   */
+  static async cancelByNoteId(noteId: string, userId: string): Promise<number> {
+    if (!noteId || !userId) return 0;
+    const result = await ShareSecurityTask.deleteMany({
+      noteId,
+      userId,
+      status: { $in: ["queued", "running", "error"] },
+    });
+    return result.deletedCount || 0;
+  }
+
+  static async cancelByNoteIds(noteIds: string[], userId: string): Promise<number> {
+    const ids = (noteIds || []).map((id) => String(id || "").trim()).filter(Boolean);
+    if (!ids.length || !userId) return 0;
+    const result = await ShareSecurityTask.deleteMany({
+      noteId: { $in: ids },
+      userId,
+      status: { $in: ["queued", "running", "error"] },
+    });
+    return result.deletedCount || 0;
+  }
+
+  /** Hard delete / purge: remove all security tasks for the note. */
+  static async deleteByNoteId(noteId: string, userId: string): Promise<number> {
+    if (!noteId || !userId) return 0;
+    const result = await ShareSecurityTask.deleteMany({ noteId, userId });
+    return result.deletedCount || 0;
+  }
+
+  static async deleteByNoteIds(noteIds: string[], userId: string): Promise<number> {
+    const ids = (noteIds || []).map((id) => String(id || "").trim()).filter(Boolean);
+    if (!ids.length || !userId) return 0;
+    const result = await ShareSecurityTask.deleteMany({
+      noteId: { $in: ids },
+      userId,
+    });
+    return result.deletedCount || 0;
+  }
+
   static startWorker(): void {
     if (workerStarted) return;
     workerStarted = true;
@@ -222,6 +264,12 @@ export class ShareSecurityTaskService {
   /** Exposed for unit tests; production path uses runOnce → handleTask. */
   static async handleTask(task: IShareSecurityTask): Promise<void> {
     try {
+      const note = await Note.findById(task.noteId).select("isDeleted").lean();
+      if (!note || note.isDeleted) {
+        await ShareSecurityTask.deleteOne({ _id: task._id });
+        return;
+      }
+
       if (task.source === "wechat_text") {
         const textPayload = `${task.snapshot?.title || ""}\n${task.snapshot?.content || ""}`.trim();
         const result = await WeChatContentSecurityService.checkText(

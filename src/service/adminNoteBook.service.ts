@@ -77,13 +77,21 @@ export class AdminNoteBookService {
     return noteBook;
   }
 
-  /** 与 C 端一致：删除手帐本及其下所有手帐 */
+  /** 硬删手帐本及其下所有手帐，并级联释放 MediaRef / Reminder / ShareSecurityTask */
   static async deleteNoteBook(id: string): Promise<boolean> {
     const noteBook = await NoteBook.findById(id);
     if (!noteBook) {
       return false;
     }
-    const userId = noteBook.userId;
+    const userId = String(noteBook.userId);
+    const notes = await Note.find({ noteBookId: id, userId }).select("_id").lean();
+    const noteIds = notes.map((n) => String(n._id));
+    if (noteIds.length > 0) {
+      const { cascadeHardDeleteNoteSideEffectsMany } = await import(
+        "./note/noteHardDeleteCascade.service"
+      );
+      await cascadeHardDeleteNoteSideEffectsMany(userId, noteIds);
+    }
     await Note.deleteMany({ noteBookId: id, userId });
     await NoteBook.deleteOne({ _id: id });
     return true;

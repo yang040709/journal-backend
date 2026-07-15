@@ -127,6 +127,8 @@ export interface UserImageAssetListItem {
   objectThumbKey?: string;
   source: "note" | "cover";
   refId: string;
+  /** 来源手帐不存在或已软删时为 true（仅 source=note） */
+  sourceUnavailable?: boolean;
   width: number;
   height: number;
   size: number;
@@ -177,6 +179,52 @@ function toListItem(d: any): UserImageAssetListItem {
   };
 }
 
+/**
+ * Enrich note-sourced assets with sourceUnavailable when the ref note
+ * is missing or soft-deleted.
+ */
+async function withSourceAvailability(
+  items: UserImageAssetListItem[],
+): Promise<UserImageAssetListItem[]> {
+  const noteRefIds = [
+    ...new Set(
+      items
+        .filter((it) => it.source === "note" && it.refId)
+        .map((it) => String(it.refId).trim())
+        .filter((id) => id && isStrictObjectId(id)),
+    ),
+  ];
+  if (!noteRefIds.length) {
+    return items.map((it) => {
+      if (it.source !== "note" || !it.refId) return it;
+      // Non-ObjectId / empty ref cannot resolve a live note
+      return { ...it, sourceUnavailable: true };
+    });
+  }
+
+  const { default: Note } = await import("../model/Note");
+  const notes = await Note.find({ _id: { $in: noteRefIds } })
+    .select("_id isDeleted")
+    .lean();
+  const availableIds = new Set(
+    notes
+      .filter((n: any) => !n.isDeleted)
+      .map((n: any) => String(n._id)),
+  );
+
+  return items.map((it) => {
+    if (it.source !== "note" || !it.refId) return it;
+    const refId = String(it.refId).trim();
+    if (!isStrictObjectId(refId)) {
+      return { ...it, sourceUnavailable: true };
+    }
+    return {
+      ...it,
+      sourceUnavailable: !availableIds.has(refId),
+    };
+  });
+}
+
 export async function listByUser(
   userId: string,
   params: ListUserImageAssetsParams = {},
@@ -199,7 +247,8 @@ export async function listByUser(
     UserImageAsset.countDocuments(query),
   ]);
 
-  return { items: docs.map((d: any) => toListItem(d)), total };
+  const items = await withSourceAvailability(docs.map((d: any) => toListItem(d)));
+  return { items, total };
 }
 
 export async function listAll(
@@ -226,7 +275,8 @@ export async function listAll(
     UserImageAsset.countDocuments(query),
   ]);
 
-  return { items: docs.map((d: any) => toListItem(d)), total };
+  const items = await withSourceAvailability(docs.map((d: any) => toListItem(d)));
+  return { items, total };
 }
 
 export async function findAssetByIdForUser(userId: string, id: string) {

@@ -451,6 +451,12 @@ export class UserMigrationService {
     const targetPlain = targetDocs.map((x) => cloneWithoutId(x as unknown as Record<string, unknown>));
 
     const noteIdMap = new Map<string, string>();
+    if (oldTargetIds.length > 0) {
+      const { cascadeHardDeleteNoteSideEffectsMany } = await import(
+        "./note/noteHardDeleteCascade.service"
+      );
+      await cascadeHardDeleteNoteSideEffectsMany(targetOpenid, oldTargetIds);
+    }
     if (sourceCount > 0) {
       const inserted = await runWithOptionalTransaction(async (session) => {
         const options = session ? { session } : undefined;

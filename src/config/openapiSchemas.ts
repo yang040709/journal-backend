@@ -122,6 +122,16 @@ export const openapiSchemas = {
         type: "string",
         enum: ["pending", "sent", "failed"],
       },
+      noteUnavailable: {
+        type: "boolean",
+        description: "关联手帐当前不可读（软删中或已不存在）",
+      },
+      noteUnavailableAt: {
+        type: "string",
+        format: "date-time",
+        nullable: true,
+        description: "置位 noteUnavailable 的时间",
+      },
       createdAt: { type: "string", format: "date-time" },
       updatedAt: { type: "string", format: "date-time" },
     },

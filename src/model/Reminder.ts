@@ -14,6 +14,10 @@ export interface IReminder extends Document {
   sentAt?: Date; // 发送时间
   /** 认领进入 sending 的时间，用于超时回收 */
   sendLockedAt?: Date | null;
+  /** 关联手帐当前不可读（软删或查无） */
+  noteUnavailable: boolean;
+  /** 置位 noteUnavailable 的时间 */
+  noteUnavailableAt?: Date | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -81,6 +85,15 @@ const reminderSchema = new Schema(
       type: Date,
       default: null,
     },
+    noteUnavailable: {
+      type: Boolean,
+      default: false,
+      index: true,
+    },
+    noteUnavailableAt: {
+      type: Date,
+      default: null,
+    },
   },
   {
     timestamps: true,
@@ -100,6 +113,7 @@ reminderSchema.index({ subscriptionStatus: 1, sendStatus: 1 });
 reminderSchema.index({ userId: 1, remindTime: -1 });
 reminderSchema.index({ userId: 1, sendStatus: 1, remindTime: -1 });
 reminderSchema.index({ sendStatus: 1, sendLockedAt: 1 });
+reminderSchema.index({ userId: 1, noteUnavailable: 1, remindTime: -1 });
 
 // 添加虚拟字段id
 reminderSchema.virtual("id").get(function (this: any) {

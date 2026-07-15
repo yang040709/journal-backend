@@ -359,6 +359,14 @@ export class NoteCrudService {
 
     await touchNoteBookAfterNoteActivity(String(note.noteBookId), -1);
 
+    const { ReminderService } = await import("../reminder.service");
+    await ReminderService.markUnavailableByNoteId(id, userId);
+
+    const { ShareSecurityTaskService } = await import(
+      "../shareSecurityTask.service"
+    );
+    await ShareSecurityTaskService.cancelByNoteId(id, userId);
+
     // 记录活动
     void ActivityLogger.record(
       {
@@ -422,6 +430,15 @@ export class NoteCrudService {
         touchNoteBookAfterNoteActivity(noteBookId, -count),
       ),
     );
+
+    const softDeletedIds = notes.map((n) => String(n._id || n.id));
+    const { ReminderService } = await import("../reminder.service");
+    await ReminderService.markUnavailableByNoteIds(softDeletedIds, userId);
+
+    const { ShareSecurityTaskService } = await import(
+      "../shareSecurityTask.service"
+    );
+    await ShareSecurityTaskService.cancelByNoteIds(softDeletedIds, userId);
 
     // 记录活动
     void ActivityLogger.record(
