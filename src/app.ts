@@ -25,6 +25,7 @@ import AnnouncementRouter from "./routes/announcement.routes";
 import EventsRouter from "./routes/events.routes";
 import DevRouter from "./routes/dev.routes";
 import AdminRouter from "./routes/admin.routes";
+import HealthRouter from "./routes/health.routes";
 import { adminCorsMiddleware } from "./middlewares/adminCors.middleware";
 import { staticFilesMiddleware } from "./middlewares/staticFiles.middleware";
 import { startAllSchedulers } from "./scheduler";
@@ -94,7 +95,8 @@ app.use(async (ctx, next) => {
   }
 });
 
-// 路由
+// 路由（/health 无鉴权，尽早挂载便于探活）
+app.use(HealthRouter.routes()).use(HealthRouter.allowedMethods());
 app.use(AdminRouter.routes()).use(AdminRouter.allowedMethods());
 app.use(UserRouter.routes()).use(UserRouter.allowedMethods());
 app.use(NoteBookRouter.routes()).use(NoteBookRouter.allowedMethods());

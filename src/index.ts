@@ -13,8 +13,17 @@ import { AiStyleService } from "./service/aiStyle.service";
 import { ShareSecurityTaskService } from "./service/shareSecurityTask.service";
 import { AlertRuleService } from "./service/alertRule.service";
 import logger from "./utils/logger";
+import {
+  PRODUCT_RELEASE_DATE,
+  PRODUCT_VERSION,
+} from "./constant/productVersion.generated";
 
 const PORT = process.env.PORT || 3000;
+
+function resolveGitSha(): string {
+  const raw = String(process.env.GIT_SHA ?? "").trim();
+  return raw || "dev";
+}
 
 // 进程级错误处理 - 防止未捕获的错误导致程序崩溃
 process.on("uncaughtException", (error) => {
@@ -67,7 +76,11 @@ const init = async () => {
     ShareSecurityTaskService.startWorker();
 
     const server = app.listen(PORT, () => {
-      logger.info(`Server is running on port ${PORT}`);
+      logger.info(`Server is running on port ${PORT}`, {
+        productVersion: PRODUCT_VERSION,
+        releaseDate: PRODUCT_RELEASE_DATE,
+        gitSha: resolveGitSha(),
+      });
     });
 
     // 优雅关闭处理
