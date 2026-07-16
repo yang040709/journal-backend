@@ -16,7 +16,7 @@ function getSecret(): string {
 
 export function signAdminToken(adminId: string): string {
   const secret = getSecret();
-  const expiresIn = process.env.ADMIN_JWT_EXPIRES_IN || "7d";
+  const expiresIn = process.env.ADMIN_JWT_EXPIRES_IN || "1d";
   const payload: AdminJwtPayload = { adminId };
   return jwt.sign(payload, secret, { expiresIn } as jwt.SignOptions);
 }

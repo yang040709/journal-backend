@@ -18,6 +18,16 @@ describe("adminJwt utils", () => {
     expect(verifyAdminToken(token)).toEqual({ adminId: "admin-id-1" });
   });
 
+  it("未配置 ADMIN_JWT_EXPIRES_IN 时默认有效期约 1 天", () => {
+    const before = Math.floor(Date.now() / 1000);
+    const token = signAdminToken("admin-id-1");
+    const decoded = jwt.decode(token) as jwt.JwtPayload;
+    expect(decoded.exp).toBeDefined();
+    const ttl = (decoded.exp as number) - before;
+    expect(ttl).toBeGreaterThan(23 * 60 * 60);
+    expect(ttl).toBeLessThanOrEqual(24 * 60 * 60 + 5);
+  });
+
   it("错误 secret 时 verifyAdminToken 抛出 JsonWebTokenError", () => {
     const token = signAdminToken("admin-id-1");
     process.env.ADMIN_JWT_SECRET = "another-admin-secret-long-enough!!";
