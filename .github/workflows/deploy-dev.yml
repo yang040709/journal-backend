@@ -20,11 +20,44 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
       - name: Build and push Docker image (dev)
         uses: docker/build-push-action@v5
         with:
           push: true
-          tags: yang0709/journal-backend:dev
+          tags: |
+            yang0709/journal-backend:dev-${{ github.sha }}
+            yang0709/journal-backend:dev
+          build-args: |
+            GIT_SHA=${{ github.sha }}
+
+      - name: Assert sha and dev digests match
+        run: |
+          set -euo pipefail
+          # buildx 对 --format 有坑：须用 json 函数，见 docker/buildx#1175
+          SHA_DIGEST=$(docker buildx imagetools inspect "yang0709/journal-backend:dev-${{ github.sha }}" --format '{{json .Manifest.Digest}}' | xargs)
+          DEV_DIGEST=$(docker buildx imagetools inspect "yang0709/journal-backend:dev" --format '{{json .Manifest.Digest}}' | xargs)
+          echo "dev-sha digest=$SHA_DIGEST"
+          echo "dev digest=$DEV_DIGEST"
+          test -n "$SHA_DIGEST"
+          test -n "$DEV_DIGEST"
+          test "$SHA_DIGEST" = "$DEV_DIGEST"
+
+      - name: Write deploy summary
+        run: |
+          {
+            echo "## Backend deploy (dev)"
+            echo ""
+            echo "| Field | Value |"
+            echo "| --- | --- |"
+            echo "| deployed_sha | \`${{ github.sha }}\` |"
+            echo "| branch | \`${{ github.ref_name }}\` |"
+            echo "| image (immutable) | \`yang0709/journal-backend:dev-${{ github.sha }}\` |"
+            echo "| image (floating) | \`yang0709/journal-backend:dev\` |"
+            echo "| at (UTC) | \`$(date -u +%Y-%m-%dT%H:%M:%SZ)\` |"
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload deployment files to server
         uses: appleboy/scp-action@v0.1.7
@@ -72,7 +105,7 @@ jobs:
             DEEPSEEK_API_BASE=https://api.deepseek.com
             DEEPSEEK_MODEL=deepseek-chat
             ADMIN_JWT_SECRET=${{ secrets.ADMIN_JWT_SECRET }}
-            ADMIN_JWT_EXPIRES_IN=7d
+            ADMIN_JWT_EXPIRES_IN=1d
             ADMIN_BOOTSTRAP_USERNAME=${{ secrets.ADMIN_BOOTSTRAP_USERNAME }}
             ADMIN_BOOTSTRAP_PASSWORD=${{ secrets.ADMIN_BOOTSTRAP_PASSWORD }}
             ADMIN_LOGIN_CAPTCHA_ENABLED=true
@@ -104,7 +137,11 @@ jobs:
             UPLOAD_DAILY_BASE_LIMIT=15
             AI_DAILY_BASE_LIMIT=5
             EOF
-            sudo docker pull yang0709/journal-backend:dev
+            # 先拉 immutable tag，再打成本地 :dev
+            sudo docker pull yang0709/journal-backend:dev-${{ github.sha }}
+            sudo docker tag yang0709/journal-backend:dev-${{ github.sha }} yang0709/journal-backend:dev
             sudo docker compose -f docker-compose.dev.yml down
-            sudo docker compose -f docker-compose.dev.yml up --force-recreate -d
+            # --pull never：避免 up 时再拉 Hub :dev，被并发部署覆盖本地 retag
+            sudo docker compose -f docker-compose.dev.yml up --force-recreate --pull never -d
+            # Hub 上 dev-<sha> 仍保留；本地 prune 不影响回滚窗口
             sudo docker image prune -f

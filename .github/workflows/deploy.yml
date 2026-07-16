@@ -20,11 +20,44 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
       - name: Build and push Docker image
         uses: docker/build-push-action@v5
         with:
           push: true
-          tags: yang0709/journal-backend:latest
+          tags: |
+            yang0709/journal-backend:${{ github.sha }}
+            yang0709/journal-backend:latest
+          build-args: |
+            GIT_SHA=${{ github.sha }}
+
+      - name: Assert sha and latest digests match
+        run: |
+          set -euo pipefail
+          # buildx 对 --format 有坑：须用 json 函数，见 docker/buildx#1175
+          SHA_DIGEST=$(docker buildx imagetools inspect "yang0709/journal-backend:${{ github.sha }}" --format '{{json .Manifest.Digest}}' | xargs)
+          LATEST_DIGEST=$(docker buildx imagetools inspect "yang0709/journal-backend:latest" --format '{{json .Manifest.Digest}}' | xargs)
+          echo "sha digest=$SHA_DIGEST"
+          echo "latest digest=$LATEST_DIGEST"
+          test -n "$SHA_DIGEST"
+          test -n "$LATEST_DIGEST"
+          test "$SHA_DIGEST" = "$LATEST_DIGEST"
+
+      - name: Write deploy summary
+        run: |
+          {
+            echo "## Backend deploy (production)"
+            echo ""
+            echo "| Field | Value |"
+            echo "| --- | --- |"
+            echo "| deployed_sha | \`${{ github.sha }}\` |"
+            echo "| branch | \`${{ github.ref_name }}\` |"
+            echo "| image (immutable) | \`yang0709/journal-backend:${{ github.sha }}\` |"
+            echo "| image (floating) | \`yang0709/journal-backend:latest\` |"
+            echo "| at (UTC) | \`$(date -u +%Y-%m-%dT%H:%M:%SZ)\` |"
+          } >> "$GITHUB_STEP_SUMMARY"
 
       # 新增：选择性上传部署文件到服务器
       - name: Upload deployment files to server
@@ -76,7 +109,7 @@ jobs:
             DEEPSEEK_API_BASE=https://api.deepseek.com
             DEEPSEEK_MODEL=deepseek-chat
             ADMIN_JWT_SECRET=${{ secrets.ADMIN_JWT_SECRET }}
-            ADMIN_JWT_EXPIRES_IN=7d
+            ADMIN_JWT_EXPIRES_IN=1d
             ADMIN_BOOTSTRAP_USERNAME=${{ secrets.ADMIN_BOOTSTRAP_USERNAME }}
             ADMIN_BOOTSTRAP_PASSWORD=${{ secrets.ADMIN_BOOTSTRAP_PASSWORD }}
             ADMIN_LOGIN_CAPTCHA_ENABLED=true
@@ -108,11 +141,12 @@ jobs:
             UPLOAD_DAILY_BASE_LIMIT=15
             AI_DAILY_BASE_LIMIT=5
             EOF
-            # 拉取最新的镜像
-            sudo docker pull yang0709/journal-backend:latest
+            # 先拉 immutable sha，再打成本地 latest，保证 compose 跑的是本次构建
+            sudo docker pull yang0709/journal-backend:${{ github.sha }}
+            sudo docker tag yang0709/journal-backend:${{ github.sha }} yang0709/journal-backend:latest
             # 停止并删除现有容器
             sudo docker compose down
-            # 启动服务
-            sudo docker compose -f docker-compose.yml up --force-recreate -d
-            # 清理未使用的镜像
+            # --pull never：避免 up 时再拉 Hub latest，被并发部署覆盖本地 retag
+            sudo docker compose -f docker-compose.yml up --force-recreate --pull never -d
+            # 清理未使用的本地镜像；Hub 上 sha tag 仍保留，不影响回滚窗口
             sudo docker image prune -f

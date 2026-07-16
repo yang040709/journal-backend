@@ -17,6 +17,10 @@ FROM node:22-alpine AS runner
 
 WORKDIR /app
 
+# 构建溯源：deploy workflow 传入 github.sha；本地未注入时运行时为 dev
+ARG GIT_SHA=
+ENV GIT_SHA=${GIT_SHA}
+
 # 安装生产依赖（不含 devDependencies）
 COPY package.json pnpm-lock.yaml ./
 RUN npm install -g pnpm && \
